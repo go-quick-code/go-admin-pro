@@ -18,7 +18,13 @@ type Config struct {
 	Storage  StorageConfig  `mapstructure:"storage"`
 	Tenant   TenantConfig   `mapstructure:"tenant"`
 	Logger   LoggerConfig   `mapstructure:"logger"`
+
+	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
+	loc *time.Location
 }
+
+// DefaultTimezone 是 app.timezone 为空时的默认业务时区。
+const DefaultTimezone = "Asia/Shanghai"
 
 type AppConfig struct {
 	Name      string `mapstructure:"name"`
@@ -26,6 +32,7 @@ type AppConfig struct {
 	Port      int    `mapstructure:"port"`
 	APIPrefix string `mapstructure:"api-prefix"`
 	WebRoot   string `mapstructure:"web-root"`
+	Timezone  string `mapstructure:"timezone"`
 }
 
 type DatabaseConfig struct {
@@ -94,12 +101,31 @@ func Load(path string) (*Config, error) {
 	cfg.applyDefaults()
 	cfg.applyEnv()
 	cfg.normalize()
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// validate 校验跨字段约束：app.timezone 必须是可加载的 IANA 时区名。
+// 在 Load 里做而不是等到第一次使用，是为了让非法值在启动阶段就失败，
+// 而不是等到第一次导入 Excel 才暴露。
+func (c *Config) validate() error {
+	loc, err := time.LoadLocation(c.App.Timezone)
+	if err != nil {
+		return fmt.Errorf("app.timezone %q 不是合法的 IANA 时区名（期望形如 Asia/Shanghai 或 UTC）: %w", c.App.Timezone, err)
+	}
+	c.loc = loc
+	c.Database.DSN = ApplyDSNLoc(c.Database.DSN, c.App.Timezone)
+	return nil
 }
 
 func (c *Config) applyDefaults() {
 	if c.App.Name == "" {
 		c.App.Name = "go-admin-pro"
+	}
+	if c.App.Timezone == "" {
+		c.App.Timezone = DefaultTimezone
 	}
 	if c.App.Port == 0 {
 		c.App.Port = 8080
@@ -172,4 +198,32 @@ func (c *Config) normalize() {
 	if c.JWT.Secret == "" {
 		c.JWT.Secret = "go-admin-pro-dev-secret"
 	}
+}
+
+// Location 返回业务时区的 *time.Location（由 app.timezone 决定）。
+// 这是业务侧获取时区的单一访问点：Excel 导入等需要显式时区的调用方
+// 用它传给 helper（如 ImportOptions.Location），不要再各自解析配置。
+func (c *Config) Location() *time.Location {
+	if c.loc != nil {
+		return c.loc
+	}
+	name := c.App.Timezone
+	if name == "" {
+		name = DefaultTimezone
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		// 仅防绕过 Load 的构造路径（如手工 &Config{} 的测试）：正常路径
+		// 已在启动时校验 App.Timezone，不会走到这里。兜底用确定的业务
+		// 默认时区 DefaultTimezone，而不是 time.Local——依赖服务器 TZ
+		// 正是 spec #32 要消除的行为。
+		loc, err = time.LoadLocation(DefaultTimezone)
+		if err != nil {
+			// 极端情况（运行环境缺少 tzdata）下 DefaultTimezone 也加载
+			// 失败时退到 UTC：仍是确定值，不依赖服务器 TZ。
+			loc = time.UTC
+		}
+	}
+	c.loc = loc
+	return loc
 }

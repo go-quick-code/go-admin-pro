@@ -1,6 +1,6 @@
 # Verification
 
-DB-backed changes（迁移、seed、认证、数据权限）用一条命令验证，不靠手工拼步骤。
+数据库相关改动（迁移、seed、认证、数据权限、时区配置）用一条命令验证，不靠手工拼步骤。
 
 ## 空库迁移 + 启动冒烟
 
@@ -30,6 +30,18 @@ go run ./cmd/migrate -c configs/config.yaml -expect-tables 17 verify
 - 检查残留监听：`lsof -nP -iTCP:18099 -sTCP:LISTEN`。
 - 验证库与开发库分开；`GAP_DATABASE_DSN` 可覆盖 `configs/config.yaml` 的 DSN。
 - 登录接口 `/admin-api/system/auth/login`，业务接口带 `Authorization: Bearer <token>`。
+
+## DSN 与业务时区（app.timezone）
+
+DSN 的 `loc` 参数由 `app.timezone` 生成并覆盖，时区名 URL 编码（如 `Asia/Shanghai` → `loc=Asia%2FShanghai`），示例不再写 `loc=Local`；业务时区通过配置文件 `configs/config.yaml` 的 `app.timezone` 声明，无环境变量覆盖：
+
+```bash
+export GAP_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro?charset=utf8mb4&parseTime=True'
+```
+
+- 旧配置/旧文档里遗留的 `loc=Local` 仍兼容，但会被 `app.timezone` 覆盖；服务器 `TZ` 不再影响数据库时间的解释。依赖旧行为的环境把 `app.timezone` 设为原服务器时区即可，见 `docs/adr/0006-app-timezone.md` 的迁移注意。
+- 验证时区行为：把 `app.timezone` 设为与服务器 `TZ` 不同的时区（如 `UTC`）再启动，导入无时区日期后核对落库的墙上时间与 Excel 输入一致。
+- 验证启动期校验：`app.timezone` 设为非法值（如 `Not/AZone`）时启动必须失败，错误信息包含该值与期望格式。
 
 ## CI
 

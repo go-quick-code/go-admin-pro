@@ -81,6 +81,8 @@ go-admin-pro
 │       ├── tenant/             # 租户上下文与 Skip
 │       ├── jwt/ authn/         # 令牌与登录主体
 │       ├── middleware/         # CORS、日志、Recovery
+│       ├── excel/              # Excel 导入导出与模板
+│       ├── money/              # 金额值类型（int64 分，decimal(12,2)）
 │       ├── response/ xerr/     # 统一响应与业务错误
 │       └── web/ utils/         # 分页、通用工具
 ├── web/                        # Vue3 前端
@@ -180,6 +182,7 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 MySQL 的 DDL 不在事务里：基线在一个文件中建 17 张表，中途失败会留下半套表，需要手工清理后重跑。后续迁移保持单个 DDL，或写成可重入语句。
 
 改动迁移后运行 `make verify-migration`：需要一个空的 disposable 库（DSN 通过 `GAP_DATABASE_DSN` 指定），脚本会做 `up → reset → up`、启动服务、seed、登录与用户分页冒烟。详细步骤见 `docs/agents/verification.md`。
+
 
 ### 多租户隔离
 
