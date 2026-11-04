@@ -234,9 +234,10 @@ func TestIntegrationUpdateRoleRollsBackOnMenuAssignmentFailure(t *testing.T) {
 	token := env.Login(t, "admin", "123456")
 
 	status, api := env.Request(t, http.MethodPost, "/system/role", token, map[string]any{
-		"name":    "集成角色",
-		"code":    "integ_role",
-		"menuIds": []int64{101},
+		"name":      "集成角色",
+		"code":      "integ_role",
+		"dataScope": 1, // 数据范围非法值会被 400 拒绝（issue #5），这里取合法值
+		"menuIds":   []int64{101},
 	})
 	if status != http.StatusOK || api.Code != 0 {
 		t.Fatalf("创建角色: HTTP %d code %d msg %q", status, api.Code, api.Msg)
@@ -257,10 +258,11 @@ func TestIntegrationUpdateRoleRollsBackOnMenuAssignmentFailure(t *testing.T) {
 	roleID := page.List[0].ID
 
 	status, api = env.Request(t, http.MethodPut, "/system/role", token, map[string]any{
-		"id":      roleID,
-		"name":    "集成角色改名",
-		"code":    "integ_role",
-		"menuIds": []int64{1011, 1011}, // 重复 menuId 触发主键冲突
+		"id":        roleID,
+		"name":      "集成角色改名",
+		"code":      "integ_role",
+		"dataScope": 1,
+		"menuIds":   []int64{1011, 1011}, // 重复 menuId 触发主键冲突
 	})
 	if status != http.StatusInternalServerError {
 		t.Fatalf("注入失败应返回 HTTP 500，实际 HTTP %d code %d msg %q", status, api.Code, api.Msg)

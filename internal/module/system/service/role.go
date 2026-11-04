@@ -61,16 +61,17 @@ func (s *Service) CreateRole(ctx context.Context, req *dto.RoleCreateReq) error 
 		Type:      2,
 		Remark:    req.Remark,
 	}
-	// 角色行与菜单绑定在同一事务里落库，绑定失败时不留无菜单的半套角色。
+	// 角色行、菜单绑定与自定义部门绑定在同一事务里落库，
+	// 任一步失败整体回滚，不留半套角色。
 	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
 		if err := tx.CreateRole(ctx, role); err != nil {
 			return err
 		}
-		return tx.ReplaceRoleMenus(ctx, role.ID, req.MenuIDs)
+		if err := tx.ReplaceRoleMenus(ctx, role.ID, req.MenuIDs); err != nil {
+			return err
+		}
+		return tx.ReplaceRoleDepts(ctx, role.ID, req.DeptIDs)
 	}); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceRoleDepts(ctx, role.ID, req.DeptIDs); err != nil {
 		return err
 	}
 	s.ClearAllPermissionCache()
@@ -103,17 +104,17 @@ func (s *Service) UpdateRole(ctx context.Context, req *dto.RoleUpdateReq) error 
 	role.DataScope = req.DataScope
 	role.Status = req.Status
 	role.Remark = req.Remark
-	// 角色资料与菜单绑定（角色菜单分配）在同一事务里落库：
-	// 绑定失败时角色修改一并回滚，避免出现「改了角色却没改上菜单」的中间态。
+	// 角色资料、菜单绑定与自定义部门绑定在同一事务里落库：
+	// 任一步失败整体回滚，避免出现「改了角色却没改上菜单/部门」的中间态。
 	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
 		if err := tx.SaveRole(ctx, role); err != nil {
 			return err
 		}
-		return tx.ReplaceRoleMenus(ctx, role.ID, req.MenuIDs)
+		if err := tx.ReplaceRoleMenus(ctx, role.ID, req.MenuIDs); err != nil {
+			return err
+		}
+		return tx.ReplaceRoleDepts(ctx, role.ID, req.DeptIDs)
 	}); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceRoleDepts(ctx, role.ID, req.DeptIDs); err != nil {
 		return err
 	}
 	s.ClearAllPermissionCache()
