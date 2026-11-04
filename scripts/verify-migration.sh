@@ -8,13 +8,14 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=18  断言 up 后的业务表数量（默认 18；CI 继承此默认值；00003 新增 system_role_dept）
+#   EXPECTED_TABLES=20  断言 up 后的业务表数量（默认 20；CI 继承此默认值；
+#                       00003 新增 system_role_dept，00004 新增 crm_customer、crm_sequence）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
 set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-18}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-20}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
