@@ -81,7 +81,7 @@ func MigrateStatus(ctx context.Context, db *sql.DB) error {
 
 // MigrateStamp 把已有库标记为指定迁移版本，不执行任何 DDL。
 // 仅用于结构已存在但没有 goose 版本记录的库（例如旧 AutoMigrate 建的库）；
-// 它不校验表结构，调用方需自行核对，stamp 后应执行 migrate up 应用后续版本。
+// 它会检查基线 17 张表存在，并按 <= version 回填版本记录，stamp 后应执行 migrate up。
 func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
 	if err := initGoose(); err != nil {
 		return err
@@ -116,13 +116,74 @@ func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
 	if tableCount == 0 {
 		return fmt.Errorf("refusing to stamp an empty database; run migrate-up instead")
 	}
+	missing, err := missingBaselineTables(ctx, db)
+	if err != nil {
+		return err
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing baseline tables %v; verify the schema before stamping", missing)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin stamp transaction: %w", err)
+	}
+	defer tx.Rollback()
 
 	query := fmt.Sprintf("INSERT INTO `%s` (version_id, is_applied) VALUES (?, 1)", goose.TableName())
-	if _, err := db.ExecContext(ctx, query, version); err != nil {
-		return fmt.Errorf("stamp version %d: %w", version, err)
+	stamped := make([]int64, 0, len(versions))
+	for _, v := range versions {
+		if v > version {
+			break
+		}
+		if _, err := tx.ExecContext(ctx, query, v); err != nil {
+			return fmt.Errorf("stamp version %d: %w", v, err)
+		}
+		stamped = append(stamped, v)
 	}
-	fmt.Printf("database stamped at version %d; run `make migrate-up` to apply later migrations\n", version)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit stamp: %w", err)
+	}
+	fmt.Printf("database stamped at versions %v; run `make migrate-up` to apply later migrations\n", stamped)
 	return nil
+}
+
+// baselineTables 是 00001_baseline.sql 建出的 17 张表，用于 stamp 前校验结构。
+var baselineTables = []string{
+	"system_tenant",
+	"system_user",
+	"system_role",
+	"system_menu",
+	"system_dept",
+	"system_post",
+	"system_user_role",
+	"system_user_post",
+	"system_role_menu",
+	"system_dict_type",
+	"system_dict_data",
+	"system_login_log",
+	"system_operate_log",
+	"infra_file",
+	"infra_config",
+	"infra_job",
+	"infra_job_log",
+}
+
+func missingBaselineTables(ctx context.Context, db *sql.DB) ([]string, error) {
+	var missing []string
+	for _, table := range baselineTables {
+		var count int
+		if err := db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
+			table,
+		).Scan(&count); err != nil {
+			return nil, fmt.Errorf("inspect table %s: %w", table, err)
+		}
+		if count == 0 {
+			missing = append(missing, table)
+		}
+	}
+	return missing, nil
 }
 
 // CreateMigration 在磁盘的 migrations 目录下创建新的 SQL 迁移模板（不连数据库）。

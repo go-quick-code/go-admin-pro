@@ -166,7 +166,7 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 表结构由 `migrations/` 下的 goose SQL 管理，迁移文件会内嵌进二进制：
 
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
-- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
+- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
 - `make migrate-status`：查看每个版本的应用状态。
 - `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为指定版本，不执行 DDL。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
@@ -340,8 +340,8 @@ compose 会先运行一次性的 `migrate` 服务，迁移成功后 `app` 才启
 make help         # 查看命令
 make run          # 启动后端
 make migrate-up    # 执行全部待执行迁移
-make migrate-down  # 回滚一个迁移版本
-make migrate-reset # 回滚全部迁移版本
+make migrate-down CONFIRM=yes  # 回滚一个迁移版本
+make migrate-reset CONFIRM=yes # 回滚全部迁移版本
 make migrate-status # 查看迁移状态
 make migrate-stamp version=1 # 已有库标记基线版本
 make migrate-create name=add_xxx # 新建迁移文件

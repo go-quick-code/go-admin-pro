@@ -77,7 +77,7 @@
 
 ## 实现与测试
 
-- 新增 `crm` 业务模块（model / dto / repository / service / api 分层），新增 Excel 能力包；迁移与 `BaseEntity` 在平台层完成。
+- 新增 `crm` 模块（model / dto / repository / service / api 分层），新增 Excel 能力包；迁移与 `BaseEntity` 在平台层完成。
 - 表结构、数据权限谓词、公海规则、金额不变量、状态机、编号、删除约束、API 清单、前端页面、导入导出与测试 seam，以 [`docs/crm-mvp-spec.md`](../crm-mvp-spec.md) 为唯一来源；本文件不再复制规则正文。
 - 架构取舍见 `docs/adr/0001`–`0005`。
 

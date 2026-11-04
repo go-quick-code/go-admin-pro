@@ -56,9 +56,11 @@ migrate-up:
 	go run ./cmd/migrate -c $(CONFIG) up
 
 migrate-down:
+	@if [ "$$CONFIRM" != "yes" ]; then echo "refusing to roll back: set CONFIRM=yes (down executes the migration's DROP statements)"; exit 1; fi
 	go run ./cmd/migrate -c $(CONFIG) down
 
 migrate-reset:
+	@if [ "$$CONFIRM" != "yes" ]; then echo "refusing to reset: set CONFIRM=yes (reset drops all migrated objects)"; exit 1; fi
 	go run ./cmd/migrate -c $(CONFIG) reset
 
 migrate-status:

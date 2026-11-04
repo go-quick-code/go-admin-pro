@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations. Issue bodies are summaries; the detailed design lives in the repo and is the single source of rules (see `docs/agents/domain.md`).
 
 ## Conventions
 

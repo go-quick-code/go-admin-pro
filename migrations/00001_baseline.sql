@@ -1,8 +1,9 @@
 -- +goose Up
 -- 基线：固化切换 goose 前 GORM AutoMigrate 建出的 17 张表结构与索引。
 -- 后续表结构变更一律新增迁移文件，不改本文件。
+-- IF NOT EXISTS 仅用于 DDL 中途失败后的重跑；全新库的建表结果不变。
 
-CREATE TABLE `system_tenant` (
+CREATE TABLE IF NOT EXISTS `system_tenant` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -19,7 +20,7 @@ CREATE TABLE `system_tenant` (
   KEY `idx_system_tenant_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_user` (
+CREATE TABLE IF NOT EXISTS `system_user` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -43,7 +44,7 @@ CREATE TABLE `system_user` (
   KEY `idx_system_user_dept_id` (`dept_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_role` (
+CREATE TABLE IF NOT EXISTS `system_role` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -61,7 +62,7 @@ CREATE TABLE `system_role` (
   KEY `idx_system_role_tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_menu` (
+CREATE TABLE IF NOT EXISTS `system_menu` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -83,7 +84,7 @@ CREATE TABLE `system_menu` (
   KEY `idx_system_menu_parent_id` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_dept` (
+CREATE TABLE IF NOT EXISTS `system_dept` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -102,7 +103,7 @@ CREATE TABLE `system_dept` (
   KEY `idx_system_dept_parent_id` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_post` (
+CREATE TABLE IF NOT EXISTS `system_post` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -118,25 +119,25 @@ CREATE TABLE `system_post` (
   KEY `idx_system_post_tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_user_role` (
+CREATE TABLE IF NOT EXISTS `system_user_role` (
   `user_id` bigint NOT NULL,
   `role_id` bigint NOT NULL,
   PRIMARY KEY (`user_id`,`role_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_user_post` (
+CREATE TABLE IF NOT EXISTS `system_user_post` (
   `user_id` bigint NOT NULL,
   `post_id` bigint NOT NULL,
   PRIMARY KEY (`user_id`,`post_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_role_menu` (
+CREATE TABLE IF NOT EXISTS `system_role_menu` (
   `role_id` bigint NOT NULL,
   `menu_id` bigint NOT NULL,
   PRIMARY KEY (`role_id`,`menu_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_dict_type` (
+CREATE TABLE IF NOT EXISTS `system_dict_type` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -151,7 +152,7 @@ CREATE TABLE `system_dict_type` (
   KEY `idx_system_dict_type_tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_dict_data` (
+CREATE TABLE IF NOT EXISTS `system_dict_data` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -171,7 +172,7 @@ CREATE TABLE `system_dict_data` (
   KEY `idx_system_dict_data_dict_type` (`dict_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_login_log` (
+CREATE TABLE IF NOT EXISTS `system_login_log` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -191,7 +192,7 @@ CREATE TABLE `system_login_log` (
   KEY `idx_system_login_log_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `system_operate_log` (
+CREATE TABLE IF NOT EXISTS `system_operate_log` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -217,7 +218,7 @@ CREATE TABLE `system_operate_log` (
   KEY `idx_system_operate_log_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `infra_file` (
+CREATE TABLE IF NOT EXISTS `infra_file` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -232,7 +233,7 @@ CREATE TABLE `infra_file` (
   KEY `idx_infra_file_tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `infra_config` (
+CREATE TABLE IF NOT EXISTS `infra_config` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -248,7 +249,7 @@ CREATE TABLE `infra_config` (
   KEY `idx_infra_config_tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `infra_job` (
+CREATE TABLE IF NOT EXISTS `infra_job` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -265,7 +266,7 @@ CREATE TABLE `infra_job` (
   KEY `idx_infra_job_tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `infra_job_log` (
+CREATE TABLE IF NOT EXISTS `infra_job_log` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `tenant_id` bigint NOT NULL DEFAULT '1',

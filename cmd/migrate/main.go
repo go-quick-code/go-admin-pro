@@ -44,6 +44,10 @@ func main() {
 		}
 		return
 	}
+	if len(args) > 1 && cmd != "stamp" {
+		fmt.Fprintf(os.Stderr, "unexpected arguments for %q: %v (flags must come before the command)\n", cmd, args[1:])
+		os.Exit(2)
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
