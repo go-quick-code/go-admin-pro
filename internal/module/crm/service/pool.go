@@ -73,7 +73,8 @@ func (s *Service) ReleaseCustomer(ctx context.Context, req *dto.CustomerReleaseR
 	})
 }
 
-// ClaimCustomer 从公海认领客户到自己名下：校验认领上限（规格 §4.2，默认 50）、
+// ClaimCustomer 从公海认领客户到自己名下：校验认领上限（规格 §4.2，
+// 上限按租户配置生效，缺省 50——#14 起从 crm_pool_config 读取）、
 // 客户仍在公海（条件更新保证并发认领只成功一个）、写历史（claim）并落部门快照。
 func (s *Service) ClaimCustomer(ctx context.Context, req *dto.CustomerClaimReq) (*model.Customer, error) {
 	uid := CurrentUserID(ctx)
@@ -86,11 +87,16 @@ func (s *Service) ClaimCustomer(ctx context.Context, req *dto.CustomerClaimReq) 
 	}
 
 	// 认领上限：名下未删除客户总数（不区分成交），达上限拒绝（CheckClaimLimit）。
+	// 上限值来自租户级公海配置（#14）：行缺失按默认值 50，行为与 #13 一致。
+	cfg, err := s.GetPoolConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
 	owned, err := s.repo.CountCustomersByOwner(ctx, uid)
 	if err != nil {
 		return nil, err
 	}
-	if err := CheckClaimLimit(owned); err != nil {
+	if err := CheckClaimLimit(owned, cfg.ClaimLimit); err != nil {
 		return nil, err
 	}
 	// 部门快照随新负责人落库（规格 §4.1：owner_dept_id 随 owner 同步快照）。

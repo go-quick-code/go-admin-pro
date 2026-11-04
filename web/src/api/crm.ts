@@ -39,6 +39,15 @@ export function pageCustomerOwnerHistory(id: number, params: any) {
   return request.get(`/crm/customer/${id}/owner-history`, { params }) as Promise<any>
 }
 
+// ---------- 公海租户配置（issue #14：回收天数/认领上限按租户生效） ----------
+// 读挂 crm:customer:pool:view（能看公海即可读）；写挂 crm:pool-config:update。
+export function getPoolConfig() {
+  return request.get('/crm/pool-config') as Promise<any>
+}
+export function updatePoolConfig(data: { recycleDays: number; claimLimit: number }) {
+  return request.put('/crm/pool-config', data) as Promise<any>
+}
+
 // ---------- CRM 联系人（issue #9：隶属客户，可见性跟随客户） ----------
 export function pageContacts(params: any) {
   return request.get('/crm/contact/page', { params }) as Promise<any>

@@ -50,4 +50,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	followUp.POST("", h.requirePermission("crm:follow-up:create"), h.CreateFollowUp)
 	followUp.PUT("", h.UpdateFollowUp)
 	followUp.DELETE("/:id", h.DeleteFollowUp)
+
+	// 公海租户配置（issue #14）：读复用公海可见性权限码（能看公海即可读），
+	// 写挂 crm:pool-config:update（菜单种子 4050）。
+	poolConfig := rg.Group("/crm/pool-config")
+	poolConfig.GET("", h.requirePermission("crm:customer:pool:view"), h.GetPoolConfig)
+	poolConfig.PUT("", h.requirePermission("crm:pool-config:update"), h.UpdatePoolConfig)
 }

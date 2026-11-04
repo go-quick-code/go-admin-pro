@@ -3,6 +3,7 @@ package seed_test
 import (
 	"testing"
 
+	crmmodel "github.com/lautung/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/lautung/go-admin-pro/internal/module/infra/model"
 	sysmodel "github.com/lautung/go-admin-pro/internal/module/system/model"
 	"github.com/lautung/go-admin-pro/internal/pkg/database"
@@ -34,6 +35,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.RoleMenu{}, &sysmodel.Post{}, &sysmodel.User{}, &sysmodel.UserRole{},
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
 		&inframodel.Config{}, &inframodel.Job{},
+		&crmmodel.PoolConfig{},
 	); err != nil {
 		t.Fatalf("建表: %v", err)
 	}
@@ -53,7 +55,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.DictType{}, 2, "字典类型")
 	assertCount(t, db, &sysmodel.DictData{}, 5, "字典数据")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
-	assertCount(t, db, &inframodel.Job{}, 1, "定时任务")
+	assertCount(t, db, &inframodel.Job{}, 2, "定时任务")
+	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
 
 	var admin sysmodel.User
 	if err := tenant.Skip(db).First(&admin, 1).Error; err != nil {
