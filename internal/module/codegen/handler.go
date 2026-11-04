@@ -62,4 +62,5 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	group.GET("/tables", h.perm("infra:codegen:query"), h.ListTables)
 	group.GET("/tables/:tableName/columns", h.perm("infra:codegen:query"), h.GetTable)
 	group.POST("/generate", h.perm("infra:codegen:generate"), h.Generate)
+	group.POST("/generate-entity", h.perm("infra:codegen:generate"), h.GenerateEntity)
 }
