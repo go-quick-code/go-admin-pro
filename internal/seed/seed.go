@@ -162,11 +162,16 @@ func seedMenus(db *gorm.DB) error {
 		btn(3001, 300, "生成代码", "infra:codegen:generate", 1),
 
 		// CRM（issue #8 起逐步落地）：菜单挂在动态路由下，组件路径对应 web/src/views。
+		// 公海纵切（issue #13）：公海页面 + 认领按钮，客户管理下加释放/转移按钮。
 		dir(400, "CRM", "/crm", "Suitcase", 40),
 		menu(401, 400, "客户管理", "customer", "crm/customer/index", "crm:customer:query", "Avatar", 1),
 		btn(4011, 401, "客户新增", "crm:customer:create", 1),
 		btn(4012, 401, "客户修改", "crm:customer:update", 2),
 		btn(4013, 401, "客户删除", "crm:customer:delete", 3),
+		btn(4014, 401, "客户释放", "crm:customer:release", 4),
+		btn(4015, 401, "客户转移", "crm:customer:transfer", 5),
+		menu(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
+		btn(4021, 402, "客户认领", "crm:customer:claim", 1),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err

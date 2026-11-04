@@ -73,3 +73,77 @@ func (h *Handler) DeleteCustomer(c *gin.Context) {
 	}
 	response.OK(c, true)
 }
+
+// ---------- 公海（issue #13，docs/crm-mvp-spec.md §4.2）----------
+
+// PagePoolCustomers 公海分页（owner IS NULL，不受数据范围过滤）。
+func (h *Handler) PagePoolCustomers(c *gin.Context) {
+	var req dto.CustomerPoolPageReq
+	if !bindQuery(c, &req) {
+		return
+	}
+	list, total, err := h.svc.ListPoolCustomers(c.Request.Context(), &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.Page(c, list, total)
+}
+
+// ReleaseCustomer 释放客户到公海（操作权限在 service：负责人本人或权限码）。
+func (h *Handler) ReleaseCustomer(c *gin.Context) {
+	var req dto.CustomerReleaseReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := h.svc.ReleaseCustomer(c.Request.Context(), &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
+}
+
+// ClaimCustomer 从公海认领客户到自己名下，返回认领后的客户。
+func (h *Handler) ClaimCustomer(c *gin.Context) {
+	var req dto.CustomerClaimReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	customer, err := h.svc.ClaimCustomer(c.Request.Context(), &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, customer)
+}
+
+// TransferCustomer 转移客户给同租户其他用户（操作权限在 service）。
+func (h *Handler) TransferCustomer(c *gin.Context) {
+	var req dto.CustomerTransferReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := h.svc.TransferCustomer(c.Request.Context(), &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
+}
+
+// PageCustomerOwnerHistory 按客户分页查负责人历史（新→旧）。
+func (h *Handler) PageCustomerOwnerHistory(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	var req dto.OwnerHistoryPageReq
+	if !bindQuery(c, &req) {
+		return
+	}
+	list, total, err := h.svc.ListCustomerOwnerHistory(c.Request.Context(), id, &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.Page(c, list, total)
+}

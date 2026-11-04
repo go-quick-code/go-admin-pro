@@ -32,6 +32,11 @@ func notFound(err error) error {
 // 到 CRM 列名 owner_dept_id / owner_user_id 的翻译，与 system 模块 UserFilter 同构）：
 //   - 两者皆零值：不加范围条件（数据范围「全部」）；
 //   - 空 OwnerDeptIDs + SelfOwnerUserID = 0：谓词恒假（fail-closed，无可见部门）。
+//
+// 公海归属过滤（issue #13，两者互斥；皆假时不过滤归属，保持 #8 行为）：
+//   - PoolOnly：只看公海客户（owner IS NULL）；公海列表不受数据范围过滤，
+//     调用方 service 不再拼范围谓词（规格 §4.1）。
+//   - ExcludePool：普通客户列表排除公海客户（公海在独立页面按 pool:view 展示）。
 type CustomerFilter struct {
 	Name        string
 	Status      *int8
@@ -40,6 +45,9 @@ type CustomerFilter struct {
 
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
+
+	PoolOnly    bool
+	ExcludePool bool
 }
 
 // FindCustomerByID 按 ID 查客户（租户插件自动过滤），不存在返回 nil。
@@ -65,6 +73,12 @@ func (r *Repository) ListCustomers(ctx context.Context, f CustomerFilter, offset
 	}
 	if f.OwnerDeptID > 0 {
 		q = q.Where("owner_dept_id = ?", f.OwnerDeptID)
+	}
+	switch {
+	case f.PoolOnly:
+		q = q.Where("owner_user_id IS NULL")
+	case f.ExcludePool:
+		q = q.Where("owner_user_id IS NOT NULL")
 	}
 	if f.OwnerDeptIDs != nil || f.SelfOwnerUserID > 0 {
 		switch {
