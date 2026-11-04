@@ -108,6 +108,18 @@ func parseBool(text string) (bool, error) {
 	return b, nil
 }
 
+// Excel 日期序列号上限：1900 日期系统中 9999-12-31 的序列号是 2958465。
+const (
+	maxSerial1900 = 2958465.0
+	// 1904 日期系统整体比 1900 系统早 1462 天，序列号 0 是 1904-01-01。
+	maxSerial1904 = maxSerial1900 - 1462
+)
+
+// dateRangeError 统一构造序列号超出 Excel 日期范围的错误。
+func dateRangeError(text string) error {
+	return fmt.Errorf("值 %q 超出 Excel 日期范围（示例：2026-01-02）", truncateEchoValue(text))
+}
+
 func parseTime(text string, location *time.Location, date1904 bool) (time.Time, error) {
 	for _, layout := range timeLayouts {
 		if t, err := time.ParseInLocation(layout, text, location); err == nil {
@@ -116,21 +128,19 @@ func parseTime(text string, location *time.Location, date1904 bool) (time.Time, 
 	}
 	// 未设置日期格式的单元格会以 Excel 序列号返回。
 	if serial, err := strconv.ParseFloat(text, 64); err == nil {
-		// Excel 日期上限是 9999-12-31（1900 系统的序列号 2958465）。
-		maxSerial := 2958465.0
+		maxSerial := maxSerial1900
 		minSerial := 1.0
 		if date1904 {
-			// 1904 日期系统整体比 1900 系统早 1462 天，序列号 0 是 1904-01-01。
-			maxSerial = 2957003.0
+			maxSerial = maxSerial1904
 			minSerial = 0
 		}
 		if math.IsNaN(serial) || math.IsInf(serial, 0) || serial < minSerial || serial > maxSerial {
-			return time.Time{}, fmt.Errorf("值 %q 超出 Excel 日期范围（示例：2026-01-02）", truncateEchoValue(text))
+			return time.Time{}, dateRangeError(text)
 		}
 		if t, err := excelize.ExcelDateToTime(serial, date1904); err == nil {
 			// 兜底拒绝转换后仍超出 9999 年的结果，避免数据库无法存储的年份。
 			if t.Year() > 9999 {
-				return time.Time{}, fmt.Errorf("值 %q 超出 Excel 日期范围（示例：2026-01-02）", truncateEchoValue(text))
+				return time.Time{}, dateRangeError(text)
 			}
 			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), location), nil
 		}
