@@ -4,7 +4,7 @@ BIN      := bin/server
 MIGRATE  := bin/migrate
 version ?= 1
 
-.PHONY: help run build test test-integration vet fmt tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create web-install web-dev web-build build-all docker-up docker-down docker-logs clean
+.PHONY: help run build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build build-all docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
@@ -16,8 +16,10 @@ help:
 	@echo "  make migrate-status 查看迁移状态"
 	@echo "  make migrate-stamp version=1 把已有库标记为指定版本（不执行 DDL）"
 	@echo "  make migrate-create name=xxx 新建迁移文件"
+	@echo "  make verify-migration 空库迁移往返 + 启动/登录冒烟（需要 GAP_DATABASE_DSN）"
 	@echo "  make test         运行 Go 测试"
 	@echo "  make test-integration 运行集成测试（构建标签 integration）"
+	@echo "  make check        fmt-check + build + vet + test"
 	@echo "  make vet          go vet 静态检查"
 	@echo "  make fmt          gofmt 格式化"
 	@echo "  make tidy         go mod tidy"
@@ -39,15 +41,24 @@ build:
 test:
 	go test ./...
 
-# 集成测试基座在 #3 落地；此 target 先固定命令入口。
+# 集成测试基座在 #3 落地；没有 integration 用例时明确失败，避免假绿。
 test-integration:
+	@if ! grep -rqs --include='*_test.go' -e '^//go:build integration' $$(go list -f '{{.Dir}}' ./...); then \
+		echo "no integration tests found (build tag integration)"; exit 1; \
+	fi
 	go test -tags=integration ./...
+
+check: fmt-check build vet test
 
 vet:
 	go vet ./...
 
 fmt:
-	gofmt -w ./cmd ./internal ./migrations
+	gofmt -w $$(go list -f '{{.Dir}}' ./...)
+
+fmt-check:
+	@out="$$(gofmt -l $$(go list -f '{{.Dir}}' ./...))"; \
+	if [ -n "$$out" ]; then echo "gofmt required:"; echo "$$out"; exit 1; fi
 
 tidy:
 	go mod tidy
@@ -71,6 +82,9 @@ migrate-stamp:
 
 migrate-create:
 	go run ./cmd/migrate create $(name)
+
+verify-migration:
+	./scripts/verify-migration.sh
 
 web-install:
 	cd web && pnpm install

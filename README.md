@@ -179,6 +179,8 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 
 MySQL 的 DDL 不在事务里：基线在一个文件中建 17 张表，中途失败会留下半套表，需要手工清理后重跑。后续迁移保持单个 DDL，或写成可重入语句。
 
+改动迁移后运行 `make verify-migration`：需要一个空的 disposable 库（DSN 通过 `GAP_DATABASE_DSN` 指定），脚本会做 `up → reset → up`、启动服务、seed、登录与用户分页冒烟。详细步骤见 `docs/agents/verification.md`。
+
 ### 多租户隔离
 
 租户来自 JWT 的 `tenantId`，由 Auth 中间件写入 `context.Context`：
@@ -345,8 +347,10 @@ make migrate-reset CONFIRM=yes # 回滚全部迁移版本
 make migrate-status # 查看迁移状态
 make migrate-stamp version=1 # 已有库标记基线版本
 make migrate-create name=add_xxx # 新建迁移文件
+make verify-migration # 空库迁移往返 + 启动/登录冒烟
 make test         # 运行测试
-make test-integration # 运行集成测试（构建标签 integration）
+make test-integration # 运行集成测试（#3 落地前会明确失败）
+make check        # fmt-check + build + vet + test
 make vet          # 静态检查
 make fmt          # gofmt
 make web-dev      # 启动前端开发服务器
@@ -380,7 +384,7 @@ make docker-down  # 停止容器
 欢迎提交 Issue / PR。提交前请确保：
 
 ```bash
-go build ./... && go vet ./... && go test ./...
+make check
 pnpm --dir web build
 ```
 
