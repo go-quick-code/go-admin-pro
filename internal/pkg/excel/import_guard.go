@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"time"
 )
 
@@ -18,7 +17,7 @@ const (
 )
 
 // ImportGuard 是应用级导入 guard：固定 helper 的导入限额、用信号量限制
-// 同时解析的导入数，并把 helper 错误归类为类型化业务错误（见 HTTPStatus）。
+// 同时解析的导入数，并把 helper 错误归类为类型化业务错误（见 GuardErrorKind）。
 //
 // guard 实例是应用级组件，应在启动时创建一次、多个请求共享：
 //
@@ -57,8 +56,9 @@ type GuardOptions[T any] struct {
 }
 
 // Import 用固定限额解析 Excel，行为与 Import 一致：第一行是表头，
-// 有错整批拒绝、不返回任何数据。逐行校验失败返回 *ValidationError
-// （200 语义），其余错误返回 *GuardError（400/500 语义）。
+// 有错整批拒绝、不返回任何数据。逐行校验失败返回 *ValidationError，
+// 其余错误返回 *GuardError；HTTP 状态映射由 HTTP 适配层
+// internal/pkg/response 提供，本包保持 HTTP 无关。
 func (g *ImportGuard[T]) Import(r io.Reader, opts GuardOptions[T]) ([]T, error) {
 	// 应用级信号量：超出并发的导入在此排队等待。
 	g.sem <- struct{}{}
@@ -85,25 +85,26 @@ func (g *ImportGuard[T]) Import(r io.Reader, opts GuardOptions[T]) ([]T, error) 
 type GuardErrorKind int
 
 const (
-	// GuardErrInternal 未预期错误，500 语义，对外不泄露内部细节。
+	// GuardErrInternal 未预期错误，对外不泄露内部细节。
 	GuardErrInternal GuardErrorKind = iota
-	// GuardErrFileTooLarge 文件超过大小上限（含解压后总大小），400 语义。
+	// GuardErrFileTooLarge 文件超过大小上限（含解压后总大小）。
 	GuardErrFileTooLarge
-	// GuardErrTooManyRows 数据行数超过上限，400 语义。
+	// GuardErrTooManyRows 数据行数超过上限。
 	GuardErrTooManyRows
-	// GuardErrInvalidWorkbook 文件不是可解析的 xlsx 或缺少表头，400 语义。
+	// GuardErrInvalidWorkbook 文件不是可解析的 xlsx 或缺少表头。
 	GuardErrInvalidWorkbook
-	// GuardErrSheetNotFound 指定的工作表不存在，400 语义。
+	// GuardErrSheetNotFound 指定的工作表不存在。
 	GuardErrSheetNotFound
-	// GuardErrInvalidSchema 字段映射非法（结构体标签或字段类型不支持），400 语义。
+	// GuardErrInvalidSchema 字段映射非法（结构体标签或字段类型不支持）。
 	GuardErrInvalidSchema
-	// GuardErrInvalidHeader 表头不合法（未知列、缺少必填列、重复表头），400 语义。
+	// GuardErrInvalidHeader 表头不合法（未知列、缺少必填列、重复表头）。
 	GuardErrInvalidHeader
 )
 
 // GuardError 是 guard 的类型化业务错误，与 net/http 解耦：
-// HTTP 状态由 HTTPStatus 统一映射。Msg 是稳定的用户可见文案，
-// 不包含内部细节；Err 保留底层原因，仅供日志与 errors.Is/As。
+// Kind→HTTP 状态的映射由 HTTP 适配层 internal/pkg/response 提供。
+// Msg 是稳定的用户可见文案，不包含内部细节；Err 保留底层原因，
+// 仅供日志与 errors.Is/As。
 type GuardError struct {
 	Kind GuardErrorKind
 	Msg  string
@@ -119,9 +120,8 @@ func (e *GuardError) Error() string {
 
 func (e *GuardError) Unwrap() error { return e.Err }
 
-// ValidationError 表示导入逐行校验失败：这是业务结果而非服务端错误，
-// HTTP 语义为 200。字段与 helper 的 ImportError 对齐，可直接作为响应
-// data 序列化。
+// ValidationError 表示导入逐行校验失败：这是业务结果而非服务端错误。
+// 字段与 helper 的 ImportError 对齐，可直接作为响应 data 序列化。
 type ValidationError struct {
 	Errors    []CellError `json:"errors"`
 	Total     int         `json:"total"`
@@ -138,23 +138,6 @@ func (e *ValidationError) Error() string {
 
 // Unwrap 保留 helper 的 *ImportError，兼容按 helper 语义判断的调用方。
 func (e *ValidationError) Unwrap() error { return e.ie }
-
-// HTTPStatus 返回 guard 错误对应的 HTTP 状态码：逐行校验失败为 200，
-// 限额与内容错误为 400，未预期错误为 500。非 guard 错误一律按 500 处理。
-func HTTPStatus(err error) int {
-	var ve *ValidationError
-	if errors.As(err, &ve) {
-		return http.StatusOK
-	}
-	var ge *GuardError
-	if errors.As(err, &ge) {
-		if ge.Kind == GuardErrInternal {
-			return http.StatusInternalServerError
-		}
-		return http.StatusBadRequest
-	}
-	return http.StatusInternalServerError
-}
 
 // wrapGuardError 把 helper 错误归类为类型化业务错误。
 func wrapGuardError(err error) error {
