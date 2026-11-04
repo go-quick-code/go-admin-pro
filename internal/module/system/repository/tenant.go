@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/lautung/go-admin-pro/internal/module/system/model"
+	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 )
 
 type TenantFilter struct {
@@ -58,4 +59,17 @@ func (r *Repository) SaveTenant(ctx context.Context, t *model.Tenant) error {
 
 func (r *Repository) DeleteTenant(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Tenant{}, id).Error
+}
+
+// ListEnabledTenantIDs 返回全部启用租户的 ID（升序，系统级）：
+// 公海自动回收 job 遍历租户用（issue #14）。租户注册表是系统级数据
+// （不在租户插件 TenantTables 内，也没有租户上下文可依赖），查询显式
+// tenant.Skip——Skip 紧贴本条查询链，不影响调用方后续语句。
+func (r *Repository) ListEnabledTenantIDs(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	err := tenant.Skip(r.db.WithContext(ctx).Model(&model.Tenant{})).
+		Where("status = ?", model.StatusEnable).
+		Order("id ASC").
+		Pluck("id", &ids).Error
+	return ids, err
 }

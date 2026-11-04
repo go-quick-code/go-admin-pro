@@ -91,6 +91,23 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
 	crmRepo := crmrepo.New(db)
 	crmSvc := crmservice.New(crmRepo, sysSvc)
+	// #16 接入点：合同模块落地后在此调用 crmSvc.SetContractChecker(实现)，
+	// 替换公海自动回收的空合同检查（v1 恒「无合同」，见
+	// crmservice.ContractChecker 接口注释）。
+
+	// 注册公海自动回收任务（issue #14）：handlerName 为 recyclePoolCustomers，
+	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed
+	// 的 seedJobs 注释）。回收是系统级动作：handler 忽略 job 所属租户上下文，
+	// 由 crm service 以 tenant.Skip 列出启用租户后逐租户执行。
+	scheduler.Register(crmservice.RecycleJobHandlerName, func(ctx context.Context, param string) error {
+		result, err := crmSvc.RunPoolRecycle(ctx)
+		if err != nil {
+			return err
+		}
+		slog.Info("pool auto-recycle job finished", "tenants", result.Tenants, "recycled", result.Recycled)
+		return nil
+	})
+
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission)
 
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)

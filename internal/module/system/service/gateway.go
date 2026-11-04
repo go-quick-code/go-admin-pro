@@ -56,3 +56,9 @@ func (s *Service) UserHasPermission(ctx context.Context, userID int64, permissio
 func (s *Service) ListSimpleUsers(ctx context.Context) ([]model.SimpleUser, error) {
 	return s.repo.ListSimpleUsers(ctx)
 }
+
+// ListEnabledTenantIDs 返回全部启用租户的 ID（系统级）：
+// crm 公海自动回收 job 遍历租户用（issue #14，见 crm/service.SystemGateway）。
+func (s *Service) ListEnabledTenantIDs(ctx context.Context) ([]int64, error) {
+	return s.repo.ListEnabledTenantIDs(ctx)
+}

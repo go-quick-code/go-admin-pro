@@ -3,18 +3,21 @@ package model
 import "time"
 
 // 负责人历史操作类型（docs/crm-mvp-spec.md §4.1：负责人变更写 crm_customer_owner_history）。
-// recycle（自动回收）由 #14 引入，词汇表先留位。
+// recycle（自动回收）由 #14 引入：系统定时任务清空负责人时落 recycle 行，
+// 操作人为 0（系统动作，无登录用户）。
 const (
 	OwnerHistoryCreate   = "create"   // 创建：落首任负责人（含创建即入公海的空场景，to_owner 为 0）
 	OwnerHistoryClaim    = "claim"    // 认领：从公海认领到自己名下
 	OwnerHistoryRelease  = "release"  // 释放：释放回公海
 	OwnerHistoryTransfer = "transfer" // 转移：变更负责人给同租户其他用户
+	OwnerHistoryRecycle  = "recycle"  // 回收：超期未跟进由系统自动回收入池（#14）
 )
 
 // ValidOwnerHistoryAction 报告操作类型是否合法。
 func ValidOwnerHistoryAction(action string) bool {
 	switch action {
-	case OwnerHistoryCreate, OwnerHistoryClaim, OwnerHistoryRelease, OwnerHistoryTransfer:
+	case OwnerHistoryCreate, OwnerHistoryClaim, OwnerHistoryRelease,
+		OwnerHistoryTransfer, OwnerHistoryRecycle:
 		return true
 	}
 	return false
