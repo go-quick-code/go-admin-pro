@@ -33,4 +33,5 @@ var TenantTables = []string{
 	"crm_follow_up",
 	"crm_sequence",
 	"crm_customer_owner_history",
+	"crm_pool_config",
 }
