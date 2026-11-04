@@ -75,34 +75,11 @@
 57. 作为系统管理员，我想要 CRM 的菜单和按钮权限由种子下发，这样新租户开箱即可用。
 58. 作为租户管理员，我想要 CRM 数据按租户隔离，这样不同租户的客户和合同互不可见。
 
-## Implementation Decisions
+## 实现与测试
 
-- **模块**：新增 `crm` 业务模块，按 model / dto / repository / service / api 分层；新增 Excel 能力包；数据库层增加迁移与 `BaseEntity`；种子数据增加 CRM 菜单、权限码、字典与演示数据。
-- **迁移**：使用 goose 管理版本化 SQL；`00001_baseline.sql` 固化现有 17 张表，后续迁移包括 `BaseEntity`、数据范围枚举、`system_role_dept`、CRM 表。应用启动只校验版本，不自动建表。
-- **模型底座**：实体表统一 `id`、`tenant_id`、`created_at`、`updated_at`、`deleted_at`、`creator`、`updater`；关联表使用复合主键 + `tenant_id`，不设软删除，变更由操作日志记录。
-- **数据范围**：枚举对齐芋道 1–5（1 全部 / 2 自定义部门 / 3 本部门 / 4 本部门及以下 / 5 仅本人）；旧值 2→4、4→5；非法值返回 400。多角色取可见部门并集，任一角色「全部」则全可见。新增 `system_role_dept` 支撑自定义部门。
-- **数据权限**：客户、商机、合同按 `owner_user_id` 与 `owner_dept_id` 过滤；联系人、跟进记录、回款记录 join 父记录后套用父谓词；公海记录（`owner_user_id IS NULL`）靠 `crm:customer:pool:view` 可见，不受数据范围过滤；负责人变更写 `crm_customer_owner_history`。
-- **公海**：手动释放 + 自动回收 + 认领；自动回收条件为「有负责人、`last_follow_time` 超过 N 天（默认 30）、无未作废合同」；认领上限默认 50；规则按租户配置；跟进任一子记录刷新客户 `last_follow_time`。
-- **CRM 实体**：`crm_product_category`、`crm_product`、`crm_customer`、`crm_contact`、`crm_follow_up`、`crm_customer_owner_history`、`crm_opportunity`、`crm_opportunity_product`、`crm_contract`、`crm_contract_product`、`crm_receivable_plan`、`crm_receivable_record`、`crm_sequence`。
-- **金额不变量**：合同有行项目时 `amount = SUM(行项目金额)`；`SUM(回款计划金额) ≤ 合同金额`；`SUM(回款记录金额) ≤ 计划金额`；金额非负，`decimal(12,2)`，v1 单币种 CNY；违反时服务层返回业务错误。
-- **状态机**：合同为草稿 → 待审 → 已签，可作废；待审可驳回回草稿；v1 用 `ApprovalService` 直通实现，bpm 上线后替换。商机阶段 1–4 进行中，5 赢单、6 输单。客户「已成交」由是否存在已签合同派生。回款计划状态全部派生，不落库。
-- **编号**：客户 `KH`、商机 `SJ`、合同 `HT`、回款 `HK` + `yyyyMMdd` + 4 位序号；`crm_sequence` 按 `(tenant_id, biz_type, date_key)` 原子递增。
-- **删除约束**：客户存在未作废合同时禁止删除；产品被商机/合同行项目引用时禁止删除；合同存在回款记录时禁止作废/删除；计划存在回款记录时禁止删除；全部软删除，子记录不级联硬删。
-- **API 契约**：统一前缀 `/admin-api/crm`，沿用 `{code,data,msg}`、`pageNo/pageSize`、`Authorization: Bearer`；权限码按 `crm:<entity>:<action>` 命名，公海/认领/转移/审批单独授权。
-- **Excel**：客户、联系人、产品导入；客户、合同、回款计划导出；模板下载；5000 行/10MB 上限；先全量校验，有错整批拒绝并返回行号+原因；导出遵守数据权限。
-- **前端**：自建 Vue3 + Element Plus；页面包括仪表盘、产品、客户列表/详情、公海、商机、合同、回款；动态路由与按钮权限由后端菜单下发；客户详情用 tab 承载关联数据。
-- **开发方式**：先手写客户 + 联系人确立模式，再升级 codegen 生成其余实体；codegen 详细设计在客户+联系人完成后单独一轮。
-- **租户隔离**：所有 CRM 表纳入租户插件；系统级任务必须显式 `tenant.Skip`；无租户上下文的查询直接报错。
-
-## Testing Decisions
-
-- **好测试的标准**：只测外部行为（HTTP 请求/响应、数据库最终状态），不测实现细节；测试之间隔离，不共享可变状态；失败信息能定位到具体规则。
-- **主 seam：HTTP API + 真实 MySQL**。用真实 Gin router，带 JWT、权限、租户中间件，打 `/admin-api/...`；使用独立测试库 `go_admin_pro_test`，测试前跑迁移，用例间清表；覆盖数据权限矩阵、租户隔离、公海领取/释放/回收、合同/回款不变量、Excel 导入导出、仪表盘聚合。CI 增加 MySQL 8 service；本地用 `docker compose up -d mysql`。
-- **次 seam：纯函数单元测试**。沿用现有 `internal/module/system/service/*_test.go` 的模式，覆盖数据范围谓词组合、金额校验、编号生成、状态机、Excel 行校验；不连数据库，保证快和准。
-- **分层**：单元测试默认随 `go test ./...` 跑；HTTP 集成测试用构建标签隔离，`make test-integration` 显式执行，避免本地无 MySQL 时失败。
-- **测试数据**：种子一个租户、五种数据范围各一个角色、部门树、多个负责人/部门的客户、产品、商机、合同、回款计划与记录；集成测试复用这些种子。
-- **重点场景**：非法数据范围返回 400 且不返回数据；无租户上下文查询报错；多角色并集；公海认领上限；自动回收排除有合同客户；合同金额与行项目不一致报错；计划超合同金额报错；回款超计划报错；有回款的合同不能作废；Excel 有错整批拒绝。
-- **先例**：现有 `internal/module/system/service` 的纯函数测试和 `internal/module/codegen` 的校验测试是单元 seam 的先例；HTTP seam 是新增，但沿用现有 router 与中间件，不引入测试专用后门。
+- 新增 `crm` 业务模块（model / dto / repository / service / api 分层），新增 Excel 能力包；迁移与 `BaseEntity` 在平台层完成。
+- 表结构、数据权限谓词、公海规则、金额不变量、状态机、编号、删除约束、API 清单、前端页面、导入导出与测试 seam，以 [`docs/crm-mvp-spec.md`](../crm-mvp-spec.md) 为唯一来源；本文件不再复制规则正文。
+- 架构取舍见 `docs/adr/0001`–`0005`。
 
 ## Out of Scope
 

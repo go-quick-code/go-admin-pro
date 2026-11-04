@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/lautung/go-admin-pro/internal/config"
@@ -74,6 +75,51 @@ func MigrateStatus(ctx context.Context, db *sql.DB) error {
 	}
 	if err := goose.StatusContext(ctx, db, migrationsDir); err != nil {
 		return fmt.Errorf("goose status: %w", err)
+	}
+	return nil
+}
+
+// MigrateStamp 把已有库标记为指定迁移版本，不执行任何 DDL。
+// 仅用于结构已存在但没有 goose 版本记录的库（例如旧 AutoMigrate 建的库）；
+// 为避免覆盖已有迁移历史，只允许在未应用任何版本时使用。
+func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
+	if err := initGoose(); err != nil {
+		return err
+	}
+	versions, err := embeddedVersions()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(versions, version) {
+		return fmt.Errorf("version %d is not an embedded migration (known versions: %v)", version, versions)
+	}
+
+	current, err := goose.EnsureDBVersionContext(ctx, db)
+	if err != nil {
+		return fmt.Errorf("read migration version: %w", err)
+	}
+	if current == version {
+		fmt.Printf("database is already at version %d\n", version)
+		return nil
+	}
+	if current != 0 {
+		return fmt.Errorf("database already has applied version %d; refusing to stamp version %d over existing history", current, version)
+	}
+
+	var tableCount int
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name <> ?",
+		goose.TableName(),
+	).Scan(&tableCount); err != nil {
+		return fmt.Errorf("inspect database tables: %w", err)
+	}
+	if tableCount == 0 {
+		return fmt.Errorf("refusing to stamp an empty database; run migrate-up instead")
+	}
+
+	query := fmt.Sprintf("INSERT INTO `%s` (version_id, is_applied) VALUES (?, 1)", goose.TableName())
+	if _, err := db.ExecContext(ctx, query, version); err != nil {
+		return fmt.Errorf("stamp version %d: %w", version, err)
 	}
 	return nil
 }

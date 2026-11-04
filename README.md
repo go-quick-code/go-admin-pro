@@ -162,11 +162,16 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
 - `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本。
 - `make migrate-status`：查看每个版本的应用状态。
+- `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为指定版本，不执行 DDL。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
+
+迁移默认超时 30 分钟，可用 `go run ./cmd/migrate -timeout 0 up` 关闭超时（数据迁移或 backfill 建议显式放宽）。
 
 应用启动时只校验迁移版本，不建表也不执行迁移；数据库未迁移、落后或超前都会报错退出。已发布的迁移不要修改，表结构变更一律新增文件。
 
-旧版 AutoMigrate 建的本地库没有迁移记录，启动会报「database is not migrated」；开发环境删库后重新执行 `make migrate-up` 再启动即可。
+旧版 AutoMigrate 建的库没有 goose 版本记录：先备份，人工核对 17 张表结构与基线一致后执行 `make migrate-stamp version=1`；不一致或开发环境无数据时，删库后重新 `make migrate-up` 更干净。
+
+MySQL 的 DDL 不在事务里：基线在一个文件中建 17 张表，中途失败会留下半套表，需要手工清理后重跑。后续迁移保持单个 DDL，或写成可重入语句。
 
 ### 多租户隔离
 
@@ -332,8 +337,10 @@ make migrate-up    # 执行全部待执行迁移
 make migrate-down  # 回滚一个迁移版本
 make migrate-reset # 回滚全部迁移版本
 make migrate-status # 查看迁移状态
+make migrate-stamp version=1 # 已有库标记基线版本
 make migrate-create name=add_xxx # 新建迁移文件
 make test         # 运行测试
+make test-integration # 运行集成测试（构建标签 integration）
 make vet          # 静态检查
 make fmt          # gofmt
 make web-dev      # 启动前端开发服务器

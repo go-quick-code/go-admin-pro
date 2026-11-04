@@ -26,7 +26,7 @@
 
 ## 3. 表结构
 
-所有实体表含 `id`、`tenant_id`、`created_at`、`updated_at`、`deleted_at`、`creator`、`updater`。关联表用复合主键 + `tenant_id`，不设软删除，变更由操作日志记录。
+所有实体表含 `id`、`tenant_id`、`created_at`、`updated_at`、`deleted_at`、`creator`、`updater`。关联表用复合主键 + `tenant_id`，不设软删除，变更由操作日志记录。`crm_customer_owner_history` 是追加型审计表，仅 `created_at/creator`；`crm_sequence` 是计数支撑表，只有业务字段——这两类不套用实体底座。
 
 ### 产品
 
@@ -80,8 +80,10 @@
 ### 4.2 公海
 
 - 手动释放：owner 置空，写 `pool_enter_time`、`release_reason`、历史。
-- 自动回收：`infra_job` 按租户配置执行；条件为「owner 非空、`last_follow_time` 超过 N 天（默认 30）、无未作废合同」。
-- 认领：校验 `crm:customer:claim`、认领上限（默认 50）、客户仍在公海；写入新 owner 与部门，清空池字段，写历史。
+- 自动回收：`infra_job` 按租户配置执行；条件为「owner 非空、`COALESCE(last_follow_time, created_at)` 超过 N 天（默认 30）、无未作废合同」。从未跟进的新客户按创建时间计算，不会被排除在回收规则外。
+- 认领：校验 `crm:customer:claim`、认领上限、客户仍在公海；写入新 owner 与部门，清空池字段，写历史。
+- 认领上限：指 `owner_user_id = 当前用户` 的未删除客户总数，不区分是否成交；默认 50。
+- 配置落点：回收天数与认领上限存 `infra_config` 的租户级 key `crm.pool.recycle_days`、`crm.pool.claim_limit`，缺省 30 / 50。
 - 跟进任一子记录都刷新客户的 `last_follow_time`。
 
 ### 4.3 金额不变量
@@ -145,7 +147,7 @@
 - `goose up` 从空库建出全部表；seed 写入菜单、权限、演示数据。
 - 一个销售能完成：建客户 → 加联系人 → 写跟进 → 建商机 → 推进阶段 → 建合同（行项目）→ 拆回款计划 → 登记回款 → 看仪表盘。
 - 数据权限：销售只看自己/本部门；主管看下级；自定义部门生效；公海按权限可见。
-- 公海：释放、认领、30 天自动回收、认领上限全部可验证。
+- 公海：释放、认领、30 天自动回收、认领上限全部可验证；从未跟进的新客户按创建时间参与回收，认领上限按 owner 名下客户总数计算。
 - 非法数据范围返回 400，绝不回退「全部」。
 - Excel 导入校验错误可读；导出内容与权限一致。
 

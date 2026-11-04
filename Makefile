@@ -2,8 +2,9 @@ APP_NAME := go-admin-pro
 CONFIG   := configs/config.yaml
 BIN      := bin/server
 MIGRATE  := bin/migrate
+MIGRATION_VERSION ?= 1
 
-.PHONY: help run build test vet fmt tidy migrate-up migrate-down migrate-reset migrate-status migrate-create web-install web-dev web-build build-all docker-up docker-down docker-logs clean
+.PHONY: help run build test test-integration vet fmt tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create web-install web-dev web-build build-all docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
@@ -13,8 +14,10 @@ help:
 	@echo "  make migrate-down 回滚一个迁移版本"
 	@echo "  make migrate-reset 回滚全部迁移版本"
 	@echo "  make migrate-status 查看迁移状态"
+	@echo "  make migrate-stamp version=1 把已有库标记为指定版本（不执行 DDL）"
 	@echo "  make migrate-create name=xxx 新建迁移文件"
 	@echo "  make test         运行 Go 测试"
+	@echo "  make test-integration 运行集成测试（构建标签 integration）"
 	@echo "  make vet          go vet 静态检查"
 	@echo "  make fmt          gofmt 格式化"
 	@echo "  make tidy         go mod tidy"
@@ -36,11 +39,15 @@ build:
 test:
 	go test ./...
 
+# 集成测试基座在 #3 落地；此 target 先固定命令入口。
+test-integration:
+	go test -tags=integration ./...
+
 vet:
 	go vet ./...
 
 fmt:
-	gofmt -w ./cmd ./internal
+	gofmt -w ./cmd ./internal ./migrations
 
 tidy:
 	go mod tidy
@@ -56,6 +63,9 @@ migrate-reset:
 
 migrate-status:
 	go run ./cmd/migrate -c $(CONFIG) status
+
+migrate-stamp:
+	go run ./cmd/migrate -c $(CONFIG) stamp $(MIGRATION_VERSION)
 
 migrate-create:
 	go run ./cmd/migrate create $(name)

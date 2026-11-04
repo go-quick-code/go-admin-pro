@@ -6,6 +6,7 @@
 //	go run ./cmd/migrate -c configs/config.yaml down
 //	go run ./cmd/migrate -c configs/config.yaml reset
 //	go run ./cmd/migrate -c configs/config.yaml status
+//	go run ./cmd/migrate -c configs/config.yaml stamp 1
 //	go run ./cmd/migrate -c configs/config.yaml create add_crm_customer
 package main
 
@@ -14,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/lautung/go-admin-pro/internal/config"
@@ -22,6 +24,7 @@ import (
 
 func main() {
 	configPath := flag.String("c", "configs/config.yaml", "配置文件路径")
+	timeout := flag.Duration("timeout", 30*time.Minute, "迁移超时时间，0 表示不限制")
 	flag.Parse()
 
 	args := flag.Args()
@@ -52,8 +55,12 @@ func main() {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
+	ctx := context.Background()
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
+	}
 
 	switch cmd {
 	case "up":
@@ -64,6 +71,17 @@ func main() {
 		err = database.MigrateReset(ctx, db)
 	case "status":
 		err = database.MigrateStatus(ctx, db)
+	case "stamp":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "用法: migrate stamp <version>")
+			os.Exit(2)
+		}
+		version, parseErr := strconv.ParseInt(args[1], 10, 64)
+		if parseErr != nil || version <= 0 {
+			fmt.Fprintf(os.Stderr, "无效版本号: %s\n", args[1])
+			os.Exit(2)
+		}
+		err = database.MigrateStamp(ctx, db, version)
 	default:
 		fmt.Fprintf(os.Stderr, "未知命令: %s\n\n", cmd)
 		usage()
@@ -75,14 +93,17 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `用法: migrate [-c config.yaml] <command>
+	fmt.Fprint(os.Stderr, `用法: migrate [-c config.yaml] [-timeout 30m] <command>
 
 命令:
-  up        应用所有未执行的迁移
-  down      回滚一个迁移版本
-  reset     回滚所有迁移版本
-  status    查看迁移状态
-  create    新建 SQL 迁移模板（不需要数据库）
+  up             应用所有未执行的迁移
+  down           回滚一个迁移版本
+  reset          回滚所有迁移版本
+  status         查看迁移状态
+  stamp <version> 把已有库标记为指定迁移版本（不执行 DDL）
+  create <name>  新建 SQL 迁移模板（不需要数据库）
+
+-timeout 0 表示不限制迁移时长。
 `)
 }
 
