@@ -3,9 +3,11 @@ package excel
 import (
 	"encoding"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -79,7 +81,11 @@ func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 	}
 
 	for rowIdx, item := range rows {
-		rowValue := derefRow(reflect.ValueOf(&item).Elem())
+		rowValue := reflect.ValueOf(&item).Elem()
+		if hasNilInChain(rowValue) {
+			return nil, fmt.Errorf("第 %d 行为 nil，无法导出（请传入非 nil 行）", rowIdx+2)
+		}
+		rowValue = derefRow(rowValue)
 		for colPos, colIdx := range colIdxs {
 			col := s.columns[colIdx]
 			field := rowValue.FieldByIndex(s.indexes[colIdx])
@@ -173,16 +179,23 @@ func (s *schema) lookup(name string) (int, error) {
 	return 0, fmt.Errorf("%w: %s", ErrColumnNotFound, name)
 }
 
-// derefRow 把指针行解引用为可读的结构体值；nil 指针得到零值结构体。
+// derefRow 把指针行解引用为可读的结构体值。
 func derefRow(rv reflect.Value) reflect.Value {
 	for rv.Kind() == reflect.Ptr {
-		if rv.IsNil() {
-			rv = reflect.New(rv.Type().Elem()).Elem()
-			continue
-		}
 		rv = rv.Elem()
 	}
 	return rv
+}
+
+// hasNilInChain 判断指针行链中是否存在 nil。
+func hasNilInChain(rv reflect.Value) bool {
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return true
+		}
+		rv = rv.Elem()
+	}
+	return false
 }
 
 // cellValue 计算单元格值，优先使用调用方提供的转换函数。
@@ -263,6 +276,9 @@ func exportValue(fv reflect.Value) (any, error) {
 	return nil, fmt.Errorf("类型 %s 不支持导出", fv.Type())
 }
 
+// maxCellTextUnits 是 Excel 单元格文本上限，按 UTF-16 code unit 计。
+const maxCellTextUnits = 32767
+
 // normalizeCell 把转换函数的结果规整成适合写入单元格的值。
 func normalizeCell(value any, nativeDates bool) (any, error) {
 	switch v := value.(type) {
@@ -277,13 +293,69 @@ func normalizeCell(value any, nativeDates bool) (any, error) {
 			// Formatter 返回 time.Time 时与字段值同样处理，不做区分。
 			return v, nil
 		}
-		return v.Format(DefaultTimeLayout), nil
+		return checkCellTextLength(v.Format(DefaultTimeLayout))
 	case encoding.TextMarshaler:
 		text, err := v.MarshalText()
 		if err != nil {
 			return nil, fmt.Errorf("值转换失败：%w", err)
 		}
-		return string(text), nil
+		return checkCellTextLength(string(text))
+	case string:
+		return checkCellTextLength(v)
+	case float32:
+		if err := checkFiniteFloat(float64(v)); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case float64:
+		if err := checkFiniteFloat(v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	}
+	// 命名类型（type Note string、type Rate float64）与 []byte 不会匹配上面的
+	// 内置类型分支，excelize 会用 fmt.Sprint 原样写入，必须在这里补齐校验。
+	return normalizeReflectValue(value)
+}
+
+// normalizeReflectValue 按底层 Kind 处理命名类型与字节切片，避免绕过单元格校验。
+func normalizeReflectValue(value any) (any, error) {
+	rv := reflect.ValueOf(value)
+	for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return "", nil
+		}
+		rv = rv.Elem()
+	}
+	switch rv.Kind() {
+	case reflect.String:
+		return checkCellTextLength(rv.String())
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return checkCellTextLength(string(rv.Bytes()))
+		}
+	case reflect.Float32, reflect.Float64:
+		if err := checkFiniteFloat(rv.Float()); err != nil {
+			return nil, err
+		}
+		return rv.Float(), nil
 	}
 	return value, nil
+}
+
+// checkFiniteFloat 拒绝无法写入 Excel 数字单元格的 NaN 与 ±Inf。
+func checkFiniteFloat(v float64) error {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return fmt.Errorf("非有限浮点数 %v 无法导出（需为有限数字）", v)
+	}
+	return nil
+}
+
+// checkCellTextLength 校验文本长度不超过 Excel 单元格上限。
+func checkCellTextLength(text string) (string, error) {
+	// 按 UTF-16 code unit 计数：BMP 之外的一个字符占两个 unit。
+	if units := len(utf16.Encode([]rune(text))); units > maxCellTextUnits {
+		return "", fmt.Errorf("文本长度 %d 个 UTF-16 字符超过 Excel 单元格上限 %d", units, maxCellTextUnits)
+	}
+	return text, nil
 }

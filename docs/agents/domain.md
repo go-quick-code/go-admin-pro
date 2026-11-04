@@ -2,6 +2,13 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
+## Specs
+
+- **Issue-facing summary**: `docs/specs/<feature>.md` — problem, solution, user stories, scope. It links to the detailed spec.
+- **Detailed design**: `docs/<feature>-spec.md` — tables, rules, API, acceptance. Rules live only here; summaries do not copy them.
+
+When a rule changes, edit the detailed spec and leave the summary as a pointer.
+
 ## Before exploring, read these
 
 - **`GLOSSARY.md`** at the repo root, or
@@ -49,7 +56,3 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
 > _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
-
-## Review scope
-
-Scope a review to the changed paths and their direct neighbours: read the diff, then the changed package. Search the whole repo for similar implementations only when the change claims a single owner / single entry point; otherwise stop at the first relevant hit.

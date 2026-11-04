@@ -52,7 +52,7 @@ type ImportOptions[T any] struct {
 // 只要有一处错误就返回 *ImportError（包含行号、列名与原因），且不返回任何数据，
 // 调用方应整批拒绝。完全空白的行会被跳过。
 //
-// 单元格按原始值解析：日期为 Excel 序列号（1–2958465，1904 系统上限 2957003，
+// 单元格按原始值解析：日期为 Excel 序列号（1900 系统 1–2958465，1904 系统 0–2957003，
 // 自动识别日期系统，日期列中的纯数字按序列号解释），百分比 50% 读作 0.5，
 // 带千分位格式的金额读作底层数字。无时区文本与序列号使用 ImportOptions.Location
 // 解释，默认 time.Local。
@@ -241,12 +241,12 @@ func matchHeader(s *schema, cells []string, allowUnknown bool, importErrs *Impor
 			continue
 		}
 		if _, ok := fileIndex[h]; ok {
-			importErrs.add(1, h, "表头重复")
+			importErrs.add(1, truncateEchoValue(h), "表头重复")
 			continue
 		}
 		fileIndex[h] = i
 		if _, known := s.byHeader[h]; !known && !allowUnknown {
-			importErrs.add(1, h, "未知列，请使用模板表头")
+			importErrs.add(1, truncateEchoValue(h), "未知列，请使用模板表头")
 		}
 	}
 	if len(fileIndex) == 0 {

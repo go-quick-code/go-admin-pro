@@ -184,7 +184,10 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("GAP_APP_ENV"); v != "" {
 		c.App.Env = v
 	}
-	if strings.EqualFold(os.Getenv("GAP_SEED"), "false") {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_SEED"))) {
+	case "true":
+		c.Database.Seed = true
+	case "false":
 		c.Database.Seed = false
 	}
 }

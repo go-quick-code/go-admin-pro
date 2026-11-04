@@ -6,6 +6,7 @@
 //	go run ./cmd/migrate -c configs/config.yaml down
 //	go run ./cmd/migrate -c configs/config.yaml reset
 //	go run ./cmd/migrate -c configs/config.yaml status
+//	go run ./cmd/migrate -c configs/config.yaml verify
 //	go run ./cmd/migrate -c configs/config.yaml stamp 1
 //	go run ./cmd/migrate -c configs/config.yaml create add_crm_customer
 package main
@@ -25,6 +26,7 @@ import (
 func main() {
 	configPath := flag.String("c", "configs/config.yaml", "配置文件路径")
 	timeout := flag.Duration("timeout", 30*time.Minute, "迁移超时时间，0 表示不限制")
+	expectTables := flag.Int("expect-tables", 0, "verify 时断言的业务表数量，0 表示不检查")
 	flag.Parse()
 
 	args := flag.Args()
@@ -35,7 +37,7 @@ func main() {
 
 	cmd := args[0]
 	if cmd == "create" {
-		if len(args) < 2 || args[1] == "" {
+		if len(args) != 2 || args[1] == "" {
 			fmt.Fprintln(os.Stderr, "用法: migrate create <name>")
 			os.Exit(2)
 		}
@@ -43,6 +45,10 @@ func main() {
 			fail(err)
 		}
 		return
+	}
+	if len(args) > 1 && cmd != "stamp" {
+		fmt.Fprintf(os.Stderr, "unexpected arguments for %q: %v (flags must come before the command)\n", cmd, args[1:])
+		os.Exit(2)
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -71,8 +77,14 @@ func main() {
 		err = database.MigrateReset(ctx, db)
 	case "status":
 		err = database.MigrateStatus(ctx, db)
+	case "verify":
+		result, verifyErr := database.VerifyMigrationRoundtrip(ctx, db, *expectTables)
+		if verifyErr == nil {
+			fmt.Printf("migration roundtrip ok: %d tables -> 0 -> %d\n", result.TablesAfterUp, result.TablesAfterUpAgain)
+		}
+		err = verifyErr
 	case "stamp":
-		if len(args) < 2 {
+		if len(args) != 2 {
 			fmt.Fprintln(os.Stderr, "用法: migrate stamp <version>")
 			os.Exit(2)
 		}
@@ -100,10 +112,11 @@ func usage() {
   down           回滚一个迁移版本
   reset          回滚所有迁移版本
   status         查看迁移状态
+  verify         在空库上验证 up → reset → up（会拒绝非空库）
   stamp <version> 把已有库标记为指定迁移版本（不执行 DDL）
   create <name>  新建 SQL 迁移模板（不需要数据库）
 
--timeout 0 表示不限制迁移时长。
+-timeout 0 表示不限制迁移时长；-expect-tables N 用于 verify 断言业务表数量（0 表示不检查）。
 `)
 }
 

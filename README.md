@@ -168,9 +168,9 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 表结构由 `migrations/` 下的 goose SQL 管理，迁移文件会内嵌进二进制：
 
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
-- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
+- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
 - `make migrate-status`：查看每个版本的应用状态。
-- `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为指定版本，不执行 DDL。
+- `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为基线版本，不执行 DDL；后续版本必须走 `migrate up`。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
 
 迁移默认超时 30 分钟，可用 `go run ./cmd/migrate -timeout 0 up` 关闭超时（数据迁移或 backfill 建议显式放宽）。
@@ -180,6 +180,9 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 旧版 AutoMigrate 建的库没有 goose 版本记录：先备份，人工核对 17 张表结构与基线一致后执行 `make migrate-stamp version=1`；不一致或开发环境无数据时，删库后重新 `make migrate-up` 更干净。
 
 MySQL 的 DDL 不在事务里：基线在一个文件中建 17 张表，中途失败会留下半套表，需要手工清理后重跑。后续迁移保持单个 DDL，或写成可重入语句。
+
+改动迁移后运行 `make verify-migration`：需要一个空的 disposable 库（DSN 通过 `GAP_DATABASE_DSN` 指定），脚本会做 `up → reset → up`、启动服务、seed、登录与用户分页冒烟。详细步骤见 `docs/agents/verification.md`。
+
 
 ### 多租户隔离
 
@@ -342,14 +345,15 @@ compose 会先运行一次性的 `migrate` 服务，迁移成功后 `app` 才启
 make help         # 查看命令
 make run          # 启动后端
 make migrate-up    # 执行全部待执行迁移
-make migrate-down  # 回滚一个迁移版本
-make migrate-reset # 回滚全部迁移版本
+make migrate-down CONFIRM=yes  # 回滚一个迁移版本
+make migrate-reset CONFIRM=yes # 回滚全部迁移版本
 make migrate-status # 查看迁移状态
 make migrate-stamp version=1 # 已有库标记基线版本
 make migrate-create name=add_xxx # 新建迁移文件
+make verify-migration # 空库迁移往返 + 启动/登录冒烟
 make test         # 运行测试
-make test-integration # 运行集成测试（构建标签 integration）
-make check        # fmt-check + build + vet + test-race
+make test-integration # 运行集成测试（#3 落地前会明确失败）
+make check        # fmt-check + build + vet + test
 make vet          # 静态检查
 make fmt          # gofmt
 make web-dev      # 启动前端开发服务器
@@ -383,7 +387,7 @@ make docker-down  # 停止容器
 欢迎提交 Issue / PR。提交前请确保：
 
 ```bash
-go build ./... && go vet ./... && go test ./...
+make check
 pnpm --dir web build
 ```
 
