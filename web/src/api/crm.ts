@@ -55,3 +55,22 @@ export function updateContact(data: any) {
 export function deleteContact(id: number) {
   return request.delete(`/crm/contact/${id}`) as Promise<any>
 }
+
+// ---------- CRM 跟进记录（issue #12：客户维度，可见性跟随客户） ----------
+// 新增跟进后端会同事务刷新客户 lastFollowTime；修改/删除不回退。
+export function pageFollowUps(params: any) {
+  return request.get('/crm/follow-up/page', { params }) as Promise<any>
+}
+export function getFollowUp(id: number) {
+  return request.get(`/crm/follow-up/${id}`) as Promise<any>
+}
+export function createFollowUp(data: any) {
+  return request.post('/crm/follow-up', data) as Promise<any>
+}
+// 修改/删除：创建人本人或持 crm:follow-up:update/delete 按钮码。
+export function updateFollowUp(data: any) {
+  return request.put('/crm/follow-up', data) as Promise<any>
+}
+export function deleteFollowUp(id: number) {
+  return request.delete(`/crm/follow-up/${id}`) as Promise<any>
+}

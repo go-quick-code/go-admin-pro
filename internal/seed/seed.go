@@ -177,6 +177,13 @@ func seedMenus(db *gorm.DB) error {
 		// 按钮段让位 #9 的联系人 4014–4017，改用 4030 段（合并 #13 时重排）。
 		btn(4030, 401, "客户释放", "crm:customer:release", 8),
 		btn(4031, 401, "客户转移", "crm:customer:transfer", 9),
+		// 跟进记录（issue #12）：无独立页面，作为客户详情的 tab 呈现，
+		// 按钮权限码挂客户管理菜单下（可见性跟随客户的数据范围）；
+		// ID 从 4040 起（4014–4017 联系人、4030/4031 释放/转移、402/4021 公海已占用）。
+		btn(4040, 401, "跟进查询", "crm:follow-up:query", 10),
+		btn(4041, 401, "跟进新增", "crm:follow-up:create", 11),
+		btn(4042, 401, "跟进修改", "crm:follow-up:update", 12),
+		btn(4043, 401, "跟进删除", "crm:follow-up:delete", 13),
 		menu(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
 		btn(4021, 402, "客户认领", "crm:customer:claim", 1),
 	}
