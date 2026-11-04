@@ -77,6 +77,50 @@ func TestImportLongValueErrorMessageSize(t *testing.T) {
 	}
 }
 
+// TestImportLongHeaderErrorMessageSize 验证超长表头不会原样进入 ImportError。
+// 100 个约 30000 字符的未知列在未截断时会产生约 3MB 的 JSON；
+// 截断到 32 个 rune 加省略号后整体应稳定在 64KB 以内。
+func TestImportLongHeaderErrorMessageSize(t *testing.T) {
+	const (
+		headerCount = 100
+		headerLen   = 30000
+		jsonMax     = 64 << 10
+	)
+	headers := make([]any, 0, headerCount)
+	for i := 0; i < headerCount; i++ {
+		headers = append(headers, fmt.Sprintf("未知列%03d-%s", i, strings.Repeat("表", headerLen)))
+	}
+
+	_, err := excel.Import[importRow](bytes.NewReader(buildWorkbook(t, "数据", [][]any{headers})), excel.ImportOptions[importRow]{})
+	ie := asImportError(t, err)
+
+	if len(ie.Errors) != headerCount {
+		t.Fatalf("errors = %d, want %d", len(ie.Errors), headerCount)
+	}
+	for i, item := range ie.Errors {
+		if item.Row != 1 {
+			t.Fatalf("errors[%d].Row = %d, want header row 1", i, item.Row)
+		}
+		if !strings.Contains(item.Msg, "未知列") {
+			t.Fatalf("errors[%d].Msg = %q, want 未知列 error kept", i, item.Msg)
+		}
+		if n := utf8.RuneCountInString(item.Column); n > echoLimitRunes+1 {
+			t.Fatalf("errors[%d].Column uses %d runes, want <= %d", i, n, echoLimitRunes+1)
+		}
+		if !strings.Contains(item.Column, "…") {
+			t.Fatalf("errors[%d].Column = %q, want ellipsis after truncation", i, item.Column)
+		}
+	}
+
+	raw, err := json.Marshal(ie)
+	if err != nil {
+		t.Fatalf("marshal ImportError: %v", err)
+	}
+	if len(raw) >= jsonMax {
+		t.Fatalf("ImportError JSON = %d bytes, want < %d", len(raw), jsonMax)
+	}
+}
+
 // sizeCode 只接受固定前缀，用于覆盖 TextUnmarshaler 的回显路径。
 type sizeCode string
 

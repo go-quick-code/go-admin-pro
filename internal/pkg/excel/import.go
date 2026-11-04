@@ -241,12 +241,12 @@ func matchHeader(s *schema, cells []string, allowUnknown bool, importErrs *Impor
 			continue
 		}
 		if _, ok := fileIndex[h]; ok {
-			importErrs.add(1, h, "表头重复")
+			importErrs.add(1, truncateEchoValue(h), "表头重复")
 			continue
 		}
 		fileIndex[h] = i
 		if _, known := s.byHeader[h]; !known && !allowUnknown {
-			importErrs.add(1, h, "未知列，请使用模板表头")
+			importErrs.add(1, truncateEchoValue(h), "未知列，请使用模板表头")
 		}
 	}
 	if len(fileIndex) == 0 {
