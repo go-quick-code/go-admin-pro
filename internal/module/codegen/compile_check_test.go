@@ -18,6 +18,9 @@ import (
 
 // TestGeneratedProductCompiles 产品脚手架叠加到 crm 模块后可编译、可 vet，
 // 纯函数测试骨架可跑通，集成矩阵骨架在 integration 标签下可编译。
+// issue #11 起产品实体已在 crm 真实落地：叠加前先清掉副本中该实体的既有文件
+// （生成器语义是「重新生成覆盖同名产物」，见 INTEGRATION.md 限制一节），
+// 否则样板与实现并存会导致类型/常量重复声明，编译检查失去意义。
 func TestGeneratedProductCompiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short 模式跳过编译验证")
@@ -32,6 +35,7 @@ func TestGeneratedProductCompiles(t *testing.T) {
 	}
 
 	tmp := copyModuleSubset(t)
+	pruneOverlaidEntityFiles(t, tmp)
 	if err := overlay(tmp, files); err != nil {
 		t.Fatalf("叠加生成产物: %v", err)
 	}
@@ -42,6 +46,22 @@ func TestGeneratedProductCompiles(t *testing.T) {
 	runGo(t, tmp, "vet", "-tags=integration", "./internal/module/crm/...")
 	// 纯函数测试骨架（枚举校验/编号格式）真实执行。
 	runGo(t, tmp, "test", "-count=1", "-run", "TestValidateProductStatus", "./internal/module/crm/service/")
+}
+
+// pruneOverlaidEntityFiles 从副本里删除 issue #11 落地的产品实体集成测试：
+// 样板骨架与手写测试同属包 crm_test，都定义 crmProductMenuID 等常量会重复声明。
+// 清理后样板骨架在「生成物 + 模块底座」的干净组合上做编译验证——即
+// 「重新生成覆盖同名产物」语义（INTEGRATION.md 限制一节）在测试层的等价物。
+func pruneOverlaidEntityFiles(t *testing.T, tmp string) {
+	t.Helper()
+	for _, rel := range []string{
+		"internal/module/crm/product_http_integration_test.go",
+		"internal/module/crm/product_category_http_integration_test.go",
+	} {
+		if err := os.Remove(filepath.Join(tmp, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("清理存量实体测试 %s: %v", rel, err)
+		}
+	}
 }
 
 // TestGeneratedFreshModuleCompiles 新模块骨架变体（ModuleScaffold=true、非 owner、
