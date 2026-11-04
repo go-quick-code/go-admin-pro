@@ -81,6 +81,7 @@ go-admin-pro
 │       ├── tenant/             # 租户上下文与 Skip
 │       ├── jwt/ authn/         # 令牌与登录主体
 │       ├── middleware/         # CORS、日志、Recovery
+│       ├── excel/              # Excel 导入导出与模板
 │       ├── response/ xerr/     # 统一响应与业务错误
 │       └── web/ utils/         # 分页、通用工具
 ├── web/                        # Vue3 前端
