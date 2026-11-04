@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	crmmodel "github.com/lautung/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/lautung/go-admin-pro/internal/module/infra/model"
 	sysmodel "github.com/lautung/go-admin-pro/internal/module/system/model"
 	"github.com/lautung/go-admin-pro/internal/module/system/service"
@@ -39,6 +40,9 @@ func Run(db *gorm.DB) error {
 		return err
 	}
 	if err := seedConfigs(db); err != nil {
+		return err
+	}
+	if err := seedPoolConfigs(db); err != nil {
 		return err
 	}
 	if err := seedJobs(db); err != nil {
@@ -186,9 +190,12 @@ func seedMenus(db *gorm.DB) error {
 		btn(4043, 401, "跟进删除", "crm:follow-up:delete", 13),
 		menu(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
 		btn(4021, 402, "客户认领", "crm:customer:claim", 1),
+		// 公海配置（issue #14）：租户级回收天数/认领上限的编辑入口，
+		// 按钮码接 4050（4014–4017/4030–4031/402/4021/4040–4043 已占用）。
+		btn(4050, 402, "公海配置", "crm:pool-config:update", 2),
 		// 产品与产品分类（issue #11）：产品管理目录（4060）+ 产品列表/产品分类两个菜单项。
-		// ID 从 4060 起：4014–4017 联系人、4030/4031 释放/转移、4040–4043 跟进、402/4021 公海已占用。
-		// 每个菜单项带查询/新增/修改/删除四个按钮码（codegen menus 片段同款）。
+		// ID 从 4060 起：4014–4017 联系人、4030/4031 释放/转移、4040–4043 跟进、
+		// 402/4021/4050 公海已占用；每个菜单项带查询/新增/修改/删除四个按钮码（codegen menus 片段同款）。
 		dir(4060, 400, "产品管理", "product", "Goods", 3),
 		menu(4061, 4060, "产品列表", "list", "crm/product/index", "crm:product:query", "Goods", 1),
 		btn(4063, 4061, "产品查询", "crm:product:query", 1),
@@ -360,15 +367,48 @@ func seedJobs(db *gorm.DB) error {
 	if count > 0 {
 		return nil
 	}
-	job := &inframodel.Job{
-		TenantID:       1,
-		Name:           "演示任务",
-		HandlerName:    "demoJob",
-		HandlerParam:   "hello go-admin-pro",
-		CronExpression: "0 */5 * * * *",
-		RetryCount:     0,
-		Status:         inframodel.JobStatusPaused,
-		Remark:         "每 5 分钟执行一次的演示任务，默认暂停",
+	jobs := []inframodel.Job{
+		{
+			TenantID:       1,
+			Name:           "演示任务",
+			HandlerName:    "demoJob",
+			HandlerParam:   "hello go-admin-pro",
+			CronExpression: "0 */5 * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusPaused,
+			Remark:         "每 5 分钟执行一次的演示任务，默认暂停",
+		},
+		// 公海自动回收（issue #14）：默认暂停。
+		// 理由：回收是批量清空负责人归属的破坏性动作，触发前管理员应先
+		// 按租户确认公海配置（回收天数，默认 30）；且 #16 的合同排除尚未
+		// 接入（v1 空实现恒「无合同」），有成交合同的客户也会被回收，
+		// 开箱即跑风险不可控。确认配置并接入合同排除后再启用。
+		{
+			TenantID:       1,
+			Name:           "公海自动回收",
+			HandlerName:    "recyclePoolCustomers",
+			CronExpression: "0 0 3 * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusPaused,
+			Remark:         "每天 03:00 按租户公海配置回收超期未跟进的客户（清空负责人并写历史），默认暂停：请先确认各租户回收天数配置",
+		},
 	}
-	return tenant.Skip(db).Create(job).Error
+	return tenant.Skip(db).Create(&jobs).Error
+}
+
+// seedPoolConfigs 写入租户 1 的公海配置默认行（issue #14）：
+// TenantID 显式赋值（seed 无租户上下文，不依赖插件回填），取值与
+// crm/service 的默认值（DefaultRecycleDays/DefaultClaimLimit，规格 §4.2
+// 缺省 30/50）一致。其余租户不预置——配置行缺失时业务层按同一默认值执行，
+// 首次编辑才落行。
+func seedPoolConfigs(db *gorm.DB) error {
+	var count int64
+	if err := tenant.Skip(db).Model(&crmmodel.PoolConfig{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	row := &crmmodel.PoolConfig{TenantID: 1, RecycleDays: 30, ClaimLimit: 50}
+	return tenant.Skip(db).Create(row).Error
 }

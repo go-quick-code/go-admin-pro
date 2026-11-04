@@ -30,6 +30,10 @@ type SystemGateway interface {
 	// UserHasPermission 判断用户是否持有指定权限码（super_admin 以 "*" 通配）。
 	// 公海释放/转移的「负责人本人 或 权限码」组合校验使用（issue #13）。
 	UserHasPermission(ctx context.Context, userID int64, permission string) (bool, error)
+	// ListEnabledTenantIDs 返回全部启用租户的 ID（系统级，无租户过滤）。
+	// 公海自动回收 job 遍历租户用（issue #14）；租户注册表不属于租户插件
+	// 管辖，实现侧对本次查询显式 tenant.Skip。
+	ListEnabledTenantIDs(ctx context.Context) ([]int64, error)
 }
 
 // Service 汇聚 crm 模块的业务能力。
@@ -39,11 +43,14 @@ type Service struct {
 	// productRefs 是产品删除引用校验扩展点（issue #11，v1 空实现，#15/#16 注册实现），
 	// 见 product_refs.go；零值即空实现语义，装配侧无需显式初始化。
 	productRefs ProductRefCountChecker
+	// contracts 是合同依赖面（#16 接入点）：v1 为空实现 NoopContractChecker
+	// （恒「无合同」），#16 落地后在 app.go 装配处 SetContractChecker 替换。
+	contracts ContractChecker
 }
 
-// New 创建 crm Service。
+// New 创建 crm Service。合同依赖面缺省空实现（v1 无合同可查，回收不做排除）。
 func New(repo *repository.Repository, sys SystemGateway) *Service {
-	return &Service{repo: repo, sys: sys}
+	return &Service{repo: repo, sys: sys, contracts: NoopContractChecker{}}
 }
 
 // CurrentUserID 返回 context 中的当前用户 ID。
