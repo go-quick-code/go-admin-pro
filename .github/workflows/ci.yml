@@ -46,6 +46,34 @@ jobs:
       - name: Migration roundtrip + auth smoke
         run: ./scripts/verify-migration.sh
 
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: "123456"
+          MYSQL_DATABASE: go_admin_pro_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -p123456"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      GAP_TEST_DATABASE_DSN: "root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Integration tests (build tag integration)
+        run: make test-integration
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

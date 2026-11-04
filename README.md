@@ -72,6 +72,7 @@ go-admin-pro
 │   ├── config/                 # 配置加载
 │   ├── router/                 # 路由、静态资源、SPA 回退
 │   ├── seed/                   # 初始化数据（依赖已执行的迁移）
+│   ├── testutil/               # 集成测试基座（真实 router + MySQL，integration 标签）
 │   ├── module/
 │   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户、日志
 │   │   ├── infra/              # 文件、参数配置、定时任务
@@ -353,7 +354,7 @@ make migrate-stamp version=1 # 已有库标记基线版本
 make migrate-create name=add_xxx # 新建迁移文件
 make verify-migration # 空库迁移往返 + 启动/登录冒烟
 make test         # 运行测试
-make test-integration # 运行集成测试（#3 落地前会明确失败）
+make test-integration # 运行集成测试（真实 router + MySQL 8；DSN 走 GAP_TEST_DATABASE_DSN）
 make check        # fmt-check + build + vet + test
 make vet          # 静态检查
 make fmt          # gofmt

@@ -3,6 +3,9 @@ CONFIG   := configs/config.yaml
 BIN      := bin/server
 MIGRATE  := bin/migrate
 version ?= 1
+# 集成测试专用库（#3）：基座会拒绝在非 go_admin_pro_test 库上运行，防止清表误伤开发库。
+# 刻意不用 GAP_DATABASE_DSN：那个名字会被 config.Load 读取，泄漏进其他包的测试。
+GAP_TEST_DATABASE_DSN ?= root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True
 
 .PHONY: help run build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build build-all docker-up docker-down docker-logs clean
 
@@ -48,7 +51,7 @@ test-integration:
 	if ! grep -rhs --include='*_test.go' -e '^//go:build' -e '^// +build' $$pkgs | grep -v '!integration' | grep -q 'integration'; then \
 		echo "no integration tests found (build tag integration)"; exit 1; \
 	fi
-	go test -tags=integration ./...
+	GAP_TEST_DATABASE_DSN="$(GAP_TEST_DATABASE_DSN)" go test -tags=integration ./...
 
 check: fmt-check build vet test
 
