@@ -56,6 +56,9 @@ func TestSchemaUnexportedTaggedFieldFails(t *testing.T) {
 			if !strings.Contains(err.Error(), "note") {
 				t.Errorf("error = %q, want it to name field note", err)
 			}
+			if !strings.Contains(err.Error(), "请改为导出字段或移除 excel 标签") {
+				t.Errorf("error = %q, want expected form hint", err)
+			}
 		})
 	}
 }

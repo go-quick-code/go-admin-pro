@@ -117,7 +117,7 @@ func (s *schema) addFields(t reflect.Type, prefix []int) error {
 		}
 		if sf.PkgPath != "" { // 未导出字段不可写
 			if tag != "" {
-				return fmt.Errorf("%w: 字段 %s 未导出", ErrInvalidSchema, sf.Name)
+				return fmt.Errorf("%w: 字段 %s 未导出（请改为导出字段或移除 excel 标签）", ErrInvalidSchema, sf.Name)
 			}
 			continue
 		}
