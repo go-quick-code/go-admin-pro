@@ -30,4 +30,5 @@ var TenantTables = []string{
 	"infra_job_log",
 	"crm_customer",
 	"crm_sequence",
+	"crm_customer_owner_history",
 }
