@@ -82,6 +82,7 @@ go-admin-pro
 │       ├── jwt/ authn/         # 令牌与登录主体
 │       ├── middleware/         # CORS、日志、Recovery
 │       ├── excel/              # Excel 导入导出与模板
+│       ├── money/              # 金额值类型（int64 分，decimal(12,2)）
 │       ├── response/ xerr/     # 统一响应与业务错误
 │       └── web/ utils/         # 分页、通用工具
 ├── web/                        # Vue3 前端
