@@ -98,10 +98,10 @@ func seedMenus(db *gorm.DB) error {
 			Status: sysmodel.StatusEnable, KeepAlive: true,
 		}
 	}
-	dir := func(id int64, name, path, icon string, sort int) sysmodel.Menu {
+	dir := func(id, parent int64, name, path, icon string, sort int) sysmodel.Menu {
 		return sysmodel.Menu{
 			BaseEntity: sysmodel.BaseEntity{ID: id}, Name: name,
-			Type: sysmodel.MenuTypeDir, Path: path, Icon: icon, Sort: sort,
+			Type: sysmodel.MenuTypeDir, ParentID: parent, Path: path, Icon: icon, Sort: sort,
 			Visible: true, Status: sysmodel.StatusEnable,
 		}
 	}
@@ -109,7 +109,7 @@ func seedMenus(db *gorm.DB) error {
 	menus := []sysmodel.Menu{
 		menu(1, 0, "仪表盘", "/dashboard", "dashboard/index", "", "Odometer", 0),
 
-		dir(100, "系统管理", "/system", "Setting", 10),
+		dir(100, 0, "系统管理", "/system", "Setting", 10),
 		menu(101, 100, "用户管理", "user", "system/user/index", "system:user:query", "User", 1),
 		menu(102, 100, "角色管理", "role", "system/role/index", "system:role:query", "UserFilled", 2),
 		menu(103, 100, "菜单管理", "menu", "system/menu/index", "system:menu:query", "Menu", 3),
@@ -144,7 +144,7 @@ func seedMenus(db *gorm.DB) error {
 		btn(1081, 108, "日志清空", "system:login-log:delete", 1),
 		btn(1091, 109, "日志清空", "system:operate-log:delete", 1),
 
-		dir(200, "基础设施", "/infra", "Tools", 20),
+		dir(200, 0, "基础设施", "/infra", "Tools", 20),
 		menu(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),
 		menu(202, 200, "参数配置", "config", "infra/config/index", "infra:config:query", "SetUp", 2),
 		menu(203, 200, "定时任务", "job", "infra/job/index", "infra:job:query", "Timer", 3),
@@ -164,7 +164,7 @@ func seedMenus(db *gorm.DB) error {
 		// CRM（issue #8 起逐步落地）：菜单挂在动态路由下，组件路径对应 web/src/views。
 		// 联系人（issue #9）：无独立页面，作为客户详情的 tab 呈现，
 		// 按钮权限码挂客户管理菜单下（可见性也跟随客户的数据范围）。
-		dir(400, "CRM", "/crm", "Suitcase", 40),
+		dir(400, 0, "CRM", "/crm", "Suitcase", 40),
 		menu(401, 400, "客户管理", "customer", "crm/customer/index", "crm:customer:query", "Avatar", 1),
 		btn(4011, 401, "客户新增", "crm:customer:create", 1),
 		btn(4012, 401, "客户修改", "crm:customer:update", 2),
@@ -186,6 +186,20 @@ func seedMenus(db *gorm.DB) error {
 		btn(4043, 401, "跟进删除", "crm:follow-up:delete", 13),
 		menu(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
 		btn(4021, 402, "客户认领", "crm:customer:claim", 1),
+		// 产品与产品分类（issue #11）：产品管理目录（4060）+ 产品列表/产品分类两个菜单项。
+		// ID 从 4060 起：4014–4017 联系人、4030/4031 释放/转移、4040–4043 跟进、402/4021 公海已占用。
+		// 每个菜单项带查询/新增/修改/删除四个按钮码（codegen menus 片段同款）。
+		dir(4060, 400, "产品管理", "product", "Goods", 3),
+		menu(4061, 4060, "产品列表", "list", "crm/product/index", "crm:product:query", "Goods", 1),
+		btn(4063, 4061, "产品查询", "crm:product:query", 1),
+		btn(4064, 4061, "产品新增", "crm:product:create", 2),
+		btn(4065, 4061, "产品修改", "crm:product:update", 3),
+		btn(4066, 4061, "产品删除", "crm:product:delete", 4),
+		menu(4062, 4060, "产品分类", "category", "crm/product-category/index", "crm:product-category:query", "FolderOpened", 2),
+		btn(4067, 4062, "分类查询", "crm:product-category:query", 1),
+		btn(4068, 4062, "分类新增", "crm:product-category:create", 2),
+		btn(4069, 4062, "分类修改", "crm:product-category:update", 3),
+		btn(4070, 4062, "分类删除", "crm:product-category:delete", 4),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err

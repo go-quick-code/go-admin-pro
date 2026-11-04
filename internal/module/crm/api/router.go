@@ -50,4 +50,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	followUp.POST("", h.requirePermission("crm:follow-up:create"), h.CreateFollowUp)
 	followUp.PUT("", h.UpdateFollowUp)
 	followUp.DELETE("/:id", h.DeleteFollowUp)
+
+	// 产品（issue #11）：租户级共享资源，普通 CRUD + 权限码，
+	// 无 owner 列与数据范围谓词（codegen ownerScoped=false 变体）。
+	h.RegisterProductRoutes(rg)
 }
