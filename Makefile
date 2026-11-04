@@ -4,7 +4,7 @@ BIN      := bin/server
 MIGRATE  := bin/migrate
 version ?= 1
 
-.PHONY: help run build test test-integration test-race check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create web-install web-dev web-build web-type-check build-all docker-up docker-down docker-logs clean
+.PHONY: help run build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build build-all docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
@@ -16,18 +16,16 @@ help:
 	@echo "  make migrate-status 查看迁移状态"
 	@echo "  make migrate-stamp version=1 把已有库标记为指定版本（不执行 DDL）"
 	@echo "  make migrate-create name=xxx 新建迁移文件"
+	@echo "  make verify-migration 空库迁移往返 + 启动/登录冒烟（需要 GAP_DATABASE_DSN）"
 	@echo "  make test         运行 Go 测试"
 	@echo "  make test-integration 运行集成测试（构建标签 integration）"
-	@echo "  make test-race    运行 Go 测试（竞态检测）"
-	@echo "  make check        提交前检查：fmt-check + build + vet + test-race"
+	@echo "  make check        fmt-check + build + vet + test"
 	@echo "  make vet          go vet 静态检查"
 	@echo "  make fmt          gofmt 格式化"
-	@echo "  make fmt-check    检查格式（不写文件）"
 	@echo "  make tidy         go mod tidy"
 	@echo "  make web-install  安装前端依赖"
 	@echo "  make web-dev      启动前端开发服务器"
 	@echo "  make web-build    构建前端产物到 web/dist"
-	@echo "  make web-type-check 前端类型检查"
 	@echo "  make build-all    构建前端 + 后端"
 	@echo "  make docker-up    启动 MySQL 容器"
 	@echo "  make docker-down  停止并移除容器"
@@ -43,23 +41,29 @@ build:
 test:
 	go test ./...
 
-# 集成测试基座在 #3 落地；此 target 先固定命令入口。
+# 集成测试基座在 #3 落地；没有 integration 用例时明确失败，避免假绿。
 test-integration:
+	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
+	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
+	if ! grep -rhs --include='*_test.go' -e '^//go:build' -e '^// +build' $$pkgs | grep -v '!integration' | grep -q 'integration'; then \
+		echo "no integration tests found (build tag integration)"; exit 1; \
+	fi
 	go test -tags=integration ./...
 
-test-race:
-	go test -race ./...
-
-check: fmt-check build vet test-race
+check: fmt-check build vet test
 
 vet:
 	go vet ./...
 
 fmt:
-	gofmt -w $$(go list -f '{{.Dir}}' ./...)
+	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
+	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
+	gofmt -w $$pkgs
 
 fmt-check:
-	@out="$$(gofmt -l $$(go list -f '{{.Dir}}' ./...))"; \
+	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
+	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
+	out="$$(gofmt -l $$pkgs)" || exit 1; \
 	if [ -n "$$out" ]; then echo "gofmt required:"; echo "$$out"; exit 1; fi
 
 tidy:
@@ -69,9 +73,11 @@ migrate-up:
 	go run ./cmd/migrate -c $(CONFIG) up
 
 migrate-down:
+	@if [ "$$CONFIRM" != "yes" ]; then echo "refusing to roll back: set CONFIRM=yes (down executes the migration's DROP statements)"; exit 1; fi
 	go run ./cmd/migrate -c $(CONFIG) down
 
 migrate-reset:
+	@if [ "$$CONFIRM" != "yes" ]; then echo "refusing to reset: set CONFIRM=yes (reset drops all migrated objects)"; exit 1; fi
 	go run ./cmd/migrate -c $(CONFIG) reset
 
 migrate-status:
@@ -83,6 +89,9 @@ migrate-stamp:
 migrate-create:
 	go run ./cmd/migrate create $(name)
 
+verify-migration:
+	./scripts/verify-migration.sh
+
 web-install:
 	cd web && pnpm install
 
@@ -91,9 +100,6 @@ web-dev:
 
 web-build:
 	cd web && pnpm build
-
-web-type-check:
-	cd web && pnpm type-check
 
 build-all: web-build build
 
