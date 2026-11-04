@@ -2,6 +2,8 @@ package model
 
 import (
 	basemodel "github.com/lautung/go-admin-pro/internal/pkg/model"
+
+	datascope "github.com/lautung/go-admin-pro/internal/pkg/datascope"
 )
 
 // BaseEntity 是统一实体底座，定义见 internal/pkg/model。
@@ -20,10 +22,12 @@ const (
 	MenuTypeButton = 3
 )
 
-// 数据权限范围。
+// 数据权限范围：枚举收口在 internal/pkg/datascope（行级谓词引擎，CRM 复用），
+// 对齐芋道 1–5：1 全部 / 2 自定义部门 / 3 本部门 / 4 本部门及以下 / 5 仅本人。
 const (
-	DataScopeAll        = 1 // 全部数据
-	DataScopeDeptAndSub = 2 // 本部门及以下
-	DataScopeDept       = 3 // 本部门
-	DataScopeSelf       = 4 // 仅本人
+	DataScopeAll        = int8(datascope.ScopeAll)        // 全部数据
+	DataScopeCustom     = int8(datascope.ScopeCustom)     // 自定义部门
+	DataScopeDept       = int8(datascope.ScopeDept)       // 本部门
+	DataScopeDeptAndSub = int8(datascope.ScopeDeptAndSub) // 本部门及以下
+	DataScopeSelf       = int8(datascope.ScopeSelf)       // 仅本人
 )

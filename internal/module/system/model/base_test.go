@@ -57,6 +57,7 @@ func TestJoinModelsUseTenantID(t *testing.T) {
 		model.UserRole{},
 		model.UserPost{},
 		model.RoleMenu{},
+		model.RoleDept{},
 	}
 
 	for _, m := range models {
@@ -70,6 +71,26 @@ func TestJoinModelsUseTenantID(t *testing.T) {
 		}
 		if _, ok := s.FieldsByDBName["deleted_at"]; ok {
 			t.Errorf("%T 不应包含软删除字段（关联表不设软删除，变更由操作日志记录）", m)
+		}
+	}
+}
+
+// TestDataScopeEnumAligned 验证角色数据范围枚举对齐芋道 1–5（issue #5）：
+// 1 全部 / 2 自定义部门 / 3 本部门 / 4 本部门及以下 / 5 仅本人。
+func TestDataScopeEnumAligned(t *testing.T) {
+	cases := map[string]struct {
+		got  int8
+		want int8
+	}{
+		"全部数据":   {model.DataScopeAll, 1},
+		"自定义部门":  {model.DataScopeCustom, 2},
+		"本部门":    {model.DataScopeDept, 3},
+		"本部门及以下": {model.DataScopeDeptAndSub, 4},
+		"仅本人":    {model.DataScopeSelf, 5},
+	}
+	for name, tc := range cases {
+		if tc.got != tc.want {
+			t.Fatalf("%s 常量 = %d，期望 %d", name, tc.got, tc.want)
 		}
 	}
 }
