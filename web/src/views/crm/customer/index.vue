@@ -46,8 +46,8 @@
       </template>
     </ProTable>
 
-    <!-- 客户详情抽屉：基本信息 + 联系人 + 负责人历史 tab
-        （issue #9 tab 结构；issue #13 融入释放/转移入口与历史 tab） -->
+    <!-- 客户详情抽屉：基本信息 + 联系人 + 负责人历史 + 跟进记录 tab
+        （issue #9 tab 结构；issue #13 融入释放/转移入口与历史 tab；issue #12 加跟进记录 tab） -->
     <el-drawer v-model="detailVisible" :title="detail?.name || '客户详情'" size="900px">
       <el-tabs v-if="detail" v-model="detailTab">
         <el-tab-pane label="基本信息" name="info">
@@ -102,6 +102,26 @@
           </el-timeline>
           <el-empty v-else description="暂无负责人变更记录" :image-size="60" />
         </el-tab-pane>
+        <el-tab-pane label="跟进记录" name="follow-ups">
+          <ProTable
+            :columns="followUpColumns"
+            :form-items="followUpFormItems"
+            :search-items="followUpSearchItems"
+            :api="followUpApi"
+            :extra-query="followUpExtraQuery"
+            :default-form="followUpDefaultForm"
+            :before-submit="injectCustomerId"
+            perm-prefix="crm:follow-up"
+            title="跟进记录"
+          >
+            <template #cell-type="{ row }">
+              <el-tag size="small" :type="followUpTypeTag(row.type)">{{ followUpTypeLabel(row.type) }}</el-tag>
+            </template>
+            <template #cell-nextFollowTime="{ row }">
+              <span>{{ row.nextFollowTime ? formatTime(row.nextFollowTime) : '-' }}</span>
+            </template>
+          </ProTable>
+        </el-tab-pane>
       </el-tabs>
     </el-drawer>
 
@@ -149,6 +169,11 @@ import {
   createContact,
   updateContact,
   deleteContact,
+  pageFollowUps,
+  getFollowUp,
+  createFollowUp,
+  updateFollowUp,
+  deleteFollowUp,
 } from '@/api/crm'
 import { treeDepts, listSimpleUsers } from '@/api/system'
 import { useUserStore } from '@/stores/user'
@@ -165,6 +190,15 @@ const contactGenderOptions = [
   { label: '未知', value: 0 },
   { label: '男', value: 1 },
   { label: '女', value: 2 },
+]
+
+// 跟进类型对齐芋道字典语义：1 电话 / 2 拜访 / 3 微信 / 4 邮件 / 5 其他（issue #12）
+const followUpTypeOptions = [
+  { label: '电话', value: 1 },
+  { label: '拜访', value: 2 },
+  { label: '微信', value: 3 },
+  { label: '邮件', value: 4 },
+  { label: '其他', value: 5 },
 ]
 
 // 负责人历史操作类型（issue #13）：create 创建 / claim 认领 / release 释放 / transfer 转移。
@@ -187,6 +221,18 @@ function statusTagType(status: number) {
 
 function genderLabel(gender: number) {
   return dictLabel(contactGenderOptions, gender)
+}
+
+function followUpTypeLabel(type: number) {
+  return dictLabel(followUpTypeOptions, type)
+}
+
+function followUpTypeTag(type: number) {
+  if (type === 1) return 'primary'
+  if (type === 2) return 'success'
+  if (type === 3) return 'warning'
+  if (type === 4) return 'info'
+  return 'info'
 }
 
 function actionLabel(action: string) {
@@ -347,7 +393,7 @@ const contactDefaultForm = { gender: 0 }
 
 const contactExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
 
-// 新建联系人时注入所属客户（所属客户创建后不可漂移，更新接口不接受 customerId）。
+// 新建联系人/跟进时注入所属客户（所属客户创建后不可漂移，更新接口不接受 customerId）。
 function injectCustomerId(payload: any, mode: 'create' | 'update') {
   if (mode === 'create' && detail.value) {
     return { ...payload, customerId: detail.value.id }
@@ -361,6 +407,47 @@ const contactApi = {
   create: createContact,
   update: updateContact,
   remove: deleteContact,
+}
+
+// ---------- 跟进记录 tab（issue #12）：列表范围锁定当前客户，可见性跟随客户；
+// 新增跟进由后端同事务刷新客户 lastFollowTime，编辑/删除不回退 ----------
+const followUpColumns = [
+  { prop: 'type', label: '类型', width: 90, slot: true },
+  { prop: 'content', label: '内容', minWidth: 220 },
+  {
+    prop: 'nextFollowTime',
+    label: '下次跟进时间',
+    minWidth: 170,
+    slot: true,
+  },
+  {
+    prop: 'createTime',
+    label: '跟进时间',
+    minWidth: 170,
+    formatter: (row: any) => formatTime(row.createTime),
+  },
+]
+
+const followUpSearchItems = [
+  { prop: 'type', label: '类型', type: 'select', options: followUpTypeOptions },
+]
+
+const followUpFormItems = [
+  { prop: 'type', label: '类型', type: 'select', options: followUpTypeOptions },
+  { prop: 'content', label: '内容', required: true, type: 'textarea' },
+  { prop: 'nextFollowTime', label: '下次跟进时间', type: 'datetime' },
+]
+
+const followUpDefaultForm = { type: 5 }
+
+const followUpExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
+
+const followUpApi = {
+  page: pageFollowUps,
+  detail: getFollowUp,
+  create: createFollowUp,
+  update: updateFollowUp,
+  remove: deleteFollowUp,
 }
 
 function flattenDeptTree(nodes: any[], out: { label: string; value: number }[] = []) {
