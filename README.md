@@ -168,7 +168,7 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
 - `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
 - `make migrate-status`：查看每个版本的应用状态。
-- `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为指定版本，不执行 DDL。
+- `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为基线版本，不执行 DDL；后续版本必须走 `migrate up`。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
 
 迁移默认超时 30 分钟，可用 `go run ./cmd/migrate -timeout 0 up` 关闭超时（数据迁移或 backfill 建议显式放宽）。

@@ -35,7 +35,7 @@ func main() {
 
 	cmd := args[0]
 	if cmd == "create" {
-		if len(args) < 2 || args[1] == "" {
+		if len(args) != 2 || args[1] == "" {
 			fmt.Fprintln(os.Stderr, "用法: migrate create <name>")
 			os.Exit(2)
 		}
@@ -76,7 +76,7 @@ func main() {
 	case "status":
 		err = database.MigrateStatus(ctx, db)
 	case "stamp":
-		if len(args) < 2 {
+		if len(args) != 2 {
 			fmt.Fprintln(os.Stderr, "用法: migrate stamp <version>")
 			os.Exit(2)
 		}

@@ -93,6 +93,9 @@ func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
 	if !slices.Contains(versions, version) {
 		return fmt.Errorf("version %d is not an embedded migration (known versions: %v)", version, versions)
 	}
+	if baseline := versions[0]; version != baseline {
+		return fmt.Errorf("only the baseline version (%d) can be stamped; apply later versions with migrate up", baseline)
+	}
 
 	current, err := goose.EnsureDBVersionContext(ctx, db)
 	if err != nil {
