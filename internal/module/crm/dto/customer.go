@@ -42,3 +42,37 @@ type CustomerPageReq struct {
 	OwnerUserID int64  `form:"ownerUserId"`
 	OwnerDeptID int64  `form:"ownerDeptId"`
 }
+
+// ---------- 公海（issue #13，docs/crm-mvp-spec.md §4.2）----------
+
+// CustomerReleaseReq 释放客户到公海。reason 落 release_reason（可空）。
+type CustomerReleaseReq struct {
+	ID     int64  `json:"id" binding:"required"`
+	Reason string `json:"reason" binding:"max=255"`
+}
+
+// CustomerClaimReq 从公海认领客户到自己名下（认领人即新负责人）。
+type CustomerClaimReq struct {
+	ID int64 `json:"id" binding:"required"`
+}
+
+// CustomerTransferReq 转移客户给同租户其他用户。
+type CustomerTransferReq struct {
+	ID            int64 `json:"id" binding:"required"`
+	ToOwnerUserID int64 `json:"toOwnerUserId" binding:"required"`
+}
+
+// CustomerPoolPageReq 公海分页筛选：仅名称与状态；负责人筛选在公海无意义
+// （owner IS NULL），不提供。
+type CustomerPoolPageReq struct {
+	PageNo   int    `form:"pageNo"`
+	PageSize int    `form:"pageSize"`
+	Name     string `form:"name"`
+	Status   *int8  `form:"status"`
+}
+
+// OwnerHistoryPageReq 负责人历史分页（按客户，客户 ID 取路径参数）。
+type OwnerHistoryPageReq struct {
+	PageNo   int `form:"pageNo"`
+	PageSize int `form:"pageSize"`
+}

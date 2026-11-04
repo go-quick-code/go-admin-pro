@@ -23,9 +23,16 @@ func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc) *
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	customer := rg.Group("/crm/customer")
 	customer.GET("/page", h.requirePermission("crm:customer:query"), h.PageCustomers)
+	customer.GET("/pool/page", h.requirePermission("crm:customer:pool:view"), h.PagePoolCustomers)
 	customer.GET("/:id", h.requirePermission("crm:customer:query"), h.GetCustomer)
+	customer.GET("/:id/owner-history", h.requirePermission("crm:customer:query"), h.PageCustomerOwnerHistory)
 	customer.POST("", h.requirePermission("crm:customer:create"), h.CreateCustomer)
 	customer.PUT("", h.requirePermission("crm:customer:update"), h.UpdateCustomer)
+	// 释放/转移的权限在 service 内做「负责人本人 或 权限码」组合校验
+	//（issue #13）：负责人不持按钮码也可操作自己的客户。
+	customer.PUT("/release", h.ReleaseCustomer)
+	customer.PUT("/claim", h.requirePermission("crm:customer:claim"), h.ClaimCustomer)
+	customer.PUT("/transfer", h.TransferCustomer)
 	customer.DELETE("/:id", h.requirePermission("crm:customer:delete"), h.DeleteCustomer)
 
 	contact := rg.Group("/crm/contact")
@@ -34,4 +41,13 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	contact.POST("", h.requirePermission("crm:contact:create"), h.CreateContact)
 	contact.PUT("", h.requirePermission("crm:contact:update"), h.UpdateContact)
 	contact.DELETE("/:id", h.requirePermission("crm:contact:delete"), h.DeleteContact)
+
+	// 跟进（issue #12）：查询/新增挂按钮码；修改/删除在 service 内做
+	// 「创建人本人 或 权限码」组合校验（同释放/转移的装配方式），路由不挂中间件。
+	followUp := rg.Group("/crm/follow-up")
+	followUp.GET("/page", h.requirePermission("crm:follow-up:query"), h.PageFollowUps)
+	followUp.GET("/:id", h.requirePermission("crm:follow-up:query"), h.GetFollowUp)
+	followUp.POST("", h.requirePermission("crm:follow-up:create"), h.CreateFollowUp)
+	followUp.PUT("", h.UpdateFollowUp)
+	followUp.DELETE("/:id", h.DeleteFollowUp)
 }

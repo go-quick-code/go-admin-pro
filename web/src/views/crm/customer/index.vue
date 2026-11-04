@@ -21,6 +21,23 @@
       </template>
       <template #actions="{ row }">
         <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
+        <!-- 公海纵切（issue #13）：负责人本人或持对应权限码可释放/转移。 -->
+        <el-button
+          v-if="userStore.hasPerm('crm:customer:release')"
+          link
+          type="warning"
+          @click.stop="handleRelease(row)"
+        >
+          释放
+        </el-button>
+        <el-button
+          v-if="userStore.hasPerm('crm:customer:transfer')"
+          link
+          type="primary"
+          @click.stop="openTransfer(row)"
+        >
+          转移
+        </el-button>
       </template>
       <template #form-ownerUserId="{ form }">
         <el-select v-model="form.ownerUserId" clearable filterable style="width: 100%" placeholder="缺省为当前登录用户">
@@ -29,7 +46,8 @@
       </template>
     </ProTable>
 
-    <!-- 客户详情抽屉：基本信息 + 联系人 tab（issue #9，联系人可见性跟随客户） -->
+    <!-- 客户详情抽屉：基本信息 + 联系人 + 负责人历史 + 跟进记录 tab
+        （issue #9 tab 结构；issue #13 融入释放/转移入口与历史 tab；issue #12 加跟进记录 tab） -->
     <el-drawer v-model="detailVisible" :title="detail?.name || '客户详情'" size="900px">
       <el-tabs v-if="detail" v-model="detailTab">
         <el-tab-pane label="基本信息" name="info">
@@ -68,13 +86,73 @@
             <template #cell-gender="{ row }">{{ genderLabel(row.gender) }}</template>
           </ProTable>
         </el-tab-pane>
+        <el-tab-pane label="负责人历史" name="owner-history">
+          <el-timeline v-if="history.length" class="history-list">
+            <el-timeline-item
+              v-for="h in history"
+              :key="h.id"
+              :timestamp="formatTime(h.createTime)"
+              :type="actionTagType(h.action)"
+            >
+              <el-tag size="small" :type="actionTagType(h.action)" class="history-action">
+                {{ actionLabel(h.action) }}
+              </el-tag>
+              <span class="history-text">{{ historyText(h) }}</span>
+            </el-timeline-item>
+          </el-timeline>
+          <el-empty v-else description="暂无负责人变更记录" :image-size="60" />
+        </el-tab-pane>
+        <el-tab-pane label="跟进记录" name="follow-ups">
+          <ProTable
+            :columns="followUpColumns"
+            :form-items="followUpFormItems"
+            :search-items="followUpSearchItems"
+            :api="followUpApi"
+            :extra-query="followUpExtraQuery"
+            :default-form="followUpDefaultForm"
+            :before-submit="injectCustomerId"
+            perm-prefix="crm:follow-up"
+            title="跟进记录"
+          >
+            <template #cell-type="{ row }">
+              <el-tag size="small" :type="followUpTypeTag(row.type)">{{ followUpTypeLabel(row.type) }}</el-tag>
+            </template>
+            <template #cell-nextFollowTime="{ row }">
+              <span>{{ row.nextFollowTime ? formatTime(row.nextFollowTime) : '-' }}</span>
+            </template>
+          </ProTable>
+        </el-tab-pane>
       </el-tabs>
     </el-drawer>
+
+    <!-- 转移对话框：选择同租户其他用户作为新负责人（issue #13）。 -->
+    <el-dialog v-model="transferVisible" title="转移客户" width="420px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="客户">
+          <span>{{ transferRow?.name }}</span>
+        </el-form-item>
+        <el-form-item label="新负责人">
+          <el-select v-model="transferTo" filterable style="width: 100%" placeholder="请选择新负责人">
+            <el-option
+              v-for="u in users.filter((u: any) => u.id !== transferRow?.ownerUserId)"
+              :key="u.id"
+              :label="u.nickname"
+              :value="u.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="transferVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!transferTo" @click="confirmTransfer">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { formatTime, dictLabel } from '@/utils/format'
 import {
@@ -83,13 +161,22 @@ import {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  releaseCustomer,
+  transferCustomer,
+  pageCustomerOwnerHistory,
   pageContacts,
   getContact,
   createContact,
   updateContact,
   deleteContact,
+  pageFollowUps,
+  getFollowUp,
+  createFollowUp,
+  updateFollowUp,
+  deleteFollowUp,
 } from '@/api/crm'
 import { treeDepts, listSimpleUsers } from '@/api/system'
+import { useUserStore } from '@/stores/user'
 
 // 客户状态对齐规格：1 潜在 / 2 活跃 / 3 流失（docs/crm-mvp-spec.md §3）
 const customerStatusOptions = [
@@ -103,6 +190,23 @@ const contactGenderOptions = [
   { label: '未知', value: 0 },
   { label: '男', value: 1 },
   { label: '女', value: 2 },
+]
+
+// 跟进类型对齐芋道字典语义：1 电话 / 2 拜访 / 3 微信 / 4 邮件 / 5 其他（issue #12）
+const followUpTypeOptions = [
+  { label: '电话', value: 1 },
+  { label: '拜访', value: 2 },
+  { label: '微信', value: 3 },
+  { label: '邮件', value: 4 },
+  { label: '其他', value: 5 },
+]
+
+// 负责人历史操作类型（issue #13）：create 创建 / claim 认领 / release 释放 / transfer 转移。
+const actionOptions = [
+  { label: '创建', value: 'create' },
+  { label: '认领', value: 'claim' },
+  { label: '释放', value: 'release' },
+  { label: '转移', value: 'transfer' },
 ]
 
 function statusLabel(status: number) {
@@ -119,7 +223,38 @@ function genderLabel(gender: number) {
   return dictLabel(contactGenderOptions, gender)
 }
 
+function followUpTypeLabel(type: number) {
+  return dictLabel(followUpTypeOptions, type)
+}
+
+function followUpTypeTag(type: number) {
+  if (type === 1) return 'primary'
+  if (type === 2) return 'success'
+  if (type === 3) return 'warning'
+  if (type === 4) return 'info'
+  return 'info'
+}
+
+function actionLabel(action: string) {
+  return dictLabel(actionOptions, action)
+}
+
+function actionTagType(action: string) {
+  if (action === 'claim') return 'success'
+  if (action === 'release') return 'warning'
+  if (action === 'create') return 'primary'
+  return 'info'
+}
+
+function historyText(h: any) {
+  const from = h.fromOwnerUserName || '公海'
+  const to = h.toOwnerUserName || '公海'
+  if (h.action === 'create') return `${to} 成为首任负责人`
+  return `${from} → ${to}`
+}
+
 const tableRef = ref()
+const userStore = useUserStore()
 const users = ref<any[]>([])
 const deptOptions = ref<{ label: string; value: number }[]>([])
 
@@ -179,11 +314,53 @@ const api = {
 const detail = ref<any>(null)
 const detailVisible = ref(false)
 const detailTab = ref('info')
+const history = ref<any[]>([])
 
 async function openDetail(row: any) {
   detail.value = await getCustomer(row.id)
   detailTab.value = 'info'
   detailVisible.value = true
+  // 负责人历史（issue #13）：创建/认领/释放/转移全记录，新→旧。
+  history.value = await pageCustomerOwnerHistory(row.id, { pageNo: 1, pageSize: 20 })
+}
+
+// ---------- 公海操作（issue #13）：释放到公海 / 转移给同租户其他用户 ----------
+
+// 释放到公海：填写释放原因（可空），确认后调用释放接口。
+async function handleRelease(row: any) {
+  const reason = await ElMessageBox.prompt(
+    `将「${row.name}」释放到公海？释放后所有人可通过公海认领。`,
+    '释放客户',
+    {
+      type: 'warning',
+      inputPlaceholder: '释放原因（可空，最多 255 字）',
+      inputValidator: (v: string) => !v || v.length <= 255 || '释放原因最多 255 字',
+    },
+  )
+    .then(({ value }) => value || '')
+    .catch(() => null)
+  if (reason === null) return
+  await releaseCustomer(row.id, reason)
+  ElMessage.success('已释放到公海')
+  tableRef.value?.reload()
+}
+
+const transferVisible = ref(false)
+const transferRow = ref<any>(null)
+const transferTo = ref<number>()
+
+function openTransfer(row: any) {
+  transferRow.value = row
+  transferTo.value = undefined
+  transferVisible.value = true
+}
+
+async function confirmTransfer() {
+  if (!transferTo.value || !transferRow.value) return
+  await transferCustomer(transferRow.value.id, transferTo.value)
+  ElMessage.success('转移成功')
+  transferVisible.value = false
+  tableRef.value?.reload()
 }
 
 // ---------- 联系人 tab（issue #9）：列表范围锁定当前客户，可见性跟随客户 ----------
@@ -216,7 +393,7 @@ const contactDefaultForm = { gender: 0 }
 
 const contactExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
 
-// 新建联系人时注入所属客户（所属客户创建后不可漂移，更新接口不接受 customerId）。
+// 新建联系人/跟进时注入所属客户（所属客户创建后不可漂移，更新接口不接受 customerId）。
 function injectCustomerId(payload: any, mode: 'create' | 'update') {
   if (mode === 'create' && detail.value) {
     return { ...payload, customerId: detail.value.id }
@@ -230,6 +407,47 @@ const contactApi = {
   create: createContact,
   update: updateContact,
   remove: deleteContact,
+}
+
+// ---------- 跟进记录 tab（issue #12）：列表范围锁定当前客户，可见性跟随客户；
+// 新增跟进由后端同事务刷新客户 lastFollowTime，编辑/删除不回退 ----------
+const followUpColumns = [
+  { prop: 'type', label: '类型', width: 90, slot: true },
+  { prop: 'content', label: '内容', minWidth: 220 },
+  {
+    prop: 'nextFollowTime',
+    label: '下次跟进时间',
+    minWidth: 170,
+    slot: true,
+  },
+  {
+    prop: 'createTime',
+    label: '跟进时间',
+    minWidth: 170,
+    formatter: (row: any) => formatTime(row.createTime),
+  },
+]
+
+const followUpSearchItems = [
+  { prop: 'type', label: '类型', type: 'select', options: followUpTypeOptions },
+]
+
+const followUpFormItems = [
+  { prop: 'type', label: '类型', type: 'select', options: followUpTypeOptions },
+  { prop: 'content', label: '内容', required: true, type: 'textarea' },
+  { prop: 'nextFollowTime', label: '下次跟进时间', type: 'datetime' },
+]
+
+const followUpDefaultForm = { type: 5 }
+
+const followUpExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
+
+const followUpApi = {
+  page: pageFollowUps,
+  detail: getFollowUp,
+  create: createFollowUp,
+  update: updateFollowUp,
+  remove: deleteFollowUp,
 }
 
 function flattenDeptTree(nodes: any[], out: { label: string; value: number }[] = []) {
@@ -246,3 +464,15 @@ onMounted(async () => {
   users.value = simpleUsers
 })
 </script>
+
+<style scoped>
+.history-list {
+  padding-left: 4px;
+}
+.history-action {
+  margin-right: 8px;
+}
+.history-text {
+  font-size: 13px;
+}
+</style>

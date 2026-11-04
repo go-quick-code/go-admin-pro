@@ -162,17 +162,30 @@ func seedMenus(db *gorm.DB) error {
 		btn(3001, 300, "生成代码", "infra:codegen:generate", 1),
 
 		// CRM（issue #8 起逐步落地）：菜单挂在动态路由下，组件路径对应 web/src/views。
+		// 联系人（issue #9）：无独立页面，作为客户详情的 tab 呈现，
+		// 按钮权限码挂客户管理菜单下（可见性也跟随客户的数据范围）。
 		dir(400, "CRM", "/crm", "Suitcase", 40),
 		menu(401, 400, "客户管理", "customer", "crm/customer/index", "crm:customer:query", "Avatar", 1),
 		btn(4011, 401, "客户新增", "crm:customer:create", 1),
 		btn(4012, 401, "客户修改", "crm:customer:update", 2),
 		btn(4013, 401, "客户删除", "crm:customer:delete", 3),
-		// 联系人（issue #9）：无独立页面，作为客户详情的 tab 呈现，
-		// 按钮权限码挂客户管理菜单下（可见性也跟随客户的数据范围）。
 		btn(4014, 401, "联系人查询", "crm:contact:query", 4),
 		btn(4015, 401, "联系人新增", "crm:contact:create", 5),
 		btn(4016, 401, "联系人修改", "crm:contact:update", 6),
 		btn(4017, 401, "联系人删除", "crm:contact:delete", 7),
+		// 公海纵切（issue #13）：公海页面 + 认领按钮，客户管理下加释放/转移按钮。
+		// 按钮段让位 #9 的联系人 4014–4017，改用 4030 段（合并 #13 时重排）。
+		btn(4030, 401, "客户释放", "crm:customer:release", 8),
+		btn(4031, 401, "客户转移", "crm:customer:transfer", 9),
+		// 跟进记录（issue #12）：无独立页面，作为客户详情的 tab 呈现，
+		// 按钮权限码挂客户管理菜单下（可见性跟随客户的数据范围）；
+		// ID 从 4040 起（4014–4017 联系人、4030/4031 释放/转移、402/4021 公海已占用）。
+		btn(4040, 401, "跟进查询", "crm:follow-up:query", 10),
+		btn(4041, 401, "跟进新增", "crm:follow-up:create", 11),
+		btn(4042, 401, "跟进修改", "crm:follow-up:update", 12),
+		btn(4043, 401, "跟进删除", "crm:follow-up:delete", 13),
+		menu(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
+		btn(4021, 402, "客户认领", "crm:customer:claim", 1),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err
