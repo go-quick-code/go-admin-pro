@@ -65,3 +65,26 @@ func TestDefaultTestDSN(t *testing.T) {
 		t.Fatalf("DefaultTestDSN 指向 %q, want %q", name, testutil.TestDatabaseName)
 	}
 }
+
+// TestIsTestDatabaseName 守住防误伤护栏的边界：
+// 只放行基准测试库与其下划线后缀变体，其余一律拒绝。
+func TestIsTestDatabaseName(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"go_admin_pro_test", true},
+		{"go_admin_pro_test_t6", true},
+		{"go_admin_pro_test_ci_2", true},
+		{"go_admin_pro", false},
+		{"go_admin_pro_testx", false}, // 无下划线分隔的后缀不算变体
+		{"go_admin_pro_production", false},
+		{"prefix_go_admin_pro_test", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := testutil.IsTestDatabaseName(tc.name); got != tc.want {
+			t.Fatalf("IsTestDatabaseName(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

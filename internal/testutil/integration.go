@@ -7,9 +7,11 @@
 //	status, api := env.Request(t, http.MethodGet, "/system/user/page?pageNo=1&pageSize=10", token, nil)
 //
 // 环境构成：
-//   - DSN 取 GAP_TEST_DATABASE_DSN（缺省 DefaultTestDSN），且必须指向独立测试库
-//     go_admin_pro_test，其他库名直接 Fatal；刻意不复用应用的 GAP_DATABASE_DSN，
-//     避免测试专用 DSN 通过 config.Load 泄漏进其他包的测试；
+//   - DSN 取 GAP_TEST_DATABASE_DSN（缺省 DefaultTestDSN），且必须指向独立测试库：
+//     库名为 go_admin_pro_test，或其下划线后缀变体（如 go_admin_pro_test_t6，
+//     供不同工单的工作树并行跑测试），其他库名直接 Fatal；
+//     刻意不复用应用的 GAP_DATABASE_DSN，避免测试专用 DSN 通过 config.Load
+//     泄漏进其他包的测试；
 //   - 目标库不存在时自动 CREATE DATABASE，随后执行 goose 迁移并清空全部业务表，
 //     再由 internal/app.New 完成生产装配（租户插件、seed、JWT/权限/租户中间件、真实路由）；
 //   - httptest.Server 挂在装配出的 gin.Engine 上，测试通过 HTTP 契约访问 /admin-api。
@@ -67,8 +69,9 @@ func NewIntegrationEnv(tb testing.TB) *IntegrationEnv {
 	if err != nil {
 		tb.Fatalf("解析测试 DSN（GAP_DATABASE_DSN）: %v", err)
 	}
-	if name != TestDatabaseName {
-		tb.Fatalf("集成测试拒绝连接数据库 %q：必须使用独立测试库 %q（用例间会清空数据，防止误伤开发库）", name, TestDatabaseName)
+	if !IsTestDatabaseName(name) {
+		tb.Fatalf("集成测试拒绝连接数据库 %q：必须使用独立测试库（名称为 %q 或其下划线后缀变体，如 %q）；用例间会清空数据，防止误伤开发库",
+			name, TestDatabaseName, TestDatabaseName+"_t6")
 	}
 
 	ensureTestDatabase(tb, dsn)
@@ -220,9 +223,18 @@ func loadConfig(tb testing.TB) *config.Config {
 }
 
 // ensureTestDatabase 在目标库不存在时自动创建（幂等）。
+// 目标库取 DSN 里的库名（守卫已确认是测试库命名），不是基准名常量：
+// 后缀变体（如 go_admin_pro_test_t6）要建各自的库。
 func ensureTestDatabase(tb testing.TB, dsn string) {
 	tb.Helper()
 
+	name, err := ParseDSNDatabase(dsn)
+	if err != nil {
+		tb.Fatalf("解析测试 DSN: %v", err)
+	}
+	if !safeTableName.MatchString(name) {
+		tb.Fatalf("测试库名 %q 含非法字符", name)
+	}
 	serverDSN, err := ServerDSN(dsn)
 	if err != nil {
 		tb.Fatalf("解析测试 DSN: %v", err)
@@ -235,9 +247,9 @@ func ensureTestDatabase(tb testing.TB, dsn string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	stmt := "CREATE DATABASE IF NOT EXISTS `" + TestDatabaseName + "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+	stmt := "CREATE DATABASE IF NOT EXISTS `" + name + "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		tb.Fatalf("创建测试库 %s: %v", TestDatabaseName, err)
+		tb.Fatalf("创建测试库 %s: %v", name, err)
 	}
 }
 

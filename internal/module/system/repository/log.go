@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/system/model"
+	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 )
 
 type LoginLogFilter struct {
@@ -83,10 +84,11 @@ func (r *Repository) ClearOperateLogs(ctx context.Context) error {
 	return r.db.WithContext(ctx).Where("1 = 1").Delete(&model.OperateLog{}).Error
 }
 
-// CleanLogsBefore 清理指定时间之前的日志，供定时任务使用。
+// CleanLogsBefore 清理指定时间之前的日志，供 cleanLogs 定时任务使用。
+// 这是系统级维护操作，需要跨租户清理，这里显式 tenant.Skip。
 func (r *Repository) CleanLogsBefore(ctx context.Context, before time.Time) error {
-	if err := r.db.WithContext(ctx).Where("login_time < ?", before).Delete(&model.LoginLog{}).Error; err != nil {
+	if err := tenant.Skip(r.db.WithContext(ctx)).Where("login_time < ?", before).Delete(&model.LoginLog{}).Error; err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Where("operate_time < ?", before).Delete(&model.OperateLog{}).Error
+	return tenant.Skip(r.db.WithContext(ctx)).Where("operate_time < ?", before).Delete(&model.OperateLog{}).Error
 }

@@ -52,19 +52,19 @@ func (s *Service) CreateTenant(ctx context.Context, req *dto.TenantCreateReq) er
 		AccountCount:  req.AccountCount,
 		Remark:        req.Remark,
 	}
-	if err := s.repo.CreateTenant(ctx, t); err != nil {
-		return err
-	}
-	if err := s.bootstrapTenant(ctx, t.ID); err != nil {
-		// 初始化失败时回滚租户，避免留下空壳租户。
-		_ = s.repo.DeleteTenant(ctx, t.ID)
-		return err
-	}
-	return nil
+	// 租户行与引导数据在同一事务里落库：引导失败整体回滚，
+	// 不会留下空壳租户或半套初始化数据（旧实现用补偿删除，失败时会有残留）。
+	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.CreateTenant(ctx, t); err != nil {
+			return err
+		}
+		return s.bootstrapTenant(ctx, tx, t.ID)
+	})
 }
 
 // bootstrapTenant 为新租户创建默认部门、角色与管理员账号。
-func (s *Service) bootstrapTenant(ctx context.Context, tenantID int64) error {
+// repo 参数是调用方事务里的 DAL：引导写入必须全部走它，才能一起回滚。
+func (s *Service) bootstrapTenant(ctx context.Context, repo *repository.Repository, tenantID int64) error {
 	tctx := tenant.WithTenantID(ctx, tenantID)
 
 	dept := &model.Dept{
@@ -74,7 +74,7 @@ func (s *Service) bootstrapTenant(ctx context.Context, tenantID int64) error {
 		Sort:     0,
 		Status:   model.StatusEnable,
 	}
-	if err := s.repo.CreateDept(tctx, dept); err != nil {
+	if err := repo.CreateDept(tctx, dept); err != nil {
 		return err
 	}
 
@@ -88,7 +88,7 @@ func (s *Service) bootstrapTenant(ctx context.Context, tenantID int64) error {
 		Type:      1,
 		Remark:    "租户内置超级管理员",
 	}
-	if err := s.repo.CreateRole(tctx, role); err != nil {
+	if err := repo.CreateRole(tctx, role); err != nil {
 		return err
 	}
 
@@ -105,10 +105,10 @@ func (s *Service) bootstrapTenant(ctx context.Context, tenantID int64) error {
 		Status:   model.StatusEnable,
 		Remark:   fmt.Sprintf("由租户 %d 初始化自动创建", tenantID),
 	}
-	if err := s.repo.CreateUser(tctx, user); err != nil {
+	if err := repo.CreateUser(tctx, user); err != nil {
 		return err
 	}
-	return s.repo.ReplaceUserRoles(tctx, user.ID, []int64{role.ID})
+	return repo.ReplaceUserRoles(tctx, user.ID, []int64{role.ID})
 }
 
 func (s *Service) UpdateTenant(ctx context.Context, req *dto.TenantUpdateReq) error {

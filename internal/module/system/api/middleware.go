@@ -42,6 +42,12 @@ func (h *Handler) Auth() gin.HandlerFunc {
 			response.Abort(c, xerr.Unauthorized("登录状态已失效，请重新登录"))
 			return
 		}
+		// fail-closed：没有合法租户的 token 无法提供租户上下文，
+		// 直接拒绝，避免带着空租户进入业务链路。
+		if claims.TenantID <= 0 {
+			response.Abort(c, xerr.Unauthorized("登录状态已失效，请重新登录"))
+			return
+		}
 
 		ctx := tenant.WithTenantID(c.Request.Context(), claims.TenantID)
 		ctx = authn.With(ctx, authn.Principal{
