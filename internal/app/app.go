@@ -55,6 +55,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		}
 	}
 
+	if err := db.Use(database.NewAuditPlugin()); err != nil {
+		return nil, fmt.Errorf("install audit plugin: %w", err)
+	}
+
 	if cfg.Database.Seed {
 		if err := seed.Run(db); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
