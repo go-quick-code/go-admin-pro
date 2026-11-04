@@ -14,8 +14,10 @@
 // 需要往返的类型必须同时实现 encoding.TextMarshaler 与 encoding.TextUnmarshaler；
 // 只实现 UnmarshalText 的类型在导出时返回错误。
 //
-// Import 按单元格原始值解析：百分比 50% 读作 0.5，日期读作 Excel 序列号；
-// Export 在内存中生成整个文件，行数由调用方控制，大结果集应分批导出。
+// Import 按单元格原始值解析：百分比 50% 读作 0.5，日期读作 Excel 序列号。
+// Export 把 time.Time 写成文本（DefaultTimeLayout），不是 Excel 原生日期；
+// 文件在内存中整体生成，行数由调用方控制，大结果集应分批导出。
+// Export 拒绝 NaN、±Inf 浮点值，以及超过 32767 个 UTF-16 code unit 的文本。
 package excel
 
 import (
