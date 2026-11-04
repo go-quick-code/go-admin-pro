@@ -41,6 +41,17 @@ func (s *Service) DeptNames(ctx context.Context, deptIDs []int64) (map[int64]str
 	return names, nil
 }
 
+// UserHasPermission 判断用户是否持有指定权限码（super_admin 以 "*" 通配）。
+// 复用 Permissions 的角色/菜单解析与缓存，与 RequirePermission 中间件
+// 同一真值来源；crm 公海释放/转移的「负责人本人 或 权限码」组合校验用（issue #13）。
+func (s *Service) UserHasPermission(ctx context.Context, userID int64, permission string) (bool, error) {
+	_, codes, err := s.Permissions(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return HasPermission(codes, permission), nil
+}
+
 // ListSimpleUsers 返回启用用户的精简列表（表单选项用，与角色/岗位 simple-list 同位）。
 func (s *Service) ListSimpleUsers(ctx context.Context) ([]model.SimpleUser, error) {
 	return s.repo.ListSimpleUsers(ctx)

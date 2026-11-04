@@ -27,6 +27,9 @@ type SystemGateway interface {
 	UserNicknames(ctx context.Context, ids []int64) (map[int64]string, error)
 	// DeptNames 批量返回部门名称。
 	DeptNames(ctx context.Context, ids []int64) (map[int64]string, error)
+	// UserHasPermission 判断用户是否持有指定权限码（super_admin 以 "*" 通配）。
+	// 公海释放/转移的「负责人本人 或 权限码」组合校验使用（issue #13）。
+	UserHasPermission(ctx context.Context, userID int64, permission string) (bool, error)
 }
 
 // Service 汇聚 crm 模块的业务能力。
@@ -72,6 +75,9 @@ func (s *Service) ListCustomers(ctx context.Context, req *dto.CustomerPageReq) (
 		Status:      req.Status,
 		OwnerUserID: req.OwnerUserID,
 		OwnerDeptID: req.OwnerDeptID,
+		// 普通客户列表排除公海客户（owner IS NULL）：公海在独立页面按
+		// crm:customer:pool:view 展示（issue #13）。
+		ExcludePool: true,
 	}
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
@@ -151,7 +157,18 @@ func (s *Service) CreateCustomer(ctx context.Context, req *dto.CustomerCreateReq
 			return err
 		}
 		c.CustomerNo = FormatCustomerNo(dateKey, seq)
-		return tx.CreateCustomer(ctx, c)
+		if err := tx.CreateCustomer(ctx, c); err != nil {
+			return err
+		}
+		// 规格 §4.1：负责人变更写历史；创建即首任归属，落 create 行。
+		return tx.CreateOwnerHistory(ctx, &model.CustomerOwnerHistory{
+			TenantID:       currentTenantID(ctx),
+			CustomerID:     c.ID,
+			Action:         model.OwnerHistoryCreate,
+			ToOwnerUserID:  ownerID,
+			ToOwnerDeptID:  deptID,
+			OperatorUserID: CurrentUserID(ctx),
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -161,7 +178,9 @@ func (s *Service) CreateCustomer(ctx context.Context, req *dto.CustomerCreateReq
 }
 
 // UpdateCustomer 修改客户：数据范围外一律 404；编号不可改；ownerUserId
-// 传 0 保持现负责人，传非 0 值重落部门快照。
+// 传 0 保持现负责人，传非 0 值视为一次负责人转移（规格 §4.1：负责人变更写
+// 历史，issue #13）——走条件更新 + 历史同事务，防并发覆盖；公海客户不能在
+// 编辑里直接指定负责人，获取负责人必须走认领接口（受认领上限与互斥约束）。
 func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq) error {
 	c, err := s.findVisibleCustomer(ctx, req.ID)
 	if err != nil {
@@ -173,13 +192,39 @@ func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq
 		}
 		c.Status = *req.Status
 	}
+	if c.OwnerUserID == 0 && req.OwnerUserID > 0 {
+		return xerr.BadRequest("公海客户请先认领，再修改负责人")
+	}
 	if req.OwnerUserID > 0 && req.OwnerUserID != c.OwnerUserID {
-		deptID, err := s.ownerDeptSnapshot(ctx, req.OwnerUserID)
+		newDept, err := s.ownerDeptSnapshot(ctx, req.OwnerUserID)
+		if err != nil {
+			return err
+		}
+		fromOwner, fromDept := c.OwnerUserID, c.OwnerDeptID
+		err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+			rows, err := tx.TransferCustomerOwner(ctx, c.ID, fromOwner, req.OwnerUserID, newDept)
+			if err != nil {
+				return err
+			}
+			if rows == 0 {
+				return xerr.Conflict("客户负责人已变更，请刷新后重试")
+			}
+			return tx.CreateOwnerHistory(ctx, &model.CustomerOwnerHistory{
+				TenantID:        currentTenantID(ctx),
+				CustomerID:      c.ID,
+				Action:          model.OwnerHistoryTransfer,
+				FromOwnerUserID: fromOwner,
+				FromOwnerDeptID: fromDept,
+				ToOwnerUserID:   req.OwnerUserID,
+				ToOwnerDeptID:   newDept,
+				OperatorUserID:  CurrentUserID(ctx),
+			})
+		})
 		if err != nil {
 			return err
 		}
 		c.OwnerUserID = req.OwnerUserID
-		c.OwnerDeptID = deptID
+		c.OwnerDeptID = newDept
 	}
 	c.Name = req.Name
 	c.Industry = req.Industry
