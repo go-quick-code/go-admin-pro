@@ -37,6 +37,9 @@ func TestExportRejectsNonFiniteFloats(t *testing.T) {
 			if !strings.Contains(err.Error(), "第 2 行") || !strings.Contains(err.Error(), "["+tc.wantCol+"]") {
 				t.Fatalf("error = %v, want row 2 and column %s", err, tc.wantCol)
 			}
+			if !strings.Contains(err.Error(), "需为有限数字") {
+				t.Fatalf("error = %v, want expected form hint 需为有限数字", err)
+			}
 		})
 	}
 }
@@ -168,4 +171,102 @@ func TestExportRejectsLongTextMarshaler(t *testing.T) {
 	if !strings.Contains(err.Error(), "第 2 行") || !strings.Contains(err.Error(), "[长文本]") {
 		t.Fatalf("error = %v, want row 2 and column 长文本", err)
 	}
+}
+
+// namedNote 与 namedRate 模拟 Formatter 返回的命名类型。excelize 对未知类型走
+// fmt.Sprint 分支，导出层必须在写入前完成长度与有限性校验。
+type namedNote string
+
+type namedRate float64
+
+func TestExportRejectsLongNamedString(t *testing.T) {
+	_, err := excel.Export([]stringSafetyRow{{Name: "甲"}}, excel.ExportOptions{
+		Formatters: map[string]excel.Formatter{
+			"名称": func(any) (any, error) { return namedNote(strings.Repeat("x", 40000)), nil },
+		},
+	})
+	if err == nil {
+		t.Fatal("Export succeeded, want long named string rejection")
+	}
+	if !strings.Contains(err.Error(), "第 2 行") || !strings.Contains(err.Error(), "[名称]") {
+		t.Fatalf("error = %v, want row 2 and column 名称", err)
+	}
+	if !strings.Contains(err.Error(), "超过 Excel 单元格上限") {
+		t.Fatalf("error = %v, want cell length limit message", err)
+	}
+}
+
+func TestExportAcceptsShortNamedString(t *testing.T) {
+	data, err := excel.Export([]stringSafetyRow{{Name: "甲"}}, excel.ExportOptions{
+		Formatters: map[string]excel.Formatter{
+			"名称": func(any) (any, error) { return namedNote("短文本"), nil },
+		},
+	})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	got := openExport(t, data, "数据")
+	if got[1][0] != "短文本" {
+		t.Fatalf("cell = %q, want 短文本", got[1][0])
+	}
+}
+
+func TestExportRejectsNonFiniteNamedFloat(t *testing.T) {
+	cases := []struct {
+		name  string
+		value namedRate
+	}{
+		{"NaN", namedRate(math.NaN())},
+		{"+Inf", namedRate(math.Inf(1))},
+		{"-Inf", namedRate(math.Inf(-1))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := excel.Export([]floatSafetyRow{{Name: "甲"}}, excel.ExportOptions{
+				Formatters: map[string]excel.Formatter{
+					"评分": func(any) (any, error) { return tc.value, nil },
+				},
+			})
+			if err == nil {
+				t.Fatal("Export succeeded, want non-finite named float rejection")
+			}
+			if !strings.Contains(err.Error(), "第 2 行") || !strings.Contains(err.Error(), "[评分]") {
+				t.Fatalf("error = %v, want row 2 and column 评分", err)
+			}
+			if !strings.Contains(err.Error(), "非有限浮点数") {
+				t.Fatalf("error = %v, want non-finite float message", err)
+			}
+		})
+	}
+}
+
+func TestExportByteSliceLengthLimit(t *testing.T) {
+	t.Run("long []byte fails", func(t *testing.T) {
+		_, err := excel.Export([]stringSafetyRow{{Name: "甲"}}, excel.ExportOptions{
+			Formatters: map[string]excel.Formatter{
+				"名称": func(any) (any, error) { return []byte(strings.Repeat("b", 40000)), nil },
+			},
+		})
+		if err == nil {
+			t.Fatal("Export succeeded, want long []byte rejection")
+		}
+		if !strings.Contains(err.Error(), "第 2 行") || !strings.Contains(err.Error(), "[名称]") {
+			t.Fatalf("error = %v, want row 2 and column 名称", err)
+		}
+	})
+
+	t.Run("short []byte succeeds", func(t *testing.T) {
+		data, err := excel.Export([]stringSafetyRow{{Name: "甲"}}, excel.ExportOptions{
+			Formatters: map[string]excel.Formatter{
+				"名称": func(any) (any, error) { return []byte("字节"), nil },
+			},
+		})
+		if err != nil {
+			t.Fatalf("Export: %v", err)
+		}
+		got := openExport(t, data, "数据")
+		if got[1][0] != "字节" {
+			t.Fatalf("cell = %q, want 字节", got[1][0])
+		}
+	})
 }

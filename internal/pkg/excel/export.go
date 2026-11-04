@@ -261,31 +261,66 @@ func normalizeCell(value any) (any, error) {
 		if v.IsZero() {
 			return "", nil
 		}
-		return checkCellText(v.Format(DefaultTimeLayout))
+		return checkCellTextLength(v.Format(DefaultTimeLayout))
 	case encoding.TextMarshaler:
 		text, err := v.MarshalText()
 		if err != nil {
 			return nil, fmt.Errorf("值转换失败：%w", err)
 		}
-		return checkCellText(string(text))
+		return checkCellTextLength(string(text))
 	case string:
-		return checkCellText(v)
+		return checkCellTextLength(v)
 	case float32:
-		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
-			return nil, fmt.Errorf("非有限浮点数 %v 无法导出", v)
+		if err := checkFiniteFloat(float64(v)); err != nil {
+			return nil, err
 		}
 		return v, nil
 	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return nil, fmt.Errorf("非有限浮点数 %v 无法导出", v)
+		if err := checkFiniteFloat(v); err != nil {
+			return nil, err
 		}
 		return v, nil
+	}
+	// 命名类型（type Note string、type Rate float64）与 []byte 不会匹配上面的
+	// 内置类型分支，excelize 会用 fmt.Sprint 原样写入，必须在这里补齐校验。
+	return normalizeReflectValue(value)
+}
+
+// normalizeReflectValue 按底层 Kind 处理命名类型与字节切片，避免绕过单元格校验。
+func normalizeReflectValue(value any) (any, error) {
+	rv := reflect.ValueOf(value)
+	for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return "", nil
+		}
+		rv = rv.Elem()
+	}
+	switch rv.Kind() {
+	case reflect.String:
+		return checkCellTextLength(rv.String())
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return checkCellTextLength(string(rv.Bytes()))
+		}
+	case reflect.Float32, reflect.Float64:
+		if err := checkFiniteFloat(rv.Float()); err != nil {
+			return nil, err
+		}
+		return rv.Float(), nil
 	}
 	return value, nil
 }
 
-// checkCellText 校验文本长度不超过 Excel 单元格上限。
-func checkCellText(text string) (string, error) {
+// checkFiniteFloat 拒绝无法写入 Excel 数字单元格的 NaN 与 ±Inf。
+func checkFiniteFloat(v float64) error {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return fmt.Errorf("非有限浮点数 %v 无法导出（需为有限数字）", v)
+	}
+	return nil
+}
+
+// checkCellTextLength 校验文本长度不超过 Excel 单元格上限。
+func checkCellTextLength(text string) (string, error) {
 	// 按 UTF-16 code unit 计数：BMP 之外的一个字符占两个 unit。
 	if units := len(utf16.Encode([]rune(text))); units > maxCellTextUnits {
 		return "", fmt.Errorf("文本长度 %d 个 UTF-16 字符超过 Excel 单元格上限 %d", units, maxCellTextUnits)
