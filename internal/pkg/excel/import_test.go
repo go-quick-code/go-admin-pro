@@ -3,6 +3,7 @@ package excel_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestImport(t *testing.T) {
 		{"李四", 28, 99, false, "2026/3/4 10:20:30", ""},
 	})
 
-	rows, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+	rows, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{Location: time.UTC})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -145,6 +146,9 @@ func TestImportRowErrors(t *testing.T) {
 	if len(ie.Errors) != 3 {
 		t.Fatalf("got %d errors, want 3: %+v", len(ie.Errors), ie.Errors)
 	}
+	if ie.Total != 3 || ie.Truncated {
+		t.Errorf("total = %d, truncated = %v; want 3, false", ie.Total, ie.Truncated)
+	}
 	assertCellError(t, ie, 2, "客户名称", "必填")
 	assertCellError(t, ie, 3, "年龄", "不是有效的整数")
 	assertCellError(t, ie, 4, "加入日期", "不是有效的日期")
@@ -207,6 +211,18 @@ func (l *level) UnmarshalText(text []byte) error {
 	return nil
 }
 
+func (l level) MarshalText() ([]byte, error) {
+	switch l {
+	case 1:
+		return []byte("高"), nil
+	case 2:
+		return []byte("中"), nil
+	case 3:
+		return []byte("低"), nil
+	}
+	return nil, fmt.Errorf("未知级别 %d", l)
+}
+
 type typedRow struct {
 	Name     string    `excel:"名称"`
 	Level    level     `excel:"级别"`
@@ -223,7 +239,7 @@ func TestImportTypes(t *testing.T) {
 		{"甲", "高", "张三", 5, serial},
 		{"乙", "中", "", "", "2026-01-02T08:09:10Z"},
 	})
-	rows, err := excel.Import[typedRow](bytes.NewReader(data), excel.ImportOptions[typedRow]{})
+	rows, err := excel.Import[typedRow](bytes.NewReader(data), excel.ImportOptions[typedRow]{Location: time.UTC})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -353,4 +369,153 @@ func TestImportUnknownOnlyRowIsNotDropped(t *testing.T) {
 	_, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{AllowUnknownHeaders: true})
 	ie := asImportError(t, err)
 	assertCellError(t, ie, 2, "客户名称", "必填")
+}
+
+type formattedRow struct {
+	Name     string    `excel:"客户名称"`
+	Amount   float64   `excel:"金额"`
+	JoinedAt time.Time `excel:"加入日期"`
+	Active   bool      `excel:"启用"`
+}
+
+func TestImportFormattedValues(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"客户名称", "金额", "加入日期", "启用"})
+	_ = f.SetCellValue("Sheet1", "A2", "张三")
+	_ = f.SetCellValue("Sheet1", "B2", 1234.56)
+	_ = f.SetCellValue("Sheet1", "C2", time.Date(2026, 1, 2, 10, 30, 0, 0, time.UTC))
+	_ = f.SetCellValue("Sheet1", "D2", true)
+
+	money, err := f.NewStyle(&excelize.Style{CustomNumFmt: stringPtr("#,##0.00")})
+	if err != nil {
+		t.Fatalf("money style: %v", err)
+	}
+	if err := f.SetCellStyle("Sheet1", "B2", "B2", money); err != nil {
+		t.Fatalf("money cell style: %v", err)
+	}
+	dateStyle, err := f.NewStyle(&excelize.Style{NumFmt: 22}) // m/d/yy h:mm
+	if err != nil {
+		t.Fatalf("date style: %v", err)
+	}
+	if err := f.SetCellStyle("Sheet1", "C2", "C2", dateStyle); err != nil {
+		t.Fatalf("date cell style: %v", err)
+	}
+
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	rows, importErr := excel.Import[formattedRow](bytes.NewReader(buf.Bytes()), excel.ImportOptions[formattedRow]{})
+	if importErr != nil {
+		t.Fatalf("Import: %v", importErr)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Amount != 1234.56 {
+		t.Errorf("amount = %v, want 1234.56", row.Amount)
+	}
+	if row.JoinedAt.Year() != 2026 || row.JoinedAt.Month() != time.January || row.JoinedAt.Day() != 2 ||
+		row.JoinedAt.Hour() != 10 || row.JoinedAt.Minute() != 30 {
+		t.Errorf("joined at = %v, want 2026-01-02 10:30", row.JoinedAt)
+	}
+	if !row.Active {
+		t.Error("active should be true")
+	}
+}
+
+func TestImportDate1904(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	if err := f.SetWorkbookProps(&excelize.WorkbookPropsOptions{Date1904: boolPtr(true)}); err != nil {
+		t.Fatalf("set workbook props: %v", err)
+	}
+	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"客户名称", "加入日期"})
+	_ = f.SetSheetRow("Sheet1", "A2", &[]any{"张三", 44562}) // 1904 系统中 2026-01-02
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	rows, importErr := excel.Import[formattedRow](bytes.NewReader(buf.Bytes()), excel.ImportOptions[formattedRow]{AllowUnknownHeaders: true})
+	if importErr != nil {
+		t.Fatalf("Import: %v", importErr)
+	}
+	if len(rows) != 1 || rows[0].JoinedAt.Year() != 2026 || rows[0].JoinedAt.Month() != time.January || rows[0].JoinedAt.Day() != 2 {
+		t.Fatalf("unexpected date: %+v", rows)
+	}
+}
+
+func stringPtr(v string) *string { return &v }
+
+func boolPtr(v bool) *bool { return &v }
+
+func TestImportTimeLayoutsWithoutSeconds(t *testing.T) {
+	data := buildWorkbook(t, "数据", [][]any{
+		{"客户名称", "加入日期"},
+		{"张三", "2026-01-02 10:30"},
+		{"李四", "2026/1/2 10:30"},
+	})
+	rows, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	for i, row := range rows {
+		got := row.JoinedAt
+		if got.Year() != 2026 || got.Month() != time.January || got.Day() != 2 || got.Hour() != 10 || got.Minute() != 30 || got.Second() != 0 {
+			t.Errorf("row %d joined at = %v, want 2026-01-02 10:30", i, got)
+		}
+	}
+}
+
+func TestImportLocation(t *testing.T) {
+	tz := time.FixedZone("CST", 8*3600)
+	const serial = 46024 + 10.5/24 // 2026-01-02 10:30
+	data := buildWorkbook(t, "数据", [][]any{
+		{"客户名称", "加入日期"},
+		{"张三", "2026-01-02 10:30"},
+		{"李四", serial},
+	})
+	rows, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{Location: tz})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	for i, row := range rows {
+		got := row.JoinedAt
+		if got.Location() != tz {
+			t.Errorf("row %d location = %v, want %v", i, got.Location(), tz)
+		}
+		if got.Year() != 2026 || got.Month() != time.January || got.Day() != 2 || got.Hour() != 10 || got.Minute() != 30 {
+			t.Errorf("row %d joined at = %v, want 2026-01-02 10:30", i, got)
+		}
+	}
+}
+
+func TestImportMaxErrors(t *testing.T) {
+	data := buildWorkbook(t, "数据", [][]any{
+		{"客户名称", "年龄"},
+		{"", 1},
+		{"", 2},
+		{"", 3},
+	})
+	_, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{MaxErrors: 2})
+	ie := asImportError(t, err)
+	if len(ie.Errors) != 2 || ie.Total != 3 || !ie.Truncated {
+		t.Fatalf("errors = %d, total = %d, truncated = %v; want 2, 3, true", len(ie.Errors), ie.Total, ie.Truncated)
+	}
+	if !strings.Contains(err.Error(), "共 3") {
+		t.Errorf("error message should mention total: %v", err)
+	}
+}
+
+func TestImportMaxUnzipBytes(t *testing.T) {
+	data := buildWorkbook(t, "数据", [][]any{
+		{"客户名称"},
+		{"张三"},
+	})
+	_, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{MaxUnzipBytes: 100})
+	if !errors.Is(err, excel.ErrFileTooLarge) {
+		t.Fatalf("error = %v, want ErrFileTooLarge", err)
+	}
 }

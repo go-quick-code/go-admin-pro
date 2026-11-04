@@ -33,14 +33,26 @@ type CellError struct {
 	Msg    string `json:"msg"`
 }
 
-// ImportError 汇总一次导入中的全部行级错误。导入采用「有错整批拒绝」语义，
+// ImportError 汇总一次导入中的行级错误。导入采用「有错整批拒绝」语义，
 // 调用方在返回该错误时不应写入任何数据。
+//
+// 明细错误最多保留 MaxErrors 条；超出后 Truncated 为 true，Total 仍记录真实数量。
 type ImportError struct {
-	Errors []CellError `json:"errors"`
+	Errors    []CellError `json:"errors"`
+	Total     int         `json:"total"`
+	Truncated bool        `json:"truncated"`
+	max       int
+}
+
+func newImportError(max int) *ImportError {
+	if max <= 0 {
+		max = DefaultMaxErrors
+	}
+	return &ImportError{max: max}
 }
 
 func (e *ImportError) Error() string {
-	if len(e.Errors) == 0 {
+	if e.Total == 0 {
 		return "excel: 导入校验失败"
 	}
 	const maxPreview = 5
@@ -56,10 +68,19 @@ func (e *ImportError) Error() string {
 		}
 		parts = append(parts, fmt.Sprintf("第 %d 行 [%s]：%s", item.Row, item.Column, item.Msg))
 	}
-	return fmt.Sprintf("导入校验失败（%d 处）：%s", len(e.Errors), strings.Join(parts, "；"))
+	prefix := fmt.Sprintf("导入校验失败（%d 处）", e.Total)
+	if e.Truncated {
+		prefix = fmt.Sprintf("导入校验失败（共 %d 处，仅显示前 %d 条）", e.Total, len(e.Errors))
+	}
+	return fmt.Sprintf("%s：%s", prefix, strings.Join(parts, "；"))
 }
 
-// add 追加一条错误，供包内使用。
+// add 追加一条错误，超过上限后只累加 Total。
 func (e *ImportError) add(row int, column, msg string) {
+	e.Total++
+	if len(e.Errors) >= e.max {
+		e.Truncated = true
+		return
+	}
 	e.Errors = append(e.Errors, CellError{Row: row, Column: column, Msg: msg})
 }

@@ -15,9 +15,12 @@ var timeType = reflect.TypeOf(time.Time{})
 
 var timeLayouts = []string{
 	"2006-01-02 15:04:05",
+	"2006-01-02 15:04",
 	"2006-01-02",
 	"2006/01/02 15:04:05",
+	"2006/01/02 15:04",
 	"2006/1/2 15:04:05",
+	"2006/1/2 15:04",
 	"2006/01/02",
 	"2006/1/2",
 	time.RFC3339,
@@ -25,10 +28,10 @@ var timeLayouts = []string{
 }
 
 // setCellValue 把单元格文本写入可寻址的字段值，必要时分配指针。
-func setCellValue(fv reflect.Value, text string) error {
+func setCellValue(fv reflect.Value, text string, location *time.Location, date1904 bool) error {
 	if fv.Kind() == reflect.Ptr {
 		elem := reflect.New(fv.Type().Elem())
-		if err := setCellValue(elem.Elem(), text); err != nil {
+		if err := setCellValue(elem.Elem(), text, location, date1904); err != nil {
 			return err
 		}
 		fv.Set(elem)
@@ -36,7 +39,7 @@ func setCellValue(fv reflect.Value, text string) error {
 	}
 
 	if fv.Type() == timeType {
-		t, err := parseTime(text)
+		t, err := parseTime(text, location, date1904)
 		if err != nil {
 			return err
 		}
@@ -100,16 +103,16 @@ func parseBool(text string) (bool, error) {
 	return b, nil
 }
 
-func parseTime(text string) (time.Time, error) {
+func parseTime(text string, location *time.Location, date1904 bool) (time.Time, error) {
 	for _, layout := range timeLayouts {
-		if t, err := time.ParseInLocation(layout, text, time.UTC); err == nil {
+		if t, err := time.ParseInLocation(layout, text, location); err == nil {
 			return t, nil
 		}
 	}
 	// 未设置日期格式的单元格会以 Excel 序列号返回。
 	if serial, err := strconv.ParseFloat(text, 64); err == nil && serial >= 20000 {
-		if t, err := excelize.ExcelDateToTime(serial, false); err == nil {
-			return t, nil
+		if t, err := excelize.ExcelDateToTime(serial, date1904); err == nil {
+			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), location), nil
 		}
 	}
 	return time.Time{}, fmt.Errorf("值 %q 不是有效的日期（示例：2026-01-02）", text)

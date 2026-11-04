@@ -49,10 +49,13 @@ func writeHeader(f *excelize.File, sheet string, cols []Column) error {
 	if err := f.SetCellStyle(sheet, "A1", lastCol+"1", style); err != nil {
 		return err
 	}
-	_ = f.SetRowHeight(sheet, 1, 24)
-	_ = f.SetPanes(sheet, &excelize.Panes{
+	if err := f.SetRowHeight(sheet, 1, 24); err != nil {
+		return err
+	}
+	if err := f.SetPanes(sheet, &excelize.Panes{
 		Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft",
-	})
-	_ = f.AutoFilter(sheet, "A1:"+lastCol+"1", nil)
+	}); err != nil {
+		return err
+	}
 	return nil
 }

@@ -10,6 +10,12 @@
 //
 // 标签格式为 `excel:"表头[,required][,width=20]"`；`excel:"-"` 表示不参与映射，
 // 未声明标签的字段同样被忽略。匿名嵌入的非指针结构体会被展开。
+//
+// 需要往返的类型必须同时实现 encoding.TextMarshaler 与 encoding.TextUnmarshaler；
+// 只实现 UnmarshalText 的类型在导出时返回错误。
+//
+// Import 按单元格原始值解析：百分比 50% 读作 0.5，日期读作 Excel 序列号；
+// Export 在内存中生成整个文件，行数由调用方控制，大结果集应分批导出。
 package excel
 
 import (

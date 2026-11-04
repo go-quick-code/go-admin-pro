@@ -32,7 +32,8 @@ type ExportOptions struct {
 // Export 把结构体切片写成 xlsx 文件内容。
 //
 // 表头固定在第一行并冻结，列顺序由 Columns 决定；未指定时按字段声明顺序导出全部列。
-// 值为 nil 的指针字段与零值 time.Time 输出为空单元格。
+// 值为 nil 的指针字段与零值 time.Time 输出为空单元格。行数由调用方控制，
+// 大结果集应分批导出，避免一次性占用过多内存。
 func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 	s, err := schemaFor(reflect.TypeOf((*T)(nil)).Elem())
 	if err != nil {
@@ -78,6 +79,13 @@ func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 			if err := f.SetCellValue(sheet, cell, value); err != nil {
 				return nil, fmt.Errorf("第 %d 行 [%s] 写入失败：%w", rowIdx+2, col.Header, err)
 			}
+		}
+	}
+	if len(rows) > 0 && len(colIdxs) > 0 {
+		lastCol, _ := excelize.ColumnNumberToName(len(colIdxs))
+		ref := fmt.Sprintf("A1:%s%d", lastCol, len(rows)+1)
+		if err := f.AutoFilter(sheet, ref, nil); err != nil {
+			return nil, fmt.Errorf("设置自动筛选失败：%w", err)
 		}
 	}
 
@@ -127,6 +135,9 @@ func resolveFormatters(s *schema, format map[string]Formatter) (map[int]Formatte
 		}
 		if fn == nil {
 			return nil, fmt.Errorf("%w: %s 的转换函数为空", ErrInvalidSchema, name)
+		}
+		if _, exists := out[idx]; exists {
+			return nil, fmt.Errorf("%w: 列 %s 被多个键重复指定", ErrDuplicateColumn, s.columns[idx].Header)
 		}
 		out[idx] = fn
 	}
@@ -207,6 +218,16 @@ func exportValue(fv reflect.Value) (any, error) {
 	if fv.CanAddr() {
 		if _, ok := fv.Addr().Interface().(encoding.TextMarshaler); ok {
 			return fv.Addr().Interface(), nil
+		}
+	}
+	if fv.CanInterface() {
+		if _, ok := fv.Interface().(encoding.TextUnmarshaler); ok {
+			return nil, fmt.Errorf("类型 %s 只实现了 UnmarshalText，导出需要同时实现 MarshalText", fv.Type())
+		}
+	}
+	if fv.CanAddr() {
+		if _, ok := fv.Addr().Interface().(encoding.TextUnmarshaler); ok {
+			return nil, fmt.Errorf("类型 %s 只实现了 UnmarshalText，导出需要同时实现 MarshalText", fv.Type())
 		}
 	}
 	switch fv.Kind() {

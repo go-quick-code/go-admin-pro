@@ -1,8 +1,10 @@
 package excel_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -144,7 +146,7 @@ func TestExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
-	got, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+	got, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{Location: time.UTC})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -170,10 +172,76 @@ func TestExportSheetAndPointers(t *testing.T) {
 	if strings.Join(got[0], "|") != "名称|级别|负责人|评分|加入日期" {
 		t.Errorf("header = %v", got[0])
 	}
-	if got[1][0] != "甲" || got[1][1] != "1" || got[1][2] != "张三" {
+	if got[1][0] != "甲" || got[1][1] != "高" || got[1][2] != "张三" {
 		t.Errorf("row = %v", got[1])
 	}
 	if len(got[1]) > 3 && got[1][3] != "" {
 		t.Errorf("nil score should be blank, got %q", got[1][3])
 	}
+}
+
+func TestExportAutoFilterRange(t *testing.T) {
+	data, err := excel.Export([]sampleRow{{Name: "张三"}, {Name: "李四"}}, excel.ExportOptions{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	sheetXML := zipEntry(t, data, "xl/worksheets/sheet1.xml")
+	if !strings.Contains(sheetXML, `autoFilter ref="$A$1:$F$3"`) {
+		t.Errorf("autoFilter should cover data rows, sheet xml: %s", sheetXML)
+	}
+}
+
+func TestExportFormatterAliasConflict(t *testing.T) {
+	_, err := excel.Export([]sampleRow{{Name: "张三"}}, excel.ExportOptions{
+		Formatters: map[string]excel.Formatter{
+			"Amount": func(value any) (any, error) { return value, nil },
+			"金额":     func(value any) (any, error) { return value, nil },
+		},
+	})
+	if !errors.Is(err, excel.ErrDuplicateColumn) {
+		t.Fatalf("error = %v, want ErrDuplicateColumn", err)
+	}
+}
+
+type unmarshalOnlyLevel int
+
+func (l *unmarshalOnlyLevel) UnmarshalText(text []byte) error {
+	*l = 1
+	return nil
+}
+
+type unmarshalOnlyRow struct {
+	Level unmarshalOnlyLevel `excel:"级别"`
+}
+
+func TestExportUnmarshalOnlyError(t *testing.T) {
+	_, err := excel.Export([]unmarshalOnlyRow{{Level: 1}}, excel.ExportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "MarshalText") {
+		t.Fatalf("error = %v, want MarshalText guidance", err)
+	}
+}
+
+func zipEntry(t *testing.T, data []byte, name string) string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	for _, file := range zr.File {
+		if file.Name != name {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", name, err)
+		}
+		defer rc.Close()
+		content, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return string(content)
+	}
+	t.Fatalf("zip entry %s not found", name)
+	return ""
 }

@@ -86,6 +86,9 @@ func resolveNotes(s *schema, notes map[string]string) (map[int]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		if _, exists := out[idx]; exists {
+			return nil, fmt.Errorf("%w: 列 %s 被多个键重复指定", ErrDuplicateColumn, s.columns[idx].Header)
+		}
 		out[idx] = note
 	}
 	return out, nil

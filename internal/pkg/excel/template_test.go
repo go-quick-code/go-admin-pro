@@ -69,4 +69,13 @@ func TestTemplate(t *testing.T) {
 			t.Fatalf("error = %v, want ErrColumnNotFound", err)
 		}
 	})
+
+	t.Run("alias conflict", func(t *testing.T) {
+		_, err := excel.Template[sampleRow](excel.TemplateOptions{
+			Notes: map[string]string{"Name": "a", "客户名称": "b"},
+		})
+		if !errors.Is(err, excel.ErrDuplicateColumn) {
+			t.Fatalf("error = %v, want ErrDuplicateColumn", err)
+		}
+	})
 }
