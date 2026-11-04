@@ -17,3 +17,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 ### Verification
 
 DB-backed changes: `make verify-migration`. See `docs/agents/verification.md`.
+
+### Before committing
+
+Run `make check`. For frontend changes, also run `make web-type-check`.
