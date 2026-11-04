@@ -13,3 +13,7 @@ The five canonical roles, unchanged: `needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Before committing
+
+Run `make check`. For frontend changes, also run `make web-type-check`.

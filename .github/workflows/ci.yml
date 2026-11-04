@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend
@@ -15,12 +19,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        run: go vet ./...
-      - name: Test
-        run: go test ./...
+      - name: Check
+        run: make check
 
   frontend:
     name: Frontend
@@ -40,5 +40,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Type check
+        run: pnpm type-check
       - name: Build
         run: pnpm build

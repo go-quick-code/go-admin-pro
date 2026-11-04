@@ -49,3 +49,7 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
 > _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+
+## Review scope
+
+Scope a review to the changed paths and their direct neighbours: read the diff, then the changed package. Search the whole repo for similar implementations only when the change claims a single owner / single entry point; otherwise stop at the first relevant hit.
