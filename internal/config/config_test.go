@@ -72,9 +72,9 @@ func TestLoadTimezoneExplicitValid(t *testing.T) {
 
 func TestLoadDSNLocFollowsTimezone(t *testing.T) {
 	tests := []struct {
-		name     string
-		yaml     string
-		wantDSN  string
+		name    string
+		yaml    string
+		wantDSN string
 	}{
 		{
 			name: "默认时区覆盖 DSN 里的 loc=Local",
