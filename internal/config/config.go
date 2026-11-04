@@ -27,12 +27,20 @@ type Config struct {
 const DefaultTimezone = "Asia/Shanghai"
 
 type AppConfig struct {
-	Name      string `mapstructure:"name"`
-	Env       string `mapstructure:"env"`
-	Port      int    `mapstructure:"port"`
-	APIPrefix string `mapstructure:"api-prefix"`
-	WebRoot   string `mapstructure:"web-root"`
-	Timezone  string `mapstructure:"timezone"`
+	Name      string     `mapstructure:"name"`
+	Env       string     `mapstructure:"env"`
+	Port      int        `mapstructure:"port"`
+	APIPrefix string     `mapstructure:"api-prefix"`
+	WebRoot   string     `mapstructure:"web-root"`
+	Timezone  string     `mapstructure:"timezone"`
+	CORS      CORSConfig `mapstructure:"cors"`
+}
+
+// CORSConfig 是 API 的跨域白名单。
+// AllowedOrigins 为精确匹配的 Origin 列表；为空表示不放行任何跨域请求
+// （不返回 CORS 头），需要跨域访问的部署必须显式配置。
+type CORSConfig struct {
+	AllowedOrigins []string `mapstructure:"allowed-origins"`
 }
 
 type DatabaseConfig struct {
@@ -183,6 +191,15 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("GAP_APP_ENV"); v != "" {
 		c.App.Env = v
+	}
+	if v := os.Getenv("GAP_CORS_ALLOWED_ORIGINS"); v != "" {
+		parts := strings.Split(v, ",")
+		c.App.CORS.AllowedOrigins = make([]string, 0, len(parts))
+		for _, origin := range parts {
+			if origin = strings.TrimSpace(origin); origin != "" {
+				c.App.CORS.AllowedOrigins = append(c.App.CORS.AllowedOrigins, origin)
+			}
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_SEED"))) {
 	case "true":
