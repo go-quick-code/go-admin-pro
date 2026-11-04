@@ -40,7 +40,7 @@ func (e *MigrationVersionError) Error() string {
 		}
 		return fmt.Sprintf("database migration is behind: applied version %d, binary expects %d; run `make migrate-up` before starting", current, latest)
 	case MigrationAhead:
-		return fmt.Sprintf("database migration is ahead: applied version %d, binary only knows %d; deploy the matching binary or roll the database back", current, latest)
+		return fmt.Sprintf("database migration is ahead: applied version %d, binary only knows %d; deploy the matching binary (rolling the database back drops schema and data)", current, latest)
 	default:
 		return fmt.Sprintf("database migration history diverged: applied versions %v, binary expects %v; reconcile the goose_db_version table", e.Applied, e.Expected)
 	}

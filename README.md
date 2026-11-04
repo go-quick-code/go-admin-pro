@@ -29,6 +29,13 @@
 - **前端动态路由**：菜单由后端下发，前端按组件路径动态注册，按钮权限通过 `v-if` 控制。
 - **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、演示任务）。
 
+## 相关文档
+
+- 术语表：[GLOSSARY.md](GLOSSARY.md)
+- 架构决策：[docs/adr/](docs/adr/)
+- CRM 详细规格：[docs/crm-mvp-spec.md](docs/crm-mvp-spec.md)
+- 迁移与验证：[docs/agents/verification.md](docs/agents/verification.md)
+
 ## 技术栈
 
 | 层次 | 选型 |
@@ -160,7 +167,7 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 表结构由 `migrations/` 下的 goose SQL 管理，迁移文件会内嵌进二进制：
 
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
-- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本。
+- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
 - `make migrate-status`：查看每个版本的应用状态。
 - `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为指定版本，不执行 DDL。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。

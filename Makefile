@@ -2,7 +2,7 @@ APP_NAME := go-admin-pro
 CONFIG   := configs/config.yaml
 BIN      := bin/server
 MIGRATE  := bin/migrate
-MIGRATION_VERSION ?= 1
+version ?= 1
 
 .PHONY: help run build test test-integration vet fmt tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create web-install web-dev web-build build-all docker-up docker-down docker-logs clean
 
@@ -65,7 +65,7 @@ migrate-status:
 	go run ./cmd/migrate -c $(CONFIG) status
 
 migrate-stamp:
-	go run ./cmd/migrate -c $(CONFIG) stamp $(MIGRATION_VERSION)
+	go run ./cmd/migrate -c $(CONFIG) stamp $(version)
 
 migrate-create:
 	go run ./cmd/migrate create $(name)
