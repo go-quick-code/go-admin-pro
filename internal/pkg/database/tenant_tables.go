@@ -33,5 +33,8 @@ var TenantTables = []string{
 	"crm_follow_up",
 	"crm_sequence",
 	"crm_customer_owner_history",
+	// 产品（issue #11）：分类树与产品均为租户级共享资源。
+	"crm_product_category",
+	"crm_product",
 	"crm_pool_config",
 }

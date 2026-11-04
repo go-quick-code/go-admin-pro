@@ -51,6 +51,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	followUp.PUT("", h.UpdateFollowUp)
 	followUp.DELETE("/:id", h.DeleteFollowUp)
 
+	// 产品分类与产品（issue #11）：租户级共享资源，普通 CRUD + 权限码，
+	// 无 owner 列与数据范围谓词（codegen ownerScoped=false 变体）。
+	h.RegisterProductCategoryRoutes(rg)
+	h.RegisterProductRoutes(rg)
+
 	// 公海租户配置（issue #14）：读复用公海可见性权限码（能看公海即可读），
 	// 写挂 crm:pool-config:update（菜单种子 4050）。
 	poolConfig := rg.Group("/crm/pool-config")

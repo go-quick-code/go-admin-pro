@@ -40,6 +40,9 @@ type SystemGateway interface {
 type Service struct {
 	repo *repository.Repository
 	sys  SystemGateway
+	// productRefs 是产品删除引用校验扩展点（issue #11，v1 空实现，#15/#16 注册实现），
+	// 见 product_refs.go；零值即空实现语义，装配侧无需显式初始化。
+	productRefs ProductRefCountChecker
 	// contracts 是合同依赖面（#16 接入点）：v1 为空实现 NoopContractChecker
 	// （恒「无合同」），#16 落地后在 app.go 装配处 SetContractChecker 替换。
 	contracts ContractChecker

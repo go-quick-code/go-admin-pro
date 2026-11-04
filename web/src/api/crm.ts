@@ -83,3 +83,34 @@ export function updateFollowUp(data: any) {
 export function deleteFollowUp(id: number) {
   return request.delete(`/crm/follow-up/${id}`) as Promise<any>
 }
+
+// ---------- 产品分类（issue #11：树形结构，删除约束在 service 层） ----------
+export function treeProductCategories() {
+  return request.get('/crm/product-category/tree') as Promise<any>
+}
+export function createProductCategory(data: any) {
+  return request.post('/crm/product-category', data) as Promise<any>
+}
+export function updateProductCategory(data: any) {
+  return request.put('/crm/product-category', data) as Promise<any>
+}
+export function deleteProductCategory(id: number) {
+  return request.delete(`/crm/product-category/${id}`) as Promise<any>
+}
+
+// ---------- 产品（issue #11：租户级共享资源，编码租户内唯一） ----------
+export function pageProducts(params: any) {
+  return request.get('/crm/product/page', { params }) as Promise<any>
+}
+export function getProduct(id: number) {
+  return request.get(`/crm/product/${id}`) as Promise<any>
+}
+export function createProduct(data: any) {
+  return request.post('/crm/product', data) as Promise<any>
+}
+export function updateProduct(data: any) {
+  return request.put('/crm/product', data) as Promise<any>
+}
+export function deleteProduct(id: number) {
+  return request.delete(`/crm/product/${id}`) as Promise<any>
+}
