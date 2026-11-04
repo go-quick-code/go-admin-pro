@@ -3,9 +3,11 @@ package excel
 import (
 	"encoding"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -245,6 +247,9 @@ func exportValue(fv reflect.Value) (any, error) {
 	return nil, fmt.Errorf("类型 %s 不支持导出", fv.Type())
 }
 
+// maxCellTextUnits 是 Excel 单元格文本上限，按 UTF-16 code unit 计。
+const maxCellTextUnits = 32767
+
 // normalizeCell 把转换函数的结果规整成适合写入单元格的值。
 func normalizeCell(value any) (any, error) {
 	switch v := value.(type) {
@@ -254,13 +259,34 @@ func normalizeCell(value any) (any, error) {
 		if v.IsZero() {
 			return "", nil
 		}
-		return v.Format(DefaultTimeLayout), nil
+		return checkCellText(v.Format(DefaultTimeLayout))
 	case encoding.TextMarshaler:
 		text, err := v.MarshalText()
 		if err != nil {
 			return nil, fmt.Errorf("值转换失败：%w", err)
 		}
-		return string(text), nil
+		return checkCellText(string(text))
+	case string:
+		return checkCellText(v)
+	case float32:
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return nil, fmt.Errorf("非有限浮点数 %v 无法导出", v)
+		}
+		return v, nil
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, fmt.Errorf("非有限浮点数 %v 无法导出", v)
+		}
+		return v, nil
 	}
 	return value, nil
+}
+
+// checkCellText 校验文本长度不超过 Excel 单元格上限。
+func checkCellText(text string) (string, error) {
+	// 按 UTF-16 code unit 计数：BMP 之外的一个字符占两个 unit。
+	if units := len(utf16.Encode([]rune(text))); units > maxCellTextUnits {
+		return "", fmt.Errorf("文本长度 %d 个 UTF-16 字符超过 Excel 单元格上限 %d", units, maxCellTextUnits)
+	}
+	return text, nil
 }
