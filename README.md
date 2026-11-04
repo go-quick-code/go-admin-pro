@@ -78,7 +78,8 @@ go-admin-pro
 │   │   ├── infra/              # 文件、参数配置、定时任务
 │   │   └── codegen/            # 代码生成器
 │   └── pkg/                    # 框架能力
-│       ├── database/           # GORM 连接、迁移校验 + 多租户插件
+│       ├── database/           # GORM 连接、迁移校验 + 多租户/审计插件
+│       ├── model/              # 实体底座 BaseEntity（时间戳、软删除、creator/updater）
 │       ├── tenant/             # 租户上下文与 Skip
 │       ├── jwt/ authn/         # 令牌与登录主体
 │       ├── middleware/         # CORS、日志、Recovery
