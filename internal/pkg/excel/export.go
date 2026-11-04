@@ -67,7 +67,10 @@ func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 	}
 
 	for rowIdx, item := range rows {
-		rowValue := derefRow(reflect.ValueOf(&item).Elem())
+		rowValue, err := derefRow(reflect.ValueOf(&item).Elem(), rowIdx+2)
+		if err != nil {
+			return nil, err
+		}
 		for colPos, colIdx := range colIdxs {
 			col := s.columns[colIdx]
 			field := rowValue.FieldByIndex(s.indexes[colIdx])
@@ -155,16 +158,15 @@ func (s *schema) lookup(name string) (int, error) {
 	return 0, fmt.Errorf("%w: %s", ErrColumnNotFound, name)
 }
 
-// derefRow 把指针行解引用为可读的结构体值；nil 指针得到零值结构体。
-func derefRow(rv reflect.Value) reflect.Value {
+// derefRow 把指针行解引用为可读的结构体值；指针链中任一层为 nil 都返回带行号的错误。
+func derefRow(rv reflect.Value, row int) (reflect.Value, error) {
 	for rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
-			rv = reflect.New(rv.Type().Elem()).Elem()
-			continue
+			return reflect.Value{}, fmt.Errorf("第 %d 行为 nil，无法导出", row)
 		}
 		rv = rv.Elem()
 	}
-	return rv
+	return rv, nil
 }
 
 // cellValue 计算单元格值，优先使用调用方提供的转换函数。
