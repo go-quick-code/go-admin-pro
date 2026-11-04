@@ -15,7 +15,7 @@
 
 | # | 任务 | 验收 |
 |---|---|---|
-| 1 | 引入 goose，写 `00001_baseline.sql` 固化现有 17 张表 | `make migrate-up/down` 从空库可往返；应用启动只校验版本 |
+| 1 | 引入 goose，写 `00001_baseline.sql` 固化现有 17 张表 | `make migrate-up` 与 `make migrate-down CONFIRM=yes` 从空库可往返；应用启动只校验版本 |
 | 2 | 实体表加 `creator` / `updater`；关联表补 `tenant_id`；所有实体嵌入 `BaseEntity` | 17 张表迁移完成；`creator/updater` 默认 0（系统） |
 | 3 | 数据范围枚举对齐芋道 1–5（1 全部 / 2 自定义 / 3 本部门 / 4 本部门及以下 / 5 仅本人），非法值返回 400 | 旧值迁移：2→4、4→5；越权回退测试覆盖 |
 | 4 | 租户插件 fail-closed：无 tenant context 时必须显式 `tenant.Skip` | 无上下文查询返回错误；系统级路径显式 Skip |
