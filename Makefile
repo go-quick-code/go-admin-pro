@@ -43,7 +43,7 @@ test:
 
 # 集成测试基座在 #3 落地；没有 integration 用例时明确失败，避免假绿。
 test-integration:
-	@if ! grep -rqs --include='*_test.go' -e '^//go:build integration' $$(go list -f '{{.Dir}}' ./...); then \
+	@if ! grep -rqs --include='*_test.go' -e '^//go:build .*integration' -e '^// +build .*integration' $$(go list -tags=integration -f '{{.Dir}}' ./...); then \
 		echo "no integration tests found (build tag integration)"; exit 1; \
 	fi
 	go test -tags=integration ./...
@@ -54,10 +54,10 @@ vet:
 	go vet ./...
 
 fmt:
-	gofmt -w $$(go list -f '{{.Dir}}' ./...)
+	gofmt -w $$(go list -tags=integration -f '{{.Dir}}' ./...)
 
 fmt-check:
-	@out="$$(gofmt -l $$(go list -f '{{.Dir}}' ./...))"; \
+	@out="$$(gofmt -l $$(go list -tags=integration -f '{{.Dir}}' ./...))" || exit 1; \
 	if [ -n "$$out" ]; then echo "gofmt required:"; echo "$$out"; exit 1; fi
 
 tidy:

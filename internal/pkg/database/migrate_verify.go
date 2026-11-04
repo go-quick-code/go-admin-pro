@@ -28,14 +28,14 @@ func VerifyMigrationRoundtrip(ctx context.Context, db *sql.DB, expectTables int)
 		return result, err
 	}
 	if tables > 0 {
-		return result, fmt.Errorf("database already has %d tables; verify requires an empty disposable database", tables)
+		return result, fmt.Errorf("database already has %d tables; verify requires an empty disposable database (drop/recreate it and retry)", tables)
 	}
 	applied, err := appliedVersions(ctx, db)
 	if err != nil {
 		return result, err
 	}
 	if len(applied) > 0 {
-		return result, fmt.Errorf("database already has applied migrations %v; verify requires an empty disposable database", applied)
+		return result, fmt.Errorf("database already has applied migrations %v; verify requires an empty disposable database (drop/recreate it and retry)", applied)
 	}
 
 	if err := MigrateUp(ctx, db); err != nil {

@@ -20,7 +20,9 @@ make verify-migration
 go run ./cmd/migrate -c configs/config.yaml -expect-tables 17 verify
 ```
 
-新增迁移导致表数量变化时，同步更新 `scripts/verify-migration.sh` 的 `EXPECTED_TABLES` 默认值或 CI 里的环境变量。
+新增迁移导致表数量变化时，同步更新 `scripts/verify-migration.sh` 的 `EXPECTED_TABLES` 默认值；CI 继承脚本默认值，不再单独配置。
+
+脚本依赖 `bash`、`curl`、`python3`、`lsof` 和 `go`。
 
 ## 手工调试注意
 

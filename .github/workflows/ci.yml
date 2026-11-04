@@ -36,7 +36,6 @@ jobs:
           --health-retries=30
     env:
       GAP_DATABASE_DSN: "root:123456@tcp(127.0.0.1:3306)/go_admin_pro_verify?charset=utf8mb4&parseTime=True&loc=Local"
-      EXPECTED_TABLES: "17"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
