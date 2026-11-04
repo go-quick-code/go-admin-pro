@@ -25,7 +25,7 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	}
 
 	engine := gin.New()
-	engine.Use(middleware.Recovery(), middleware.AccessLog(), middleware.CORS())
+	engine.Use(middleware.Recovery(), middleware.AccessLog(), middleware.CORS(cfg.App.CORS.AllowedOrigins))
 
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "app": cfg.App.Name, "env": cfg.App.Env})

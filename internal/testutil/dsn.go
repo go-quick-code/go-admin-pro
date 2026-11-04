@@ -5,9 +5,18 @@ import (
 	"strings"
 )
 
-// TestDatabaseName 是集成测试专用数据库。
-// 基座会拒绝连接任何其他库名的 DSN：用例间会清空数据，绝不能指向开发/生产库。
+// TestDatabaseName 是集成测试专用数据库的基准名。
+// 基座只接受这个名字或其下划线后缀变体（如 go_admin_pro_test_t6）：
+// 用例间会清空数据，绝不能指向开发/生产库。允许后缀变体是为了让
+// 不同工单的工作树可以并行跑集成测试，各自清各自的库互不干扰；
+// CI 与 Makefile 默认仍使用基准名本身。
 const TestDatabaseName = "go_admin_pro_test"
+
+// IsTestDatabaseName 判断库名是否是允许的集成测试库：
+// 基准名本身，或以「基准名_」开头的后缀变体。
+func IsTestDatabaseName(name string) bool {
+	return name == TestDatabaseName || strings.HasPrefix(name, TestDatabaseName+"_")
+}
 
 // DefaultTestDSN 是本机 docker compose MySQL（容器 go-admin-pro-mysql）的默认测试 DSN。
 // Makefile 与 CI 会通过 GAP_DATABASE_DSN 显式传入；两者保持一致。

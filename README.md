@@ -25,7 +25,7 @@
 - **数据权限**：角色维度支持「全部 / 本部门及以下 / 本部门 / 仅本人」，用户列表已接入。
 - **系统管理**：用户、角色、菜单（目录/菜单/按钮三级）、部门树、岗位、字典、租户、登录日志、操作日志。
 - **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）。
-- **代码生成器**：读取 `information_schema`，一键生成 Go 的 model / dto / service / api 与 Vue3 增删改查页面，ZIP 下载。
+- **代码生成器**：读取 `information_schema`，按表结构生成 Go 的 model / dto / service / api 模板与 Vue3 增删改查页面，打包 ZIP 下载；生成物是模板代码，接入工程需按 ZIP 内 README 手工放置并注册路由、菜单。
 - **前端动态路由**：菜单由后端下发，前端按组件路径动态注册，按钮权限通过 `v-if` 控制。
 - **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、演示任务）。
 
@@ -199,7 +199,7 @@ ctx = tenant.WithTenantID(ctx, claims.TenantID)
 
 - **Query / Update / Delete**：对注册过的表自动追加 `tenant_id = ?`，业务代码无需重复拼装。
 - **Create**：自动回填 `tenant_id`，避免遗漏。
-- **系统级操作**：`tenant.Skip(db)` 可跳过过滤（如统计某租户用户数）。
+- **fail-closed**：无租户上下文访问租户表会直接报错（哨兵错误 `tenant.ErrNoTenantContext`），不会静默放行；定时任务、seed 等系统级路径必须显式 `tenant.Skip(db)` 跳过过滤。
 - **表清单**：`internal/pkg/database/tenant_tables.go`，新增业务表时按需登记。
 
 创建租户时会自动生成：默认部门「总公司」、内置角色 `super_admin`、管理员 `admin/123456`。
@@ -242,7 +242,7 @@ README.md
 
 4. 按 ZIP 内 README 把代码放入工程、注册路由，并在「菜单管理」中新增对应权限码。
 
-生成器会校验表名、模块名、业务名、类名，避免路径穿越；生成的 Go 代码通过 `go/format` 格式化，可直接编译。项目内置的 `biz_product` 演示表可通过以下 SQL 创建：
+生成器会校验表名、模块名、业务名、类名，避免路径穿越；生成的 Go 代码经 `go/format` 格式化，按 ZIP 内 README 放入工程后即可编译，生成器本身不做工程内装配。项目内置的 `biz_product` 演示表可通过以下 SQL 创建：
 
 ```sql
 CREATE TABLE biz_product (
@@ -263,7 +263,8 @@ CREATE TABLE biz_product (
 ### 定时任务
 
 - 表达式为 **6 段（含秒）**，例如 `0 */5 * * * *` 表示每 5 分钟。
-- 内置处理器：`demoJob`、`cleanLogs`（参数为保留天数，默认 30）。
+- 内置处理器：`cleanLogs`（在 `internal/app/app.go` 注册，参数为保留天数，默认 30）。
+- 演示处理器 `demoJob` 内置在 `internal/module/infra/service/job.go` 的 `NewJobScheduler` 里，配套种子任务「演示任务」默认暂停，仅用于验证调度链路。
 - 新增处理器：在 `internal/app/app.go` 中调用 `scheduler.Register("name", fn)`。
 - 支持开启 / 暂停、立即执行、失败重试与执行日志。
 
@@ -306,6 +307,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.port` | HTTP 端口 |
 | `app.api-prefix` | API 前缀，默认 `/admin-api` |
 | `app.web-root` | 前端产物目录，默认 `./web/dist` |
+| `app.cors.allowed-origins` | 跨域白名单：精确匹配 Origin，非白名单来源不返回 CORS 头；为空表示不放行任何跨域（可用 `GAP_CORS_ALLOWED_ORIGINS` 逗号分隔覆盖） |
 | `database.dsn` | MySQL DSN |
 | `database.seed` | 启动时写入种子数据 |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
@@ -372,7 +374,7 @@ make docker-down  # 停止容器
 
 - 登录态为无状态 JWT，未实现 refresh token / 服务端吊销列表。
 - 文件存储仅实现本地磁盘，OSS / S3 可通过扩展 `infra` 模块接入。
-- 字典、菜单权限等使用进程内缓存（权限码 1 分钟 TTL），多实例部署时需替换为 Redis 或统一失效。
+- 权限快照（角色码 + 权限码）使用进程内缓存（1 分钟 TTL），多实例部署时需替换为 Redis 或统一失效；字典数据未做缓存，每次直接读库。
 - 未内置 Swagger，接口约定见上文与各 handler。
 - 工作流、消息中心、支付、商城等芋道业务模块不在本次范围内，可按同样分层继续扩展。
 

@@ -92,7 +92,8 @@ func (s *Service) GetUser(ctx context.Context, id int64) (*model.User, error) {
 	return user, nil
 }
 
-// CreateUser 创建用户。
+// CreateUser 创建用户。用户行、角色绑定、岗位绑定在同一事务里落库，
+// 任一步失败整体回滚，不会留下没有角色/岗位的半套账号。
 func (s *Service) CreateUser(ctx context.Context, req *dto.UserCreateReq) error {
 	total, err := s.repo.CountUserByUsername(ctx, req.Username, 0)
 	if err != nil {
@@ -118,13 +119,15 @@ func (s *Service) CreateUser(ctx context.Context, req *dto.UserCreateReq) error 
 		Status:   req.Status,
 		Remark:   req.Remark,
 	}
-	if err := s.repo.CreateUser(ctx, user); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserPosts(ctx, user.ID, req.PostIDs); err != nil {
+	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.CreateUser(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
+			return err
+		}
+		return tx.ReplaceUserPosts(ctx, user.ID, req.PostIDs)
+	}); err != nil {
 		return err
 	}
 	s.ClearPermissionCache(user.ID)
@@ -155,13 +158,16 @@ func (s *Service) UpdateUser(ctx context.Context, req *dto.UserUpdateReq) error 
 		}
 		user.Password = hash
 	}
-	if err := s.repo.SaveUser(ctx, user); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserPosts(ctx, user.ID, req.PostIDs); err != nil {
+	// 用户资料与角色/岗位绑定在同一事务里落库，绑定失败时资料修改一并回滚。
+	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.SaveUser(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
+			return err
+		}
+		return tx.ReplaceUserPosts(ctx, user.ID, req.PostIDs)
+	}); err != nil {
 		return err
 	}
 	s.ClearPermissionCache(user.ID)
