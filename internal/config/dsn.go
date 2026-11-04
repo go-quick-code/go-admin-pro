@@ -28,6 +28,9 @@ func ApplyDSNLoc(dsn, timezone string) string {
 	if slash >= 0 {
 		rest = dsn[slash:]
 	} else {
+		// go-sql-driver 的 DSN 语法（[user[:password]@][net[(addr)]]/dbname[?params]）
+		// 里 dbname 前必有「/」，正常输入不会走到这里；没有斜杠时把整段当作
+		// 参数段候选，容忍退化输入而不是报错（公开 helper 的宽容语义）。
 		rest = dsn
 	}
 	if q := strings.Index(rest, "?"); q >= 0 {
