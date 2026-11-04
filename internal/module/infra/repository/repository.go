@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/lautung/go-admin-pro/internal/module/infra/model"
+	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
 )
 
@@ -152,9 +153,10 @@ func (r *Repository) ListJobs(ctx context.Context, f JobFilter, offset, limit in
 }
 
 // ListEnabledJobs 跨租户加载所有启用任务，供调度器启动时使用。
+// 调度器启动没有租户上下文，这里显式 tenant.Skip（系统级路径）。
 func (r *Repository) ListEnabledJobs(ctx context.Context) ([]model.Job, error) {
 	var list []model.Job
-	err := r.db.WithContext(ctx).Where("status = ?", int8(0)).Find(&list).Error
+	err := tenant.Skip(r.db.WithContext(ctx)).Where("status = ?", int8(0)).Find(&list).Error
 	return list, err
 }
 

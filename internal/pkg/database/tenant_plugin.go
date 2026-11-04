@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -62,17 +63,31 @@ func (p *TenantPlugin) table(db *gorm.DB) (string, bool) {
 	return table, ok
 }
 
-func (p *TenantPlugin) shouldSkip(db *gorm.DB) bool {
-	if tenant.IsSkipped(db) {
-		return true
+// guard 是 fail-closed 守卫：
+//   - 未登记的表：放行（返回 false，插件不做任何事）；
+//   - 显式 tenant.Skip：放行（返回 false）；
+//   - 缺少租户上下文：注入 ErrNoTenantContext 并中止操作（返回 false）；
+//   - 其余：返回 true，由回调追加租户条件 / 回填 tenant_id。
+//
+// 系统级操作（seed、定时任务、跨租户统计等）必须显式 tenant.Skip，
+// 插件不再把「没有租户上下文」当作系统级的隐式信号。
+func (p *TenantPlugin) guard(db *gorm.DB) bool {
+	table, ok := p.table(db)
+	if !ok {
+		return false
 	}
-	// 没有租户上下文时视为系统级操作（如启动种子、定时任务）。
-	_, ok := tenant.FromContext(db.Statement.Context)
-	return !ok
+	if tenant.IsSkipped(db) {
+		return false
+	}
+	if _, has := tenant.FromContext(db.Statement.Context); !has {
+		db.AddError(fmt.Errorf("访问租户表 %s：%w（系统级操作请用 tenant.Skip 显式跳过）", table, tenant.ErrNoTenantContext))
+		return false
+	}
+	return true
 }
 
 func (p *TenantPlugin) queryCallback(db *gorm.DB) {
-	if _, ok := p.table(db); !ok || p.shouldSkip(db) {
+	if !p.guard(db) {
 		return
 	}
 	id := tenant.ID(db.Statement.Context)
@@ -80,7 +95,7 @@ func (p *TenantPlugin) queryCallback(db *gorm.DB) {
 }
 
 func (p *TenantPlugin) writeCallback(db *gorm.DB) {
-	if _, ok := p.table(db); !ok || p.shouldSkip(db) {
+	if !p.guard(db) {
 		return
 	}
 	id := tenant.ID(db.Statement.Context)
@@ -89,7 +104,7 @@ func (p *TenantPlugin) writeCallback(db *gorm.DB) {
 
 // createCallback 在插入时自动回填 tenant_id，避免各业务层重复赋值。
 func (p *TenantPlugin) createCallback(db *gorm.DB) {
-	if _, ok := p.table(db); !ok || p.shouldSkip(db) {
+	if !p.guard(db) {
 		return
 	}
 	id := tenant.ID(db.Statement.Context)

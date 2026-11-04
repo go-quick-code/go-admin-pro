@@ -1,7 +1,6 @@
 package seed
 
 import (
-	"context"
 	"log/slog"
 	"time"
 
@@ -13,41 +12,44 @@ import (
 )
 
 // Run 写入初始化数据。表结构由 goose 迁移预先建好，这里只负责数据。
+//
+// seed 是系统级写入路径：不携带租户上下文，所有语句显式 tenant.Skip
+// （租户插件 fail-closed 后，无上下文访问租户表会被直接拦截）；
+// 写入的业务行归属默认租户 1，显式赋值，不依赖插件回填。
 func Run(db *gorm.DB) error {
-	ctx := tenant.WithTenantID(context.Background(), 1)
-	if err := seedTenant(db, ctx); err != nil {
+	if err := seedTenant(db); err != nil {
 		return err
 	}
 	if err := seedMenus(db); err != nil {
 		return err
 	}
-	if err := seedDepts(db, ctx); err != nil {
+	if err := seedDepts(db); err != nil {
 		return err
 	}
-	if err := seedRoles(db, ctx); err != nil {
+	if err := seedRoles(db); err != nil {
 		return err
 	}
-	if err := seedPosts(db, ctx); err != nil {
+	if err := seedPosts(db); err != nil {
 		return err
 	}
-	if err := seedUsers(db, ctx); err != nil {
+	if err := seedUsers(db); err != nil {
 		return err
 	}
-	if err := seedDicts(db, ctx); err != nil {
+	if err := seedDicts(db); err != nil {
 		return err
 	}
-	if err := seedConfigs(db, ctx); err != nil {
+	if err := seedConfigs(db); err != nil {
 		return err
 	}
-	if err := seedJobs(db, ctx); err != nil {
+	if err := seedJobs(db); err != nil {
 		return err
 	}
 	return nil
 }
 
-func seedTenant(db *gorm.DB, ctx context.Context) error {
+func seedTenant(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&sysmodel.Tenant{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.Tenant{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -65,7 +67,7 @@ func seedTenant(db *gorm.DB, ctx context.Context) error {
 		AccountCount:  999,
 		Remark:        "内置租户",
 	}
-	if err := db.WithContext(ctx).Create(t).Error; err != nil {
+	if err := tenant.Skip(db).Create(t).Error; err != nil {
 		return err
 	}
 	slog.Info("seed tenant created", "tenantId", 1)
@@ -74,7 +76,7 @@ func seedTenant(db *gorm.DB, ctx context.Context) error {
 
 func seedMenus(db *gorm.DB) error {
 	var count int64
-	if err := db.Model(&sysmodel.Menu{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -166,26 +168,26 @@ func seedMenus(db *gorm.DB) error {
 	return nil
 }
 
-func seedDepts(db *gorm.DB, ctx context.Context) error {
+func seedDepts(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&sysmodel.Dept{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.Dept{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	depts := []sysmodel.Dept{
-		{BaseEntity: sysmodel.BaseEntity{ID: 100}, Name: "总公司", ParentID: 0, Sort: 0, Status: sysmodel.StatusEnable},
-		{BaseEntity: sysmodel.BaseEntity{ID: 101}, Name: "研发部", ParentID: 100, Sort: 1, Status: sysmodel.StatusEnable},
-		{BaseEntity: sysmodel.BaseEntity{ID: 102}, Name: "市场部", ParentID: 100, Sort: 2, Status: sysmodel.StatusEnable},
-		{BaseEntity: sysmodel.BaseEntity{ID: 103}, Name: "财务部", ParentID: 100, Sort: 3, Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 100}, TenantID: 1, Name: "总公司", ParentID: 0, Sort: 0, Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 101}, TenantID: 1, Name: "研发部", ParentID: 100, Sort: 1, Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 102}, TenantID: 1, Name: "市场部", ParentID: 100, Sort: 2, Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 103}, TenantID: 1, Name: "财务部", ParentID: 100, Sort: 3, Status: sysmodel.StatusEnable},
 	}
-	return db.WithContext(ctx).Create(&depts).Error
+	return tenant.Skip(db).Create(&depts).Error
 }
 
-func seedRoles(db *gorm.DB, ctx context.Context) error {
+func seedRoles(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&sysmodel.Role{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.Role{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -193,17 +195,17 @@ func seedRoles(db *gorm.DB, ctx context.Context) error {
 	}
 	roles := []sysmodel.Role{
 		{
-			BaseEntity: sysmodel.BaseEntity{ID: 1}, Name: "超级管理员", Code: "super_admin",
+			BaseEntity: sysmodel.BaseEntity{ID: 1}, TenantID: 1, Name: "超级管理员", Code: "super_admin",
 			Sort: 0, DataScope: sysmodel.DataScopeAll, Status: sysmodel.StatusEnable, Type: 1,
 			Remark: "内置角色，拥有全部权限",
 		},
 		{
-			BaseEntity: sysmodel.BaseEntity{ID: 2}, Name: "普通角色", Code: "common",
+			BaseEntity: sysmodel.BaseEntity{ID: 2}, TenantID: 1, Name: "普通角色", Code: "common",
 			Sort: 1, DataScope: sysmodel.DataScopeSelf, Status: sysmodel.StatusEnable, Type: 2,
 			Remark: "示例角色：仅本人数据，可查看用户列表",
 		},
 	}
-	if err := db.WithContext(ctx).Create(&roles).Error; err != nil {
+	if err := tenant.Skip(db).Create(&roles).Error; err != nil {
 		return err
 	}
 	// 普通角色：仪表盘 + 系统管理目录 + 用户管理页面（无增删改按钮）。
@@ -213,27 +215,27 @@ func seedRoles(db *gorm.DB, ctx context.Context) error {
 		{RoleID: 2, MenuID: 101},
 		{RoleID: 2, MenuID: 104},
 	}
-	return db.WithContext(ctx).Create(&roleMenus).Error
+	return tenant.Skip(db).Create(&roleMenus).Error
 }
 
-func seedPosts(db *gorm.DB, ctx context.Context) error {
+func seedPosts(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&sysmodel.Post{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.Post{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	posts := []sysmodel.Post{
-		{BaseEntity: sysmodel.BaseEntity{ID: 1}, Name: "董事长", Code: "chairman", Sort: 0, Status: sysmodel.StatusEnable},
-		{BaseEntity: sysmodel.BaseEntity{ID: 2}, Name: "项目经理", Code: "project_manager", Sort: 1, Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 1}, TenantID: 1, Name: "董事长", Code: "chairman", Sort: 0, Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 2}, TenantID: 1, Name: "项目经理", Code: "project_manager", Sort: 1, Status: sysmodel.StatusEnable},
 	}
-	return db.WithContext(ctx).Create(&posts).Error
+	return tenant.Skip(db).Create(&posts).Error
 }
 
-func seedUsers(db *gorm.DB, ctx context.Context) error {
+func seedUsers(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&sysmodel.User{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.User{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -255,7 +257,7 @@ func seedUsers(db *gorm.DB, ctx context.Context) error {
 			Status: sysmodel.StatusEnable, Remark: "普通角色演示账号",
 		},
 	}
-	if err := db.WithContext(ctx).Create(&users).Error; err != nil {
+	if err := tenant.Skip(db).Create(&users).Error; err != nil {
 		return err
 	}
 	userRoles := []sysmodel.UserRole{
@@ -263,62 +265,63 @@ func seedUsers(db *gorm.DB, ctx context.Context) error {
 		{UserID: 2, RoleID: 2},
 	}
 	userPosts := []sysmodel.UserPost{{UserID: 2, PostID: 2}}
-	if err := db.WithContext(ctx).Create(&userRoles).Error; err != nil {
+	if err := tenant.Skip(db).Create(&userRoles).Error; err != nil {
 		return err
 	}
 	slog.Info("seed users created", "admin", "admin/123456", "demo", "demo/123456")
-	return db.WithContext(ctx).Create(&userPosts).Error
+	return tenant.Skip(db).Create(&userPosts).Error
 }
 
-func seedDicts(db *gorm.DB, ctx context.Context) error {
+func seedDicts(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&sysmodel.DictType{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&sysmodel.DictType{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	types := []sysmodel.DictType{
-		{BaseEntity: sysmodel.BaseEntity{ID: 1}, Name: "用户性别", Type: "sys_user_sex", Status: sysmodel.StatusEnable},
-		{BaseEntity: sysmodel.BaseEntity{ID: 2}, Name: "通用状态", Type: "sys_normal_disable", Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 1}, TenantID: 1, Name: "用户性别", Type: "sys_user_sex", Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 2}, TenantID: 1, Name: "通用状态", Type: "sys_normal_disable", Status: sysmodel.StatusEnable},
 	}
-	if err := db.WithContext(ctx).Create(&types).Error; err != nil {
+	if err := tenant.Skip(db).Create(&types).Error; err != nil {
 		return err
 	}
 	data := []sysmodel.DictData{
-		{DictType: "sys_user_sex", Label: "男", Value: "1", Sort: 1, Status: sysmodel.StatusEnable, ColorType: "primary"},
-		{DictType: "sys_user_sex", Label: "女", Value: "2", Sort: 2, Status: sysmodel.StatusEnable, ColorType: "danger"},
-		{DictType: "sys_user_sex", Label: "未知", Value: "0", Sort: 3, Status: sysmodel.StatusEnable, ColorType: "info"},
-		{DictType: "sys_normal_disable", Label: "开启", Value: "0", Sort: 1, Status: sysmodel.StatusEnable, ColorType: "success"},
-		{DictType: "sys_normal_disable", Label: "停用", Value: "1", Sort: 2, Status: sysmodel.StatusEnable, ColorType: "danger"},
+		{TenantID: 1, DictType: "sys_user_sex", Label: "男", Value: "1", Sort: 1, Status: sysmodel.StatusEnable, ColorType: "primary"},
+		{TenantID: 1, DictType: "sys_user_sex", Label: "女", Value: "2", Sort: 2, Status: sysmodel.StatusEnable, ColorType: "danger"},
+		{TenantID: 1, DictType: "sys_user_sex", Label: "未知", Value: "0", Sort: 3, Status: sysmodel.StatusEnable, ColorType: "info"},
+		{TenantID: 1, DictType: "sys_normal_disable", Label: "开启", Value: "0", Sort: 1, Status: sysmodel.StatusEnable, ColorType: "success"},
+		{TenantID: 1, DictType: "sys_normal_disable", Label: "停用", Value: "1", Sort: 2, Status: sysmodel.StatusEnable, ColorType: "danger"},
 	}
-	return db.WithContext(ctx).Create(&data).Error
+	return tenant.Skip(db).Create(&data).Error
 }
 
-func seedConfigs(db *gorm.DB, ctx context.Context) error {
+func seedConfigs(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&inframodel.Config{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&inframodel.Config{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	configs := []inframodel.Config{
-		{Category: "system", Name: "系统名称", Key: "system.name", Value: "go-admin-pro", Type: "string", Visible: true, Remark: "显示在登录页与管理后台"},
-		{Category: "system", Name: "用户初始密码", Key: "user.init.password", Value: "123456", Type: "string", Visible: false, Remark: "新增用户默认密码"},
+		{TenantID: 1, Category: "system", Name: "系统名称", Key: "system.name", Value: "go-admin-pro", Type: "string", Visible: true, Remark: "显示在登录页与管理后台"},
+		{TenantID: 1, Category: "system", Name: "用户初始密码", Key: "user.init.password", Value: "123456", Type: "string", Visible: false, Remark: "新增用户默认密码"},
 	}
-	return db.WithContext(ctx).Create(&configs).Error
+	return tenant.Skip(db).Create(&configs).Error
 }
 
-func seedJobs(db *gorm.DB, ctx context.Context) error {
+func seedJobs(db *gorm.DB) error {
 	var count int64
-	if err := db.WithContext(ctx).Model(&inframodel.Job{}).Count(&count).Error; err != nil {
+	if err := tenant.Skip(db).Model(&inframodel.Job{}).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	job := &inframodel.Job{
+		TenantID:       1,
 		Name:           "演示任务",
 		HandlerName:    "demoJob",
 		HandlerParam:   "hello go-admin-pro",
@@ -327,5 +330,5 @@ func seedJobs(db *gorm.DB, ctx context.Context) error {
 		Status:         inframodel.JobStatusPaused,
 		Remark:         "每 5 分钟执行一次的演示任务，默认暂停",
 	}
-	return db.WithContext(ctx).Create(job).Error
+	return tenant.Skip(db).Create(job).Error
 }
