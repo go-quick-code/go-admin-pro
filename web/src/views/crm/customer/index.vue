@@ -21,6 +21,22 @@
       </template>
       <template #actions="{ row }">
         <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
+        <el-button
+          v-if="userStore.hasPerm('crm:customer:release')"
+          link
+          type="warning"
+          @click.stop="handleRelease(row)"
+        >
+          释放
+        </el-button>
+        <el-button
+          v-if="userStore.hasPerm('crm:customer:transfer')"
+          link
+          type="primary"
+          @click.stop="openTransfer(row)"
+        >
+          转移
+        </el-button>
       </template>
       <template #form-ownerUserId="{ form }">
         <el-select v-model="form.ownerUserId" clearable filterable style="width: 100%" placeholder="缺省为当前登录用户">
@@ -49,12 +65,53 @@
         <el-descriptions-item label="创建时间">{{ formatTime(detail.createTime) }}</el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ formatTime(detail.updateTime) }}</el-descriptions-item>
       </el-descriptions>
+
+      <!-- 负责人历史（issue #13）：创建/认领/释放/转移全记录，新→旧。 -->
+      <h4 class="history-title">负责人历史</h4>
+      <el-timeline v-if="history.length" class="history-list">
+        <el-timeline-item
+          v-for="h in history"
+          :key="h.id"
+          :timestamp="formatTime(h.createTime)"
+          :type="actionTagType(h.action)"
+        >
+          <el-tag size="small" :type="actionTagType(h.action)" class="history-action">
+            {{ actionLabel(h.action) }}
+          </el-tag>
+          <span class="history-text">{{ historyText(h) }}</span>
+        </el-timeline-item>
+      </el-timeline>
+      <el-empty v-else description="暂无负责人变更记录" :image-size="60" />
     </el-drawer>
+
+    <!-- 转移对话框：选择同租户其他用户作为新负责人。 -->
+    <el-dialog v-model="transferVisible" title="转移客户" width="420px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="客户">
+          <span>{{ transferRow?.name }}</span>
+        </el-form-item>
+        <el-form-item label="新负责人">
+          <el-select v-model="transferTo" filterable style="width: 100%" placeholder="请选择新负责人">
+            <el-option
+              v-for="u in users.filter((u: any) => u.id !== transferRow?.ownerUserId)"
+              :key="u.id"
+              :label="u.nickname"
+              :value="u.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="transferVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!transferTo" @click="confirmTransfer">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { formatTime, dictLabel } from '@/utils/format'
 import {
@@ -63,8 +120,12 @@ import {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  releaseCustomer,
+  transferCustomer,
+  pageCustomerOwnerHistory,
 } from '@/api/crm'
 import { treeDepts, listSimpleUsers } from '@/api/system'
+import { useUserStore } from '@/stores/user'
 
 // 客户状态对齐规格：1 潜在 / 2 活跃 / 3 流失（docs/crm-mvp-spec.md §3）
 const customerStatusOptions = [
@@ -83,7 +144,34 @@ function statusTagType(status: number) {
   return 'info'
 }
 
+// 负责人历史操作类型（issue #13）：create 创建 / claim 认领 / release 释放 / transfer 转移。
+const actionOptions = [
+  { label: '创建', value: 'create' },
+  { label: '认领', value: 'claim' },
+  { label: '释放', value: 'release' },
+  { label: '转移', value: 'transfer' },
+]
+
+function actionLabel(action: string) {
+  return dictLabel(actionOptions, action)
+}
+
+function actionTagType(action: string) {
+  if (action === 'claim') return 'success'
+  if (action === 'release') return 'warning'
+  if (action === 'create') return 'primary'
+  return 'info'
+}
+
+function historyText(h: any) {
+  const from = h.fromOwnerUserName || '公海'
+  const to = h.toOwnerUserName || '公海'
+  if (h.action === 'create') return `${to} 成为首任负责人`
+  return `${from} → ${to}`
+}
+
 const tableRef = ref()
+const userStore = useUserStore()
 const users = ref<any[]>([])
 const deptOptions = ref<{ label: string; value: number }[]>([])
 
@@ -142,10 +230,50 @@ const api = {
 
 const detail = ref<any>(null)
 const detailVisible = ref(false)
+const history = ref<any[]>([])
 
 async function openDetail(row: any) {
   detail.value = await getCustomer(row.id)
   detailVisible.value = true
+  history.value = await pageCustomerOwnerHistory(row.id, { pageNo: 1, pageSize: 20 })
+}
+
+// 释放到公海：填写释放原因（可空），确认后调用释放接口。
+async function handleRelease(row: any) {
+  const reason = await ElMessageBox.prompt(
+    `将「${row.name}」释放到公海？释放后所有人可通过公海认领。`,
+    '释放客户',
+    {
+      type: 'warning',
+      inputPlaceholder: '释放原因（可空，最多 255 字）',
+      inputValidator: (v: string) => !v || v.length <= 255 || '释放原因最多 255 字',
+    },
+  )
+    .then(({ value }) => value || '')
+    .catch(() => null)
+  if (reason === null) return
+  await releaseCustomer(row.id, reason)
+  ElMessage.success('已释放到公海')
+  tableRef.value?.reload()
+}
+
+// 转移给同租户其他用户。
+const transferVisible = ref(false)
+const transferRow = ref<any>(null)
+const transferTo = ref<number>()
+
+function openTransfer(row: any) {
+  transferRow.value = row
+  transferTo.value = undefined
+  transferVisible.value = true
+}
+
+async function confirmTransfer() {
+  if (!transferTo.value || !transferRow.value) return
+  await transferCustomer(transferRow.value.id, transferTo.value)
+  ElMessage.success('转移成功')
+  transferVisible.value = false
+  tableRef.value?.reload()
 }
 
 function flattenDeptTree(nodes: any[], out: { label: string; value: number }[] = []) {
@@ -162,3 +290,18 @@ onMounted(async () => {
   users.value = simpleUsers
 })
 </script>
+
+<style scoped>
+.history-title {
+  margin: 18px 0 10px;
+}
+.history-list {
+  padding-left: 4px;
+}
+.history-action {
+  margin-right: 8px;
+}
+.history-text {
+  font-size: 13px;
+}
+</style>
