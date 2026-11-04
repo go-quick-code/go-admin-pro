@@ -51,7 +51,8 @@ test-integration:
 	if ! grep -rhs --include='*_test.go' -e '^//go:build' -e '^// +build' $$pkgs | grep -v '!integration' | grep -q 'integration'; then \
 		echo "no integration tests found (build tag integration)"; exit 1; \
 	fi
-	GAP_TEST_DATABASE_DSN="$(GAP_TEST_DATABASE_DSN)" go test -tags=integration ./...
+	# -p 1 串行跑各包：集成测试包间会清空同一个测试库，并行必然互相冲掉数据。
+	GAP_TEST_DATABASE_DSN="$(GAP_TEST_DATABASE_DSN)" go test -tags=integration -p 1 ./...
 
 check: fmt-check build vet test
 
