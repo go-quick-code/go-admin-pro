@@ -1,0 +1,41 @@
+app:
+  name: go-admin-pro
+  env: dev
+  port: 8080
+  api-prefix: /admin-api
+  web-root: ./web/dist
+
+database:
+  dsn: root:123456@tcp(127.0.0.1:3306)/go_admin_pro?charset=utf8mb4&parseTime=True&loc=Local
+  max-idle-conns: 10
+  max-open-conns: 100
+  auto-migrate: true
+  seed: true
+
+jwt:
+  secret: change-me-in-production-9f8a7b6c5d4e3f2a
+  expire: 24h
+  issuer: go-admin-pro
+
+security:
+  captcha:
+    enabled: false
+    width: 120
+    height: 40
+    length: 4
+  login:
+    max-fail: 5
+    lock-duration: 10m
+
+storage:
+  local:
+    base-path: ./uploads
+    public-prefix: /files
+
+tenant:
+  enabled: true
+  default-id: 1
+
+logger:
+  level: info
+  format: text

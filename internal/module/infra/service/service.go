@@ -1,0 +1,207 @@
+package service
+
+import (
+	"context"
+	"io"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/lautung/go-admin-pro/internal/config"
+	"github.com/lautung/go-admin-pro/internal/module/infra/dto"
+	"github.com/lautung/go-admin-pro/internal/module/infra/model"
+	"github.com/lautung/go-admin-pro/internal/module/infra/repository"
+	"github.com/lautung/go-admin-pro/internal/pkg/utils"
+	"github.com/lautung/go-admin-pro/internal/pkg/web"
+	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+)
+
+const maxUploadSize = 20 << 20 // 20MB
+
+var allowedExt = map[string]struct{}{
+	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".webp": {}, ".svg": {},
+	".pdf": {}, ".doc": {}, ".docx": {}, ".xls": {}, ".xlsx": {}, ".ppt": {}, ".pptx": {},
+	".txt": {}, ".md": {}, ".csv": {}, ".json": {}, ".zip": {}, ".rar": {}, ".7z": {},
+	".mp4": {}, ".mp3": {},
+}
+
+// Service 汇聚 infra 模块能力。
+type Service struct {
+	repo      *repository.Repository
+	cfg       *config.Config
+	scheduler *JobScheduler
+}
+
+func New(repo *repository.Repository, cfg *config.Config, scheduler *JobScheduler) *Service {
+	return &Service{repo: repo, cfg: cfg, scheduler: scheduler}
+}
+
+func (s *Service) Scheduler() *JobScheduler { return s.scheduler }
+
+// ---------- 文件 ----------
+
+func (s *Service) UploadFile(ctx context.Context, fh *multipart.FileHeader) (*model.File, error) {
+	if fh.Size > maxUploadSize {
+		return nil, xerr.BadRequest("文件大小不能超过 20MB")
+	}
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	if _, ok := allowedExt[ext]; !ok {
+		return nil, xerr.BadRequest("不支持的文件类型：" + ext)
+	}
+
+	now := time.Now()
+	relDir := filepath.Join(now.Format("2006"), now.Format("01"), now.Format("02"))
+	storageName := utils.UUID() + ext
+	relPath := filepath.Join(relDir, storageName)
+	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, relPath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		return nil, xerr.Internal(err)
+	}
+
+	src, err := fh.Open()
+	if err != nil {
+		return nil, xerr.Internal(err)
+	}
+	defer src.Close()
+
+	dst, err := os.Create(absPath)
+	if err != nil {
+		return nil, xerr.Internal(err)
+	}
+	defer dst.Close()
+
+	written, err := io.Copy(dst, src)
+	if err != nil {
+		return nil, xerr.Internal(err)
+	}
+
+	url := s.cfg.Storage.Local.PublicPrefix + "/" + filepath.ToSlash(relPath)
+	f := &model.File{
+		Name:     filepath.Base(fh.Filename),
+		Path:     filepath.ToSlash(relPath),
+		URL:      url,
+		Size:     written,
+		Type:     fh.Header.Get("Content-Type"),
+		Provider: "local",
+	}
+	if err := s.repo.CreateFile(ctx, f); err != nil {
+		_ = os.Remove(absPath)
+		return nil, err
+	}
+	return f, nil
+}
+
+func (s *Service) ListFiles(ctx context.Context, req *dto.FilePageReq) ([]model.File, int64, error) {
+	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
+	page.Normalize()
+	filter := repository.FileFilter{Name: req.Name, Type: req.Type}
+	return s.repo.ListFiles(ctx, filter, page.Offset(), page.PageSize)
+}
+
+func (s *Service) DeleteFile(ctx context.Context, id int64) error {
+	f, err := s.repo.FindFileByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if f == nil {
+		return xerr.NotFound("文件不存在")
+	}
+	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
+	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+		return xerr.Internal(err)
+	}
+	return s.repo.DeleteFile(ctx, id)
+}
+
+// FilePublicURL 返回文件的公开访问地址。
+func (s *Service) FilePublicURL(f *model.File) string {
+	return f.URL
+}
+
+// ---------- 参数配置 ----------
+
+func (s *Service) ListConfigs(ctx context.Context, req *dto.ConfigPageReq) ([]model.Config, int64, error) {
+	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
+	page.Normalize()
+	filter := repository.ConfigFilter{Name: req.Name, Key: req.Key, Category: req.Category}
+	return s.repo.ListConfigs(ctx, filter, page.Offset(), page.PageSize)
+}
+
+func (s *Service) GetConfig(ctx context.Context, id int64) (*model.Config, error) {
+	c, err := s.repo.FindConfigByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, xerr.NotFound("参数配置不存在")
+	}
+	return c, nil
+}
+
+func (s *Service) CreateConfig(ctx context.Context, req *dto.ConfigCreateReq) error {
+	existing, err := s.repo.FindConfigByKey(ctx, req.Key)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return xerr.Conflict("参数键名已存在")
+	}
+	category := req.Category
+	if category == "" {
+		category = "default"
+	}
+	configType := req.Type
+	if configType == "" {
+		configType = "string"
+	}
+	c := &model.Config{
+		Category: category,
+		Name:     req.Name,
+		Key:      req.Key,
+		Value:    req.Value,
+		Type:     configType,
+		Visible:  req.Visible,
+		Remark:   req.Remark,
+	}
+	return s.repo.CreateConfig(ctx, c)
+}
+
+func (s *Service) UpdateConfig(ctx context.Context, req *dto.ConfigUpdateReq) error {
+	c, err := s.repo.FindConfigByID(ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return xerr.NotFound("参数配置不存在")
+	}
+	if c.Key != req.Key {
+		existing, err := s.repo.FindConfigByKey(ctx, req.Key)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			return xerr.Conflict("参数键名已存在")
+		}
+	}
+	c.Category = req.Category
+	c.Name = req.Name
+	c.Key = req.Key
+	c.Value = req.Value
+	c.Type = req.Type
+	c.Visible = req.Visible
+	c.Remark = req.Remark
+	return s.repo.SaveConfig(ctx, c)
+}
+
+func (s *Service) DeleteConfig(ctx context.Context, id int64) error {
+	c, err := s.repo.FindConfigByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return xerr.NotFound("参数配置不存在")
+	}
+	return s.repo.DeleteConfig(ctx, id)
+}

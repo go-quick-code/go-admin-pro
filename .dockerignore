@@ -1,0 +1,13 @@
+.git
+.gitignore
+.github
+.idea
+.vscode
+bin
+web/node_modules
+web/dist
+web/.vite
+uploads
+docs
+*.md
+!README.md

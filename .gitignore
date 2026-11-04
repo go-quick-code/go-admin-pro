@@ -1,0 +1,33 @@
+# Go
+/bin/
+/dist/
+/tmp/
+*.exe
+*.test
+*.out
+coverage.txt
+
+# Config overrides
+configs/config.local.yaml
+configs/config.yaml.bak
+
+# Runtime data
+uploads/
+logs/
+codegen-output/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.local
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Environment
+.env
+.env.*
