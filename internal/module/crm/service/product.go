@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
@@ -11,6 +12,13 @@ import (
 )
 
 // ---------- 产品（本文件由 codegen 生成（issue #10 样板），接入步骤见生成包 INTEGRATION.md）----------
+// 接入补丁（issue #11，「生成物是起点」约定的业务联动，见 INTEGRATION.md 限制一节）：
+//   - 产品编码租户内唯一：service 预检（预检看不到软删行，落库撞 uk_crm_product_tenant_code
+//     时由 repository.IsDuplicateEntry 兜底翻译 400，软删行不释放编码）；
+//   - 分类必须存在（categoryId → crm_product_category，400）；
+//   - 删除走 ProductRefCountChecker 扩展点（product_refs.go，#15/#16 注册实现）；
+//   - 列表按分类筛选（树选择器联动，codegen 不生成 int64 筛选字段）。
+
 // ListProducts 分页查询产品。
 func (s *Service) ListProducts(ctx context.Context, req *dto.ProductPageReq) ([]model.Product, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
@@ -22,10 +30,11 @@ func (s *Service) ListProducts(ctx context.Context, req *dto.ProductPageReq) ([]
 	}
 
 	filter := repository.ProductFilter{
-		Name:   req.Name,
-		Code:   req.Code,
-		Unit:   req.Unit,
-		Status: req.Status,
+		Name:       req.Name,
+		Code:       req.Code,
+		Unit:       req.Unit,
+		Status:     req.Status,
+		CategoryID: req.CategoryId,
 	}
 
 	list, total, err := s.repo.ListProducts(ctx, filter, page.Offset(), page.PageSize)
@@ -46,12 +55,18 @@ func (s *Service) GetProduct(ctx context.Context, id int64) (*model.Product, err
 
 // CreateProduct 创建产品。
 func (s *Service) CreateProduct(ctx context.Context, req *dto.ProductCreateReq) (*model.Product, error) {
-	Status := int8(1)
+	status := int8(1)
 	if req.Status != nil {
 		if err := ValidateProductStatus(*req.Status); err != nil {
 			return nil, err
 		}
-		Status = *req.Status
+		status = *req.Status
+	}
+	if err := s.validateProductCategory(ctx, req.CategoryId); err != nil {
+		return nil, err
+	}
+	if err := s.checkProductCodeFree(ctx, req.Code, 0); err != nil {
+		return nil, err
 	}
 
 	row := &model.Product{
@@ -60,16 +75,20 @@ func (s *Service) CreateProduct(ctx context.Context, req *dto.ProductCreateReq) 
 		Code:        req.Code,
 		Unit:        req.Unit,
 		Price:       req.Price,
-		Status:      Status,
+		Status:      status,
 		Description: req.Description,
 	}
 	if err := s.repo.CreateProduct(ctx, row); err != nil {
+		// 唯一键兜底：预检与落库之间的并发写入或软删行占码在此拦截。
+		if repository.IsDuplicateEntry(err) {
+			return nil, xerr.BadRequest("产品编码已存在")
+		}
 		return nil, err
 	}
 	return row, nil
 }
 
-// UpdateProduct 修改产品：数据范围外一律 404；字段全量覆盖。
+// UpdateProduct 修改产品：字段全量覆盖。
 func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) error {
 	row, err := s.findVisibleProduct(ctx, req.ID)
 	if err != nil {
@@ -81,22 +100,53 @@ func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) 
 		}
 		row.Status = *req.Status
 	}
+	if err := s.validateProductCategory(ctx, req.CategoryId); err != nil {
+		return err
+	}
+	if err := s.checkProductCodeFree(ctx, req.Code, req.ID); err != nil {
+		return err
+	}
 	row.CategoryId = req.CategoryId
 	row.Name = req.Name
 	row.Code = req.Code
 	row.Unit = req.Unit
 	row.Price = req.Price
 	row.Description = req.Description
-	return s.repo.SaveProduct(ctx, row)
+	if err := s.repo.SaveProduct(ctx, row); err != nil {
+		if repository.IsDuplicateEntry(err) {
+			return xerr.BadRequest("产品编码已存在")
+		}
+		return err
+	}
+	return nil
 }
 
-// DeleteProduct 软删除产品。
+// DeleteProduct 软删除产品；删除前跑引用校验扩展点（product_refs.go）。
 func (s *Service) DeleteProduct(ctx context.Context, id int64) error {
 	row, err := s.findVisibleProduct(ctx, id)
 	if err != nil {
 		return err
 	}
+	if err := s.checkProductRefs(ctx, row.ID); err != nil {
+		return err
+	}
 	return s.repo.DeleteProduct(ctx, row.ID)
+}
+
+// checkProductCodeFree 校验产品编码在当前租户内未被占用（selfID 非 0 时排除自身，
+// 即「保持自身编码不变」放行）。预检只看未删除行：软删行占用由唯一键兜底。
+func (s *Service) checkProductCodeFree(ctx context.Context, code string, selfID int64) error {
+	if code == "" {
+		return nil
+	}
+	row, err := s.repo.FindProductByCode(ctx, code)
+	if err != nil {
+		return err
+	}
+	if row != nil && row.ID != selfID {
+		return xerr.BadRequest(fmt.Sprintf("产品编码 %q 已存在", code))
+	}
+	return nil
 }
 
 // findVisibleProduct 取产品并做可见性校验：不存在都返回 404。

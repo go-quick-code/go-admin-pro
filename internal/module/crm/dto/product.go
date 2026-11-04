@@ -30,11 +30,13 @@ type ProductUpdateReq struct {
 }
 
 // ProductPageReq 产品分页筛选：枚举传非法值直接 400，绝不静默当成「无此筛选」。
+// categoryId 由 #11 手工补：codegen 不生成 int64 筛选字段（分类树选择器联动）。
 type ProductPageReq struct {
-	PageNo   int    `form:"pageNo"`
-	PageSize int    `form:"pageSize"`
-	Name     string `form:"name"`
-	Code     string `form:"code"`
-	Unit     string `form:"unit"`
-	Status   *int8  `form:"status"`
+	PageNo     int    `form:"pageNo"`
+	PageSize   int    `form:"pageSize"`
+	Name       string `form:"name"`
+	Code       string `form:"code"`
+	Unit       string `form:"unit"`
+	Status     *int8  `form:"status"`
+	CategoryId *int64 `form:"categoryId"`
 }

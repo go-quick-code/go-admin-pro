@@ -7,6 +7,9 @@ import (
 )
 
 // ---------- 产品（本文件由 codegen 生成（issue #10 样板），接入步骤见生成包 INTEGRATION.md）----------
+// 接入补丁（issue #11）：ProductFilter 增加 CategoryID（分类树联动，codegen 不生成
+// int64 筛选字段）；新增 FindProductByCode（编码租户内唯一的 service 预检）；
+// 创建/保存对 1062 重复键做规整（IsDuplicateEntry，软删行占码的唯一键兜底）。
 
 // ProductFilter 是产品列表查询条件。
 type ProductFilter struct {
@@ -14,12 +17,25 @@ type ProductFilter struct {
 	Code   string
 	Unit   string
 	Status *int8
+
+	// CategoryID 按分类过滤（nil 不过滤；树选择器传入，含其子分类由调用方展开）。
+	CategoryID *int64
 }
 
 // FindProductByID 按 ID 查产品（租户插件自动过滤），不存在返回 nil。
 func (r *Repository) FindProductByID(ctx context.Context, id int64) (*model.Product, error) {
 	var row model.Product
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
+// FindProductByCode 按编码查产品（租户插件自动过滤租户；GORM 软删过滤只看未删除行），
+// 不存在返回 nil。编码唯一的落库兜底见 CreateProduct/SaveProduct 的重复键规整。
+func (r *Repository) FindProductByCode(ctx context.Context, code string) (*model.Product, error) {
+	var row model.Product
+	if err := r.db.WithContext(ctx).Where("code = ?", code).First(&row).Error; err != nil {
 		return nil, notFound(err)
 	}
 	return &row, nil
@@ -40,6 +56,9 @@ func (r *Repository) ListProducts(ctx context.Context, f ProductFilter, offset, 
 	if f.Status != nil {
 		q = q.Where("status = ?", *f.Status)
 	}
+	if f.CategoryID != nil {
+		q = q.Where("category_id = ?", *f.CategoryID)
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -52,14 +71,14 @@ func (r *Repository) ListProducts(ctx context.Context, f ProductFilter, offset, 
 	return list, total, nil
 }
 
-// CreateProduct 创建产品。
+// CreateProduct 创建产品；撞 uk_crm_product_tenant_code 时返回 IsDuplicateEntry 可识别的错误。
 func (r *Repository) CreateProduct(ctx context.Context, row *model.Product) error {
-	return r.db.WithContext(ctx).Create(row).Error
+	return wrapDuplicateEntry(r.db.WithContext(ctx).Create(row).Error)
 }
 
-// SaveProduct 全量保存产品（更新路径）。
+// SaveProduct 全量保存产品（更新路径）；撞唯一键时返回 IsDuplicateEntry 可识别的错误。
 func (r *Repository) SaveProduct(ctx context.Context, row *model.Product) error {
-	return r.db.WithContext(ctx).Save(row).Error
+	return wrapDuplicateEntry(r.db.WithContext(ctx).Save(row).Error)
 }
 
 // DeleteProduct 按 ID 软删除产品（GORM deleted_at，租户插件自动带租户条件）。
