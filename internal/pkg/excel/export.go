@@ -27,12 +27,17 @@ type ExportOptions struct {
 	Columns []string
 	// Formatters 按字段名或表头指定值转换函数。
 	Formatters map[string]Formatter
+	// NativeDates 为 true 时，time.Time（字段值或 Formatter 返回值，两者处理一致）
+	// 写成 Excel 原生日期单元格：原始值是序列号，数字格式为 yyyy-mm-dd hh:mm:ss，
+	// 墙上时间按字段所在时区保持不变。默认 false，按 DefaultTimeLayout 输出文本。
+	NativeDates bool
 }
 
 // Export 把结构体切片写成 xlsx 文件内容。
 //
 // 表头固定在第一行并冻结，列顺序由 Columns 决定；未指定时按字段声明顺序导出全部列。
-// 值为 nil 的指针字段与零值 time.Time 输出为空单元格。行数由调用方控制，
+// 值为 nil 的指针字段与零值 time.Time 输出为空单元格。time.Time 默认输出文本，
+// 开启 ExportOptions.NativeDates 后写成原生日期单元格。行数由调用方控制，
 // 大结果集应分批导出，避免一次性占用过多内存。
 func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 	s, err := schemaFor(reflect.TypeOf((*T)(nil)).Elem())
@@ -58,6 +63,13 @@ func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 	}
 	defer f.Close()
 
+	var dateStyle int
+	if opts.NativeDates {
+		if dateStyle, err = newNativeDateStyle(f); err != nil {
+			return nil, fmt.Errorf("创建日期数字格式失败：%w", err)
+		}
+	}
+
 	selected := make([]Column, len(colIdxs))
 	for i, idx := range colIdxs {
 		selected[i] = s.columns[idx]
@@ -71,13 +83,19 @@ func Export[T any](rows []T, opts ExportOptions) ([]byte, error) {
 		for colPos, colIdx := range colIdxs {
 			col := s.columns[colIdx]
 			field := rowValue.FieldByIndex(s.indexes[colIdx])
-			value, err := cellValue(field, formatters[colIdx])
+			value, err := cellValue(field, formatters[colIdx], opts.NativeDates)
 			if err != nil {
 				return nil, fmt.Errorf("第 %d 行 [%s] 导出失败：%w", rowIdx+2, col.Header, err)
 			}
 			cell, _ := excelize.CoordinatesToCellName(colPos+1, rowIdx+2)
 			if err := f.SetCellValue(sheet, cell, value); err != nil {
 				return nil, fmt.Errorf("第 %d 行 [%s] 写入失败：%w", rowIdx+2, col.Header, err)
+			}
+			// time.Time 由 excelize 写成序列号；数字格式需要覆盖成统一的日期格式。
+			if _, ok := value.(time.Time); ok && opts.NativeDates {
+				if err := f.SetCellStyle(sheet, cell, cell, dateStyle); err != nil {
+					return nil, fmt.Errorf("第 %d 行 [%s] 写入失败：%w", rowIdx+2, col.Header, err)
+				}
 			}
 		}
 	}
@@ -168,7 +186,7 @@ func derefRow(rv reflect.Value) reflect.Value {
 }
 
 // cellValue 计算单元格值，优先使用调用方提供的转换函数。
-func cellValue(fv reflect.Value, format Formatter) (any, error) {
+func cellValue(fv reflect.Value, format Formatter, nativeDates bool) (any, error) {
 	var (
 		value any
 		err   error
@@ -181,7 +199,7 @@ func cellValue(fv reflect.Value, format Formatter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return normalizeCell(value)
+	return normalizeCell(value, nativeDates)
 }
 
 // unwrappedValue 去掉指针包装，供转换函数使用。
@@ -246,13 +264,18 @@ func exportValue(fv reflect.Value) (any, error) {
 }
 
 // normalizeCell 把转换函数的结果规整成适合写入单元格的值。
-func normalizeCell(value any) (any, error) {
+func normalizeCell(value any, nativeDates bool) (any, error) {
 	switch v := value.(type) {
 	case nil:
 		return "", nil
 	case time.Time:
 		if v.IsZero() {
 			return "", nil
+		}
+		if nativeDates {
+			// 保留 time.Time，由 SetCellValue 转成序列号并套用日期数字格式。
+			// Formatter 返回 time.Time 时与字段值同样处理，不做区分。
+			return v, nil
 		}
 		return v.Format(DefaultTimeLayout), nil
 	case encoding.TextMarshaler:

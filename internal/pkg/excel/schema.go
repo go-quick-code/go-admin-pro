@@ -16,6 +16,10 @@
 //
 // Import 按单元格原始值解析：百分比 50% 读作 0.5，日期读作 Excel 序列号；
 // Export 在内存中生成整个文件，行数由调用方控制，大结果集应分批导出。
+//
+// Export 默认把 time.Time 输出为 DefaultTimeLayout 文本；开启 ExportOptions.NativeDates
+// 后写成 Excel 原生日期单元格：原始值是序列号，数字格式 yyyy-mm-dd hh:mm:ss，
+// 墙上时间按字段所在时区保持不变，可在 Excel 中直接按日期筛选与排序。
 package excel
 
 import (
