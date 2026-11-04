@@ -1,0 +1,34 @@
+{
+  "module": "crm",
+  "entity": "product",
+  "tableName": "crm_product",
+  "comment": "产品",
+  "ownerScoped": true,
+  "importExport": true,
+  "menu": {
+    "menuId": 402,
+    "parentId": 400,
+    "name": "产品管理",
+    "path": "product",
+    "icon": "Goods",
+    "sort": 2,
+    "buttonIds": [4021, 4022, 4023, 4024]
+  },
+  "fields": [
+    { "name": "name", "type": "string", "size": 128, "comment": "产品名称", "required": true, "searchable": true },
+    { "name": "category", "type": "string", "size": 64, "comment": "产品分类" },
+    { "name": "unit", "type": "string", "size": 32, "comment": "单位", "dict": "crm_product_unit" },
+    { "name": "price", "type": "money", "comment": "价格（元）", "required": true },
+    {
+      "name": "status", "type": "int8", "comment": "状态", "default": 1,
+      "enum": {
+        "type": "ProductStatus",
+        "values": [
+          { "name": "OnSale", "value": 1, "label": "在售" },
+          { "name": "OffShelf", "value": 2, "label": "下架" }
+        ]
+      }
+    },
+    { "name": "remark", "type": "text", "size": 500, "comment": "备注" }
+  ]
+}
