@@ -114,6 +114,9 @@ func (s *schema) addFields(t reflect.Type, prefix []int) error {
 			continue
 		}
 		if sf.PkgPath != "" { // 未导出字段不可写
+			if tag != "" {
+				return fmt.Errorf("%w: 字段 %s 未导出", ErrInvalidSchema, sf.Name)
+			}
 			continue
 		}
 		if tag == "" {
