@@ -15,6 +15,9 @@ func TestExportNilPointerRowFirst(t *testing.T) {
 	if !strings.Contains(err.Error(), "第 2 行为 nil") {
 		t.Fatalf("error = %v, want 第 2 行为 nil", err)
 	}
+	if !strings.Contains(err.Error(), "请传入非 nil 行") {
+		t.Fatalf("error = %v, want expected form hint 请传入非 nil 行", err)
+	}
 }
 
 func TestExportNilPointerRowMiddle(t *testing.T) {
