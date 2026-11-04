@@ -25,7 +25,7 @@ func (s *Service) GetActiveUser(ctx context.Context, id int64) (*model.User, err
 	return user, nil
 }
 
-// ListUsers 分页查询用户，并应用数据权限。
+// ListUsers 分页查询用户，并按数据范围谓词过滤（行级权限引擎，见 internal/pkg/datascope）。
 func (s *Service) ListUsers(ctx context.Context, req *dto.UserPageReq) ([]model.User, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
@@ -38,14 +38,21 @@ func (s *Service) ListUsers(ctx context.Context, req *dto.UserPageReq) ([]model.
 		DeptID:   req.DeptID,
 	}
 
-	deptIDs, onlySelf, err := s.UserCenter(ctx, CurrentUserID(ctx))
+	scope, err := s.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
 		return nil, 0, err
 	}
-	if onlySelf {
-		filter.OnlyUserID = CurrentUserID(ctx)
-	} else {
-		filter.DeptIDs = deptIDs
+	if !scope.All {
+		if scope.IncludeSelf {
+			filter.SelfUserID = scope.UserID
+		}
+		switch {
+		case len(scope.DeptIDs) > 0:
+			filter.DeptIDs = scope.DeptIDs
+		case !scope.IncludeSelf:
+			// 无可见部门且不含本人：谓词恒假（fail-closed，绝不回退全部）。
+			filter.DeptIDs = []int64{}
+		}
 	}
 
 	list, total, err := s.repo.ListUsers(ctx, filter, page.Offset(), page.PageSize)
