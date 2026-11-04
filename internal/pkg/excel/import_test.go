@@ -519,3 +519,152 @@ func TestImportMaxUnzipBytes(t *testing.T) {
 		t.Fatalf("error = %v, want ErrFileTooLarge", err)
 	}
 }
+
+func TestImportDateRange(t *testing.T) {
+	t.Run("historical and max dates", func(t *testing.T) {
+		data := buildWorkbook(t, "数据", [][]any{
+			{"客户名称", "加入日期"},
+			{"甲", 18264},   // 1950-01-01
+			{"乙", 2958465}, // 9999-12-31
+		})
+		rows, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{Location: time.UTC})
+		if err != nil {
+			t.Fatalf("Import: %v", err)
+		}
+		if got := rows[0].JoinedAt; got.Year() != 1950 || got.Month() != time.January || got.Day() != 1 {
+			t.Errorf("historical date = %v, want 1950-01-01", got)
+		}
+		if got := rows[1].JoinedAt; got.Year() != 9999 || got.Month() != time.December || got.Day() != 31 {
+			t.Errorf("max date = %v, want 9999-12-31", got)
+		}
+	})
+
+	t.Run("out of range", func(t *testing.T) {
+		data := buildWorkbook(t, "数据", [][]any{
+			{"客户名称", "加入日期"},
+			{"甲", 0},
+			{"乙", 2958466},
+			{"丙", 20260102},
+			{"丁", "Inf"},
+			{"戊", "1e308"},
+			{"己", "NaN"},
+		})
+		_, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+		ie := asImportError(t, err)
+		if len(ie.Errors) != 6 {
+			t.Fatalf("got %d errors, want 6: %+v", len(ie.Errors), ie.Errors)
+		}
+		for row := 2; row <= 7; row++ {
+			assertCellError(t, ie, row, "加入日期", "超出 Excel 日期范围")
+		}
+	})
+
+	t.Run("1904 upper bound", func(t *testing.T) {
+		valid := buildDate1904Workbook(t, 2957003) // 9999-12-31
+		rows, err := excel.Import[importRow](bytes.NewReader(valid), excel.ImportOptions[importRow]{Location: time.UTC})
+		if err != nil {
+			t.Fatalf("Import valid: %v", err)
+		}
+		if got := rows[0].JoinedAt; got.Year() != 9999 {
+			t.Errorf("1904 max date = %v, want year 9999", got)
+		}
+
+		invalid := buildDate1904Workbook(t, 2957004)
+		_, err = excel.Import[importRow](bytes.NewReader(invalid), excel.ImportOptions[importRow]{})
+		ie := asImportError(t, err)
+		assertCellError(t, ie, 2, "加入日期", "超出 Excel 日期范围")
+	})
+}
+
+func buildDate1904Workbook(t *testing.T, serial int) []byte {
+	t.Helper()
+	f := excelize.NewFile()
+	defer f.Close()
+	if err := f.SetWorkbookProps(&excelize.WorkbookPropsOptions{Date1904: boolPtr(true)}); err != nil {
+		t.Fatalf("set workbook props: %v", err)
+	}
+	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"客户名称", "加入日期"})
+	_ = f.SetSheetRow("Sheet1", "A2", &[]any{"甲", serial})
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+type optionalRow struct {
+	Name  string `excel:"名称"`
+	Phone string `excel:"电话"`
+}
+
+func TestImportAllUnknownHeaders(t *testing.T) {
+	data := buildWorkbook(t, "数据", [][]any{
+		{"Name", "Phone"},
+		{"a", "b"},
+	})
+	_, err := excel.Import[optionalRow](bytes.NewReader(data), excel.ImportOptions[optionalRow]{AllowUnknownHeaders: true})
+	if !errors.Is(err, excel.ErrInvalidWorkbook) {
+		t.Fatalf("error = %v, want ErrInvalidWorkbook", err)
+	}
+}
+
+type floatRow struct {
+	Value float64 `excel:"数值"`
+}
+
+func TestImportFloatSpecialValues(t *testing.T) {
+	data := buildWorkbook(t, "数据", [][]any{
+		{"数值"},
+		{"NaN"},
+		{"Inf"},
+		{"-Inf"},
+	})
+	_, err := excel.Import[floatRow](bytes.NewReader(data), excel.ImportOptions[floatRow]{})
+	ie := asImportError(t, err)
+	if len(ie.Errors) != 3 {
+		t.Fatalf("got %d errors, want 3: %+v", len(ie.Errors), ie.Errors)
+	}
+	for row := 2; row <= 4; row++ {
+		assertCellError(t, ie, row, "数值", "不是有效的数字")
+	}
+}
+
+func TestImportDuplicateHeader(t *testing.T) {
+	data := buildWorkbook(t, "数据", [][]any{
+		{"客户名称", "客户名称"},
+		{"张三", "李四"},
+	})
+	_, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+	ie := asImportError(t, err)
+	assertCellError(t, ie, 1, "客户名称", "表头重复")
+}
+
+func TestImportDefaultMaxErrors(t *testing.T) {
+	rows := make([][]any, 0, excel.DefaultMaxErrors+2)
+	rows = append(rows, []any{"客户名称", "年龄"})
+	for i := 0; i <= excel.DefaultMaxErrors; i++ {
+		rows = append(rows, []any{"", i})
+	}
+	data := buildWorkbook(t, "数据", rows)
+	_, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+	ie := asImportError(t, err)
+	if len(ie.Errors) != excel.DefaultMaxErrors || ie.Total != excel.DefaultMaxErrors+1 || !ie.Truncated {
+		t.Fatalf("errors = %d, total = %d, truncated = %v", len(ie.Errors), ie.Total, ie.Truncated)
+	}
+}
+
+func TestImportExactlyMaxRows(t *testing.T) {
+	rows := make([][]any, 0, excel.DefaultMaxRows+1)
+	rows = append(rows, []any{"客户名称"})
+	for i := 0; i < excel.DefaultMaxRows; i++ {
+		rows = append(rows, []any{"客户"})
+	}
+	data := buildWorkbook(t, "数据", rows)
+	got, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(got) != excel.DefaultMaxRows {
+		t.Fatalf("got %d rows, want %d", len(got), excel.DefaultMaxRows)
+	}
+}

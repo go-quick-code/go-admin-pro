@@ -71,6 +71,24 @@ type unsupportedFieldRow struct {
 	Attrs map[string]string `excel:"属性"`
 }
 
+type conflictingHeaderRow struct {
+	Code string `excel:"Name"`
+	Name string `excel:"名称"`
+}
+
+type duplicateFieldBaseA struct {
+	Code string `excel:"编码A"`
+}
+
+type duplicateFieldBaseB struct {
+	Code string `excel:"编码B"`
+}
+
+type duplicateFieldRow struct {
+	duplicateFieldBaseA
+	duplicateFieldBaseB
+}
+
 func TestColumnsErrors(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -95,6 +113,18 @@ func TestColumnsErrors(t *testing.T) {
 			}
 			return excel.Columns[row]()
 		}, excel.ErrInvalidSchema},
+		{"nan width", func() ([]excel.Column, error) {
+			type row struct {
+				Name string `excel:"名称,width=NaN"`
+			}
+			return excel.Columns[row]()
+		}, excel.ErrInvalidSchema},
+		{"width too large", func() ([]excel.Column, error) {
+			type row struct {
+				Name string `excel:"名称,width=256"`
+			}
+			return excel.Columns[row]()
+		}, excel.ErrInvalidSchema},
 		{"duplicate header", func() ([]excel.Column, error) {
 			type row struct {
 				Name  string `excel:"名称"`
@@ -111,6 +141,12 @@ func TestColumnsErrors(t *testing.T) {
 		{"unsupported field type", func() ([]excel.Column, error) {
 			return excel.Columns[unsupportedFieldRow]()
 		}, excel.ErrUnsupportedType},
+		{"header conflicts with field name", func() ([]excel.Column, error) {
+			return excel.Columns[conflictingHeaderRow]()
+		}, excel.ErrInvalidSchema},
+		{"duplicate embedded field", func() ([]excel.Column, error) {
+			return excel.Columns[duplicateFieldRow]()
+		}, excel.ErrInvalidSchema},
 		{"non struct", func() ([]excel.Column, error) {
 			return excel.Columns[string]()
 		}, excel.ErrUnsupportedType},

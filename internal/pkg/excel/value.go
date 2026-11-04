@@ -3,6 +3,7 @@ package excel
 import (
 	"encoding"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -79,7 +80,7 @@ func setCellValue(fv reflect.Value, text string, location *time.Location, date19
 		fv.SetUint(n)
 	case reflect.Float32, reflect.Float64:
 		n, err := strconv.ParseFloat(text, fv.Type().Bits())
-		if err != nil {
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
 			return fmt.Errorf("值 %q 不是有效的数字", text)
 		}
 		fv.SetFloat(n)
@@ -110,7 +111,15 @@ func parseTime(text string, location *time.Location, date1904 bool) (time.Time, 
 		}
 	}
 	// 未设置日期格式的单元格会以 Excel 序列号返回。
-	if serial, err := strconv.ParseFloat(text, 64); err == nil && serial >= 20000 {
+	if serial, err := strconv.ParseFloat(text, 64); err == nil {
+		// Excel 日期上限是 9999-12-31（1900 系统的序列号 2958465）。
+		maxSerial := 2958466.0
+		if date1904 {
+			maxSerial -= 1462
+		}
+		if math.IsNaN(serial) || math.IsInf(serial, 0) || serial < 1 || serial >= maxSerial {
+			return time.Time{}, fmt.Errorf("值 %q 超出 Excel 日期范围（示例：2026-01-02）", text)
+		}
 		if t, err := excelize.ExcelDateToTime(serial, date1904); err == nil {
 			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), location), nil
 		}

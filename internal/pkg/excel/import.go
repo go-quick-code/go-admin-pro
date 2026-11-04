@@ -52,9 +52,10 @@ type ImportOptions[T any] struct {
 // 只要有一处错误就返回 *ImportError（包含行号、列名与原因），且不返回任何数据，
 // 调用方应整批拒绝。完全空白的行会被跳过。
 //
-// 单元格按原始值解析：日期为 Excel 序列号（自动识别 1900/1904 日期系统），
-// 百分比 50% 读作 0.5，带千分位格式的金额读作底层数字。无时区文本与序列号
-// 使用 ImportOptions.Location 解释，默认 time.Local。
+// 单元格按原始值解析：日期为 Excel 序列号（1–2958465，1904 系统上限 2957003，
+// 自动识别日期系统，日期列中的纯数字按序列号解释），百分比 50% 读作 0.5，
+// 带千分位格式的金额读作底层数字。无时区文本与序列号使用 ImportOptions.Location
+// 解释，默认 time.Local。
 func Import[T any](r io.Reader, opts ImportOptions[T]) ([]T, error) {
 	s, err := schemaFor(reflect.TypeOf((*T)(nil)).Elem())
 	if err != nil {
@@ -113,7 +114,7 @@ func Import[T any](r io.Reader, opts ImportOptions[T]) ([]T, error) {
 		UnzipXMLSizeLimit: xmlLimit,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidWorkbook, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidWorkbook, err)
 	}
 	defer f.Close()
 
@@ -128,7 +129,7 @@ func Import[T any](r io.Reader, opts ImportOptions[T]) ([]T, error) {
 	date1904 := props.Date1904 != nil && *props.Date1904
 	iter, err := f.Rows(sheet)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidWorkbook, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidWorkbook, err)
 	}
 	defer iter.Close()
 
@@ -266,6 +267,15 @@ func matchHeader(s *schema, cells []string, allowUnknown bool, importErrs *Impor
 	}
 	if importErrs.Total > 0 {
 		return nil, importErrs
+	}
+	matched := 0
+	for _, idx := range fileCols {
+		if idx >= 0 {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return nil, fmt.Errorf("%w: 表头与模板不匹配（未找到任何模板列）", ErrInvalidWorkbook)
 	}
 	return fileCols, nil
 }

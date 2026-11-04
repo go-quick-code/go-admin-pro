@@ -21,6 +21,7 @@ package excel
 import (
 	"encoding"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -86,6 +87,11 @@ func buildSchema(t reflect.Type) (*schema, error) {
 	if len(s.columns) == 0 {
 		return nil, fmt.Errorf("%w: %s 没有声明 excel 字段", ErrInvalidSchema, t)
 	}
+	for i, col := range s.columns {
+		if idx, ok := s.byField[col.Header]; ok && idx != i {
+			return nil, fmt.Errorf("%w: 表头 %q 与字段名冲突", ErrInvalidSchema, col.Header)
+		}
+	}
 	return s, nil
 }
 
@@ -121,6 +127,9 @@ func (s *schema) addFields(t reflect.Type, prefix []int) error {
 		if _, ok := s.byHeader[col.Header]; ok {
 			return fmt.Errorf("%w: 表头 %q 重复", ErrInvalidSchema, col.Header)
 		}
+		if _, ok := s.byField[col.Field]; ok {
+			return fmt.Errorf("%w: 字段名 %s 重复", ErrInvalidSchema, col.Field)
+		}
 		s.byField[col.Field] = len(s.columns)
 		s.byHeader[col.Header] = len(s.columns)
 		s.columns = append(s.columns, col)
@@ -150,8 +159,8 @@ func parseColumnTag(sf reflect.StructField, tag string) (Column, error) {
 			col.Required = true
 		case strings.HasPrefix(opt, "width="):
 			width, err := strconv.ParseFloat(strings.TrimPrefix(opt, "width="), 64)
-			if err != nil || width <= 0 {
-				return Column{}, fmt.Errorf("%w: 字段 %s 的列宽 %q 非法", ErrInvalidSchema, sf.Name, opt)
+			if err != nil || math.IsNaN(width) || math.IsInf(width, 0) || width <= 0 || width > 255 {
+				return Column{}, fmt.Errorf("%w: 字段 %s 的列宽 %q 非法（1–255）", ErrInvalidSchema, sf.Name, opt)
 			}
 			col.Width = width
 		default:
