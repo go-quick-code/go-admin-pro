@@ -18,7 +18,8 @@ func newFile(sheet string) (*excelize.File, error) {
 	return f, nil
 }
 
-// writeHeader 写入表头行，并设置列宽、冻结首行与自动筛选。
+// writeHeader 写入表头行，并设置列宽、样式与冻结首行；
+// 自动筛选由 Export 在写入数据行后设置。
 func writeHeader(f *excelize.File, sheet string, cols []Column) error {
 	if len(cols) == 0 {
 		return nil
