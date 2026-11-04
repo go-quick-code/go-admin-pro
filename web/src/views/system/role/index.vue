@@ -23,6 +23,22 @@
           {{ row.type === 1 ? '内置' : '自定义' }}
         </el-tag>
       </template>
+      <template #form-deptIds="{ form }">
+        <el-tree-select
+          v-if="form.dataScope === 2"
+          v-model="form.deptIds"
+          :data="deptTree"
+          :props="{ label: 'name', value: 'id', children: 'children' }"
+          multiple
+          check-strictly
+          show-checkbox
+          clearable
+          default-expand-all
+          style="width: 100%"
+          placeholder="请选择可见部门（精确集合，不含子部门）"
+        />
+        <span v-else class="dept-hint">仅「自定义部门」范围需要选择部门</span>
+      </template>
       <template #form-menuIds="{ form }">
         <div class="tree-wrap">
           <div class="tree-toolbar">
@@ -52,11 +68,12 @@
 import { computed, onMounted, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
 import { dataScopeOptions, formatTime, statusOptions } from '@/utils/format'
-import { pageRoles, getRole, createRole, updateRole, deleteRole, listMenus } from '@/api/system'
+import { pageRoles, getRole, createRole, updateRole, deleteRole, listMenus, treeDepts } from '@/api/system'
 
 const menuTree = ref<any[]>([])
 const menuTreeRef = ref()
 const treeProps = { label: 'name', children: 'children' }
+const deptTree = ref<any[]>([])
 
 const columns = [
   { prop: 'id', label: 'ID', width: 70 },
@@ -80,12 +97,13 @@ const formItems = [
   { prop: 'code', label: '角色编码', required: true },
   { prop: 'sort', label: '排序', type: 'number' },
   { prop: 'dataScope', label: '数据权限', type: 'select', options: dataScopeOptions, required: true },
+  { prop: 'deptIds', label: '自定义部门', slot: true },
   { prop: 'status', label: '状态', type: 'radio', options: statusOptions },
   { prop: 'remark', label: '备注', type: 'textarea' },
   { prop: 'menuIds', label: '菜单权限', slot: true },
 ]
 
-const defaultForm = { sort: 0, dataScope: 1, status: 0, menuIds: [] }
+const defaultForm = { sort: 0, dataScope: 1, status: 0, menuIds: [], deptIds: [] }
 
 const api = {
   page: pageRoles,
@@ -127,6 +145,7 @@ function clearAllMenus(form: any) {
 
 onMounted(async () => {
   menuTree.value = await listMenus()
+  deptTree.value = await treeDepts()
 })
 </script>
 
@@ -150,5 +169,10 @@ onMounted(async () => {
 .tip {
   font-size: 12px;
   margin-left: 8px;
+}
+
+.dept-hint {
+  font-size: 12px;
+  color: #909399;
 }
 </style>
