@@ -32,7 +32,6 @@ type DatabaseConfig struct {
 	DSN          string `mapstructure:"dsn"`
 	MaxIdleConns int    `mapstructure:"max-idle-conns"`
 	MaxOpenConns int    `mapstructure:"max-open-conns"`
-	AutoMigrate  bool   `mapstructure:"auto-migrate"`
 	Seed         bool   `mapstructure:"seed"`
 }
 
@@ -159,7 +158,10 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("GAP_APP_ENV"); v != "" {
 		c.App.Env = v
 	}
-	if strings.EqualFold(os.Getenv("GAP_SEED"), "false") {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_SEED"))) {
+	case "true":
+		c.Database.Seed = true
+	case "false":
 		c.Database.Seed = false
 	}
 }
