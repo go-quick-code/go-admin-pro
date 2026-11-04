@@ -1,30 +1,37 @@
 APP_NAME := go-admin-pro
 CONFIG   := configs/config.yaml
 BIN      := bin/server
+MIGRATE  := bin/migrate
 
-.PHONY: help run build test vet fmt tidy web-install web-dev web-build build-all docker-up docker-down docker-logs clean
+.PHONY: help run build test vet fmt tidy migrate-up migrate-down migrate-reset migrate-status migrate-create web-install web-dev web-build build-all docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
-	@echo "  make run         启动后端（go run）"
-	@echo "  make build       构建后端二进制到 $(BIN)"
-	@echo "  make test        运行 Go 测试"
-	@echo "  make vet         go vet 静态检查"
-	@echo "  make fmt         gofmt 格式化"
-	@echo "  make tidy        go mod tidy"
-	@echo "  make web-install 安装前端依赖"
-	@echo "  make web-dev     启动前端开发服务器"
-	@echo "  make web-build   构建前端产物到 web/dist"
-	@echo "  make build-all   构建前端 + 后端"
-	@echo "  make docker-up   启动 MySQL 容器"
-	@echo "  make docker-down 停止并移除容器"
-	@echo "  make clean       清理构建产物"
+	@echo "  make run          启动后端（go run）"
+	@echo "  make build        构建后端二进制到 $(BIN)"
+	@echo "  make migrate-up   执行全部待执行迁移"
+	@echo "  make migrate-down 回滚一个迁移版本"
+	@echo "  make migrate-reset 回滚全部迁移版本"
+	@echo "  make migrate-status 查看迁移状态"
+	@echo "  make migrate-create name=xxx 新建迁移文件"
+	@echo "  make test         运行 Go 测试"
+	@echo "  make vet          go vet 静态检查"
+	@echo "  make fmt          gofmt 格式化"
+	@echo "  make tidy         go mod tidy"
+	@echo "  make web-install  安装前端依赖"
+	@echo "  make web-dev      启动前端开发服务器"
+	@echo "  make web-build    构建前端产物到 web/dist"
+	@echo "  make build-all    构建前端 + 后端"
+	@echo "  make docker-up    启动 MySQL 容器"
+	@echo "  make docker-down  停止并移除容器"
+	@echo "  make clean        清理构建产物"
 
 run:
 	go run ./cmd/server -c $(CONFIG)
 
 build:
 	go build -trimpath -o $(BIN) ./cmd/server
+	go build -trimpath -o $(MIGRATE) ./cmd/migrate
 
 test:
 	go test ./...
@@ -37,6 +44,21 @@ fmt:
 
 tidy:
 	go mod tidy
+
+migrate-up:
+	go run ./cmd/migrate -c $(CONFIG) up
+
+migrate-down:
+	go run ./cmd/migrate -c $(CONFIG) down
+
+migrate-reset:
+	go run ./cmd/migrate -c $(CONFIG) reset
+
+migrate-status:
+	go run ./cmd/migrate -c $(CONFIG) status
+
+migrate-create:
+	go run ./cmd/migrate create $(name)
 
 web-install:
 	cd web && pnpm install

@@ -9,7 +9,6 @@ database:
   dsn: root:123456@tcp(127.0.0.1:3306)/go_admin_pro?charset=utf8mb4&parseTime=True&loc=Local
   max-idle-conns: 10
   max-open-conns: 100
-  auto-migrate: true
   seed: true
 
 jwt:

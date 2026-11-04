@@ -20,8 +20,21 @@ services:
       timeout: 5s
       retries: 30
 
+  migrate:
+    build: .
+    image: go-admin-pro:local
+    container_name: go-admin-pro-migrate
+    entrypoint: ["./migrate", "-c", "configs/config.yaml", "up"]
+    environment:
+      GAP_DATABASE_DSN: "root:123456@tcp(mysql:3306)/go_admin_pro?charset=utf8mb4&parseTime=True&loc=Local"
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+
   app:
     build: .
+    image: go-admin-pro:local
     container_name: go-admin-pro
     restart: unless-stopped
     ports:
@@ -33,6 +46,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - uploads:/app/uploads
 

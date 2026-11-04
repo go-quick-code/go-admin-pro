@@ -14,7 +14,8 @@ RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 # ---------- 运行镜像 ----------
 FROM alpine:3.21
@@ -22,6 +23,7 @@ RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=go-builder /out/server ./server
+COPY --from=go-builder /out/migrate ./migrate
 COPY --from=web-builder /app/web/dist ./web/dist
 COPY configs ./configs
 RUN mkdir -p uploads && chown -R app:app /app

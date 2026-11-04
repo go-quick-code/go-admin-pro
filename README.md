@@ -27,7 +27,7 @@
 - **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）。
 - **代码生成器**：读取 `information_schema`，一键生成 Go 的 model / dto / service / api 与 Vue3 增删改查页面，ZIP 下载。
 - **前端动态路由**：菜单由后端下发，前端按组件路径动态注册，按钮权限通过 `v-if` 控制。
-- **开箱即用**：启动时自动迁移表结构并写入种子数据（菜单、角色、管理员、字典、演示任务）。
+- **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、演示任务）。
 
 ## 技术栈
 
@@ -36,6 +36,7 @@
 | 语言 | Go 1.26+ |
 | Web 框架 | Gin |
 | ORM | GORM + MySQL 8 |
+| 迁移 | goose（版本化 SQL，可回滚） |
 | 认证 | JWT（golang-jwt/jwt/v5）+ bcrypt |
 | 配置 | Viper（YAML + 环境变量覆盖） |
 | 定时任务 | robfig/cron/v3 |
@@ -57,18 +58,20 @@ HTTP 请求
 ```text
 go-admin-pro
 ├── cmd/server/                 # 启动入口
+├── cmd/migrate/                # 迁移命令（up / down / status / create）
+├── migrations/                 # goose 版本化 SQL，内嵌进二进制
 ├── configs/config.yaml         # 配置文件
 ├── internal/
 │   ├── app/                    # 依赖装配
 │   ├── config/                 # 配置加载
 │   ├── router/                 # 路由、静态资源、SPA 回退
-│   ├── seed/                   # AutoMigrate + 初始化数据
+│   ├── seed/                   # 初始化数据（依赖已执行的迁移）
 │   ├── module/
 │   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户、日志
 │   │   ├── infra/              # 文件、参数配置、定时任务
 │   │   └── codegen/            # 代码生成器
 │   └── pkg/                    # 框架能力
-│       ├── database/           # GORM 连接 + 多租户插件
+│       ├── database/           # GORM 连接、迁移校验 + 多租户插件
 │       ├── tenant/             # 租户上下文与 Skip
 │       ├── jwt/ authn/         # 令牌与登录主体
 │       ├── middleware/         # CORS、日志、Recovery
@@ -98,13 +101,16 @@ docker compose up -d mysql
 
 默认创建数据库 `go_admin_pro`，root 密码 `123456`。也可以使用已有 MySQL，修改 `configs/config.yaml` 的 `database.dsn`。
 
-### 2. 启动后端
+### 2. 执行迁移并启动后端
 
 ```bash
+make migrate-up            # 按版本执行 migrations/ 下的 SQL，可重复执行
 go run ./cmd/server -c configs/config.yaml
 ```
 
-首次启动会自动建表并写入种子数据。服务地址：`http://127.0.0.1:8080`，健康检查：`GET /healthz`。
+服务启动时只校验迁移版本，不会自动建表：数据库未迁移、落后或超前都会直接报错退出。首次启动会写入种子数据（可用 `GAP_SEED=false` 关闭）。
+
+服务地址：`http://127.0.0.1:8080`，健康检查：`GET /healthz`。
 
 关键配置支持环境变量覆盖：
 
@@ -130,6 +136,8 @@ pnpm dev
 ```bash
 pnpm --dir web build          # 产物：web/dist
 go build -trimpath -o bin/server ./cmd/server
+go build -trimpath -o bin/migrate ./cmd/migrate
+./bin/migrate -c configs/config.yaml up   # 首次部署 / 升级前执行
 ./bin/server -c configs/config.yaml
 ```
 
@@ -146,6 +154,19 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 > 生产环境请务必修改默认密码与 `jwt.secret`。
 
 ## 核心设计
+
+### 版本化迁移
+
+表结构由 `migrations/` 下的 goose SQL 管理，迁移文件会内嵌进二进制：
+
+- `make migrate-up`：按版本执行未应用的迁移，可重复执行。
+- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本。
+- `make migrate-status`：查看每个版本的应用状态。
+- `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
+
+应用启动时只校验迁移版本，不建表也不执行迁移；数据库未迁移、落后或超前都会报错退出。已发布的迁移不要修改，表结构变更一律新增文件。
+
+旧版 AutoMigrate 建的本地库没有迁移记录，启动会报「database is not migrated」；开发环境删库后重新执行 `make migrate-up` 再启动即可。
 
 ### 多租户隔离
 
@@ -267,7 +288,6 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.api-prefix` | API 前缀，默认 `/admin-api` |
 | `app.web-root` | 前端产物目录，默认 `./web/dist` |
 | `database.dsn` | MySQL DSN |
-| `database.auto-migrate` | 启动时自动迁移 |
 | `database.seed` | 启动时写入种子数据 |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
@@ -284,10 +304,14 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 
-# 2. 构建后端
+# 2. 构建后端（server + migrate）
 go build -trimpath -ldflags="-s -w" -o bin/server ./cmd/server
+go build -trimpath -ldflags="-s -w" -o bin/migrate ./cmd/migrate
 
-# 3. 运行
+# 3. 执行数据库迁移（可重复执行；回滚用 down / reset）
+GAP_DATABASE_DSN='...' ./bin/migrate -c configs/config.yaml up
+
+# 4. 运行
 GAP_DATABASE_DSN='...' GAP_JWT_SECRET='...' ./bin/server -c configs/config.yaml
 ```
 
@@ -297,13 +321,18 @@ GAP_DATABASE_DSN='...' GAP_JWT_SECRET='...' ./bin/server -c configs/config.yaml
 docker compose up -d --build
 ```
 
-镜像内已包含前端产物，访问 `http://127.0.0.1:8080`。
+compose 会先运行一次性的 `migrate` 服务，迁移成功后 `app` 才启动。镜像内已包含前端产物，访问 `http://127.0.0.1:8080`。
 
 ## 开发命令
 
 ```bash
 make help         # 查看命令
 make run          # 启动后端
+make migrate-up    # 执行全部待执行迁移
+make migrate-down  # 回滚一个迁移版本
+make migrate-reset # 回滚全部迁移版本
+make migrate-status # 查看迁移状态
+make migrate-create name=add_xxx # 新建迁移文件
 make test         # 运行测试
 make vet          # 静态检查
 make fmt          # gofmt

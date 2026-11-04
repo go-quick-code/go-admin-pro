@@ -12,11 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Run 执行数据库迁移并写入初始化数据。
+// Run 写入初始化数据。表结构由 goose 迁移预先建好，这里只负责数据。
 func Run(db *gorm.DB) error {
-	if err := migrate(db); err != nil {
-		return err
-	}
 	ctx := tenant.WithTenantID(context.Background(), 1)
 	if err := seedTenant(db, ctx); err != nil {
 		return err
@@ -46,28 +43,6 @@ func Run(db *gorm.DB) error {
 		return err
 	}
 	return nil
-}
-
-func migrate(db *gorm.DB) error {
-	return db.AutoMigrate(
-		&sysmodel.Tenant{},
-		&sysmodel.User{},
-		&sysmodel.Role{},
-		&sysmodel.Menu{},
-		&sysmodel.Dept{},
-		&sysmodel.Post{},
-		&sysmodel.UserRole{},
-		&sysmodel.UserPost{},
-		&sysmodel.RoleMenu{},
-		&sysmodel.DictType{},
-		&sysmodel.DictData{},
-		&sysmodel.LoginLog{},
-		&sysmodel.OperateLog{},
-		&inframodel.File{},
-		&inframodel.Config{},
-		&inframodel.Job{},
-		&inframodel.JobLog{},
-	)
 }
 
 func seedTenant(db *gorm.DB, ctx context.Context) error {

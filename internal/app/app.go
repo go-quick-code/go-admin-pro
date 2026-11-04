@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/config"
@@ -38,15 +39,25 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get sql db: %w", err)
+	}
+	verifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := database.VerifyMigrationVersion(verifyCtx, sqlDB); err != nil {
+		return nil, fmt.Errorf("verify migration version: %w", err)
+	}
+
 	if cfg.Tenant.Enabled {
 		if err := db.Use(database.NewTenantPlugin(database.TenantTables)); err != nil {
 			return nil, fmt.Errorf("install tenant plugin: %w", err)
 		}
 	}
 
-	if cfg.Database.AutoMigrate || cfg.Database.Seed {
+	if cfg.Database.Seed {
 		if err := seed.Run(db); err != nil {
-			return nil, fmt.Errorf("migrate/seed: %w", err)
+			return nil, fmt.Errorf("seed: %w", err)
 		}
 	}
 

@@ -32,7 +32,6 @@ type DatabaseConfig struct {
 	DSN          string `mapstructure:"dsn"`
 	MaxIdleConns int    `mapstructure:"max-idle-conns"`
 	MaxOpenConns int    `mapstructure:"max-open-conns"`
-	AutoMigrate  bool   `mapstructure:"auto-migrate"`
 	Seed         bool   `mapstructure:"seed"`
 }
 
