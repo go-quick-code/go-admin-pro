@@ -2,6 +2,13 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
+## Specs
+
+- **Issue-facing summary**: `docs/specs/<feature>.md` — problem, solution, user stories, scope. It links to the detailed spec.
+- **Detailed design**: `docs/<feature>-spec.md` — tables, rules, API, acceptance. Rules live only here; summaries do not copy them.
+
+When a rule changes, edit the detailed spec and leave the summary as a pointer.
+
 ## Before exploring, read these
 
 - **`GLOSSARY.md`** at the repo root, or
