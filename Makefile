@@ -43,7 +43,9 @@ test:
 
 # 集成测试基座在 #3 落地；没有 integration 用例时明确失败，避免假绿。
 test-integration:
-	@if ! grep -rqs --include='*_test.go' -e '^//go:build .*integration' -e '^// +build .*integration' $$(go list -tags=integration -f '{{.Dir}}' ./...); then \
+	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
+	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
+	if ! grep -rqs --include='*_test.go' -e '^//go:build .*integration' -e '^// +build .*integration' $$pkgs; then \
 		echo "no integration tests found (build tag integration)"; exit 1; \
 	fi
 	go test -tags=integration ./...
@@ -54,10 +56,14 @@ vet:
 	go vet ./...
 
 fmt:
-	gofmt -w $$(go list -tags=integration -f '{{.Dir}}' ./...)
+	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
+	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
+	gofmt -w $$pkgs
 
 fmt-check:
-	@out="$$(gofmt -l $$(go list -tags=integration -f '{{.Dir}}' ./...))" || exit 1; \
+	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
+	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
+	out="$$(gofmt -l $$pkgs)" || exit 1; \
 	if [ -n "$$out" ]; then echo "gofmt required:"; echo "$$out"; exit 1; fi
 
 tidy:
