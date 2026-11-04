@@ -23,6 +23,10 @@ export function deleteUser(id: number) {
   return request.delete(`/system/user/${id}`) as Promise<any>
 }
 
+export function listSimpleUsers() {
+  return request.get('/system/user/simple-list') as Promise<any>
+}
+
 // ---------- 角色 ----------
 export function pageRoles(params: any) {
   return request.get('/system/role/page', { params }) as Promise<any>

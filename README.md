@@ -76,6 +76,7 @@ go-admin-pro
 │   ├── module/
 │   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户、日志
 │   │   ├── infra/              # 文件、参数配置、定时任务
+│   │   ├── crm/                # 客户管理（CRM 第一条纵切，手写样板：model/dto/repository/service/api）
 │   │   └── codegen/            # 代码生成器
 │   └── pkg/                    # 框架能力
 │       ├── database/           # GORM 连接、迁移校验 + 多租户/审计插件

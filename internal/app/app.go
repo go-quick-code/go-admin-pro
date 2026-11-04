@@ -11,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/config"
 	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	crmapi "github.com/lautung/go-admin-pro/internal/module/crm/api"
+	crmrepo "github.com/lautung/go-admin-pro/internal/module/crm/repository"
+	crmservice "github.com/lautung/go-admin-pro/internal/module/crm/service"
 	infraapi "github.com/lautung/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/lautung/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/lautung/go-admin-pro/internal/module/infra/service"
@@ -84,10 +87,16 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	})
 
 	sysAPI := systemapi.New(sysSvc, cfg)
+
+	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
+	crmRepo := crmrepo.New(db)
+	crmSvc := crmservice.New(crmRepo, sysSvc)
+	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission)
+
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI)
 
 	scheduler.Start(context.Background())
 

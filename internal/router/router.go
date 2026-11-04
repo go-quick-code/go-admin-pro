@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/config"
 	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	crmapi "github.com/lautung/go-admin-pro/internal/module/crm/api"
 	infraapi "github.com/lautung/go-admin-pro/internal/module/infra/api"
 	systemapi "github.com/lautung/go-admin-pro/internal/module/system/api"
 	"github.com/lautung/go-admin-pro/internal/pkg/middleware"
@@ -17,7 +18,7 @@ import (
 )
 
 // New 构建 HTTP 引擎，完成公开接口、鉴权接口与静态资源的装配。
-func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler) *gin.Engine {
+func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler) *gin.Engine {
 	if cfg.App.Env == "dev" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -39,6 +40,7 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	sysAPI.RegisterProtected(protected)
 	infraAPI.RegisterProtected(protected)
 	codegenAPI.RegisterProtected(protected)
+	crmAPI.RegisterProtected(protected)
 
 	// 本地文件访问
 	if err := os.MkdirAll(cfg.Storage.Local.BasePath, 0o755); err != nil {

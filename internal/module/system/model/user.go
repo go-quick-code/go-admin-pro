@@ -27,6 +27,13 @@ type User struct {
 
 func (User) TableName() string { return "system_user" }
 
+// SimpleUser 是用户精简项：表单选项（如 CRM 负责人选择）用，不含敏感字段。
+type SimpleUser struct {
+	ID       int64  `json:"id"`
+	Nickname string `json:"nickname"`
+	DeptID   int64  `json:"deptId"`
+}
+
 // Role 是角色，数据权限挂在角色上。
 type Role struct {
 	BaseEntity

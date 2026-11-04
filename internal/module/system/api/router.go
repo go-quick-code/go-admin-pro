@@ -24,6 +24,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 用户
 	user := rg.Group("/system/user")
 	user.GET("/page", h.RequirePermission("system:user:query"), h.PageUsers)
+	user.GET("/simple-list", h.ListSimpleUsers)
 	user.GET("/:id", h.RequirePermission("system:user:query"), h.GetUser)
 	user.POST("", h.RequirePermission("system:user:create"), h.CreateUser)
 	user.PUT("", h.RequirePermission("system:user:update"), h.UpdateUser)

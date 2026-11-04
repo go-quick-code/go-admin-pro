@@ -28,4 +28,6 @@ var TenantTables = []string{
 	"infra_config",
 	"infra_job",
 	"infra_job_log",
+	"crm_customer",
+	"crm_sequence",
 }
