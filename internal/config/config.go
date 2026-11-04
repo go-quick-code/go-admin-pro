@@ -210,8 +210,16 @@ func (c *Config) Location() *time.Location {
 	}
 	loc, err := time.LoadLocation(name)
 	if err != nil {
-		// Load 已校验过 App.Timezone，正常不会走到这里；兜底避免 panic。
-		return time.Local
+		// 仅防绕过 Load 的构造路径（如手工 &Config{} 的测试）：正常路径
+		// 已在启动时校验 App.Timezone，不会走到这里。兜底用确定的业务
+		// 默认时区 DefaultTimezone，而不是 time.Local——依赖服务器 TZ
+		// 正是 spec #32 要消除的行为。
+		loc, err = time.LoadLocation(DefaultTimezone)
+		if err != nil {
+			// 极端情况（运行环境缺少 tzdata）下 DefaultTimezone 也加载
+			// 失败时退到 UTC：仍是确定值，不依赖服务器 TZ。
+			loc = time.UTC
+		}
 	}
 	c.loc = loc
 	return loc

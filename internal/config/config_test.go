@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lautung/go-admin-pro/internal/config"
 )
@@ -67,6 +68,38 @@ func TestLoadTimezoneExplicitValid(t *testing.T) {
 	}
 	if got := cfg.Location().String(); got != "UTC" {
 		t.Errorf("Location() = %q, want UTC", got)
+	}
+}
+
+// 以下两条锁定绕过 Load 的构造路径（如单测里手工 &config.Config{}）：
+// 正常路径的时区合法性已在启动时校验，兜底必须返回确定的业务默认时区，
+// 而不是依赖服务器 TZ 的 time.Local（spec #32 要消除的正是该依赖）。
+func TestLocationBypassLoadEmptyTimezone(t *testing.T) {
+	cfg := &config.Config{}
+	loc := cfg.Location()
+	if loc == nil {
+		t.Fatal("Location() = nil")
+	}
+	if loc.String() != config.DefaultTimezone {
+		t.Errorf("Location() = %q, want %q（业务默认时区而非服务器 TZ）", loc.String(), config.DefaultTimezone)
+	}
+	if loc == time.Local {
+		t.Errorf("Location() 不应回退 time.Local（服务器 TZ 依赖）")
+	}
+}
+
+func TestLocationBypassLoadInvalidTimezone(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.App.Timezone = "Not/AZone"
+	loc := cfg.Location()
+	if loc == nil {
+		t.Fatal("Location() = nil")
+	}
+	if loc.String() != config.DefaultTimezone {
+		t.Errorf("Location() = %q, want %q（非法时区值应兜底为业务默认时区）", loc.String(), config.DefaultTimezone)
+	}
+	if loc == time.Local {
+		t.Errorf("Location() 不应回退 time.Local（服务器 TZ 依赖）")
 	}
 }
 
