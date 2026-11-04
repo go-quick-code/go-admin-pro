@@ -1,18 +1,11 @@
 package model
 
 import (
-	"time"
-
-	"gorm.io/gorm"
+	basemodel "github.com/lautung/go-admin-pro/internal/pkg/model"
 )
 
-// BaseEntity 是通用实体基类，包含主键、时间戳与软删除。
-type BaseEntity struct {
-	ID        int64          `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time      `json:"createTime"`
-	UpdatedAt time.Time      `json:"updateTime"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-}
+// BaseEntity 是统一实体底座，定义见 internal/pkg/model。
+type BaseEntity = basemodel.BaseEntity
 
 // 状态常量：0 启用 / 1 停用，与芋道保持一致。
 const (
