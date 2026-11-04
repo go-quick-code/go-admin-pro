@@ -116,7 +116,7 @@ func usage() {
   stamp <version> 把已有库标记为指定迁移版本（不执行 DDL）
   create <name>  新建 SQL 迁移模板（不需要数据库）
 
--timeout 0 表示不限制迁移时长。
+-timeout 0 表示不限制迁移时长；-expect-tables N 用于 verify 断言业务表数量（0 表示不检查）。
 `)
 }
 

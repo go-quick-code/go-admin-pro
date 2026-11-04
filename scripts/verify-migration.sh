@@ -30,15 +30,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+require_free_port() {
+  if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "port $PORT is already in use; set VERIFY_PORT to a free port"
+    exit 1
+  fi
+}
+
+# 先确认端口可用，避免迁移往返跑完后才因端口冲突失败、库已变非空。
+require_free_port
+
 echo "== migration roundtrip (expected tables: $EXPECTED_TABLES) =="
 go run ./cmd/migrate -c configs/config.yaml -expect-tables "$EXPECTED_TABLES" verify
 
 echo "== boot + seed + auth smoke (port $PORT) =="
 go build -o "$tmpdir/server" ./cmd/server
-if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "port $PORT is already in use; set VERIFY_PORT to a free port"
-  exit 1
-fi
+require_free_port
 GAP_APP_PORT="$PORT" GAP_SEED=true "$tmpdir/server" -c configs/config.yaml >"$tmpdir/server.log" 2>&1 &
 server_pid=$!
 

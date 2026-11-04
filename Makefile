@@ -45,7 +45,7 @@ test:
 test-integration:
 	@pkgs="$$(go list -tags=integration -f '{{.Dir}}' ./...)" || exit 1; \
 	if [ -z "$$pkgs" ]; then echo "go list returned no packages"; exit 1; fi; \
-	if ! grep -rqs --include='*_test.go' -e '^//go:build .*integration' -e '^// +build .*integration' $$pkgs; then \
+	if ! grep -rhs --include='*_test.go' -e '^//go:build' -e '^// +build' $$pkgs | grep -v '!integration' | grep -q 'integration'; then \
 		echo "no integration tests found (build tag integration)"; exit 1; \
 	fi
 	go test -tags=integration ./...
