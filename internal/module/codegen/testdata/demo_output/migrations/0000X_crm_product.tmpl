@@ -1,0 +1,30 @@
+-- +goose Up
+-- 产品表（本文件由 codegen 生成（issue #10 样板）的迁移模板，供实施工单参考与调整；
+-- 迁移编号由实施工单分配，不得使用本文件名中的占位编号 0000X）。
+-- 表结构沿用实体底座：created_at/updated_at/deleted_at + creator/updater + tenant_id（ADR 0002）。
+
+CREATE TABLE `crm_product` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) DEFAULT NULL,
+  `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  `creator` varchar(64) NOT NULL DEFAULT '0',
+  `updater` varchar(64) NOT NULL DEFAULT '0',
+  `tenant_id` bigint NOT NULL DEFAULT '1',
+  `name` varchar(128) NOT NULL COMMENT '产品名称',
+  `category` varchar(64) DEFAULT NULL COMMENT '产品分类',
+  `unit` varchar(32) DEFAULT NULL COMMENT '单位',
+  `price` decimal(12,2) NOT NULL COMMENT '价格（元）',
+  `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `owner_user_id` bigint DEFAULT NULL COMMENT '负责人用户 ID',
+  `owner_dept_id` bigint DEFAULT NULL COMMENT '负责人部门快照，随负责人同步（ADR 0004）',
+  PRIMARY KEY (`id`),
+  KEY `idx_crm_product_deleted_at` (`deleted_at`),
+  KEY `idx_crm_product_owner_user_id` (`owner_user_id`),
+  KEY `idx_crm_product_owner_dept_id` (`owner_dept_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- +goose Down
+-- 回滚：删除本迁移新建的表。
+DROP TABLE IF EXISTS `crm_product`;

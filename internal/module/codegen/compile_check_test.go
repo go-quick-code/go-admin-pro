@@ -1,0 +1,176 @@
+package codegen_test
+
+import (
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/lautung/go-admin-pro/internal/module/codegen"
+)
+
+// 本文件验证「生成的代码 go build/vet/test 通过」这一可信目标：
+// 把仓库可编译子集（go.mod/go.sum/internal，跳过 testdata）复制进临时目录，
+// 再把生成产物按目标路径叠加进去，跑真实 go 命令验证。
+// 参照 codegen 既有校验思路（生成时 gofmt 解析），这里把门槛提到整包编译。
+
+// TestGeneratedProductCompiles 产品脚手架叠加到 crm 模块后可编译、可 vet，
+// 纯函数测试骨架可跑通，集成矩阵骨架在 integration 标签下可编译。
+func TestGeneratedProductCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short 模式跳过编译验证")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("找不到 go 命令，跳过编译验证")
+	}
+	spec := loadProductSpec(t)
+	files, err := codegen.GenerateEntity(spec)
+	if err != nil {
+		t.Fatalf("GenerateEntity: %v", err)
+	}
+
+	tmp := copyModuleSubset(t)
+	if err := overlay(tmp, files); err != nil {
+		t.Fatalf("叠加生成产物: %v", err)
+	}
+
+	runGo(t, tmp, "build", "./internal/...")
+	runGo(t, tmp, "vet", "./internal/...")
+	// 生成的集成矩阵骨架：integration 标签下必须可编译（运行需要数据库，不在此跑）。
+	runGo(t, tmp, "vet", "-tags=integration", "./internal/module/crm/...")
+	// 纯函数测试骨架（枚举校验/编号格式）真实执行。
+	runGo(t, tmp, "test", "-count=1", "-run", "TestValidateProductStatus", "./internal/module/crm/service/")
+}
+
+// TestGeneratedFreshModuleCompiles 新模块骨架变体（ModuleScaffold=true、非 owner、
+// 字典字段）整体生成后可编译可 vet——保证「生成一个全新模块」也是可信路径。
+func TestGeneratedFreshModuleCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short 模式跳过编译验证")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("找不到 go 命令，跳过编译验证")
+	}
+	spec := loadProductSpec(t)
+	spec.Module = "erp"
+	spec.TableName = "erp_product"
+	spec.PermPrefix = "erp:product"
+	spec.APIGroup = "erp/product"
+	spec.ModuleScaffold = true
+	spec.OwnerScoped = false
+	spec.ImportExport = false
+	spec.Menu = nil
+	for i := range spec.Fields {
+		if spec.Fields[i].Name == "unit" {
+			spec.Fields[i].Dict = "erp_product_unit"
+		}
+		if spec.Fields[i].Name == "status" {
+			spec.Fields[i].Enum = nil
+			spec.Fields[i].Dict = "erp_product_status"
+		}
+	}
+	files, err := codegen.GenerateEntity(spec)
+	if err != nil {
+		t.Fatalf("GenerateEntity: %v", err)
+	}
+
+	tmp := copyModuleSubset(t)
+	if err := overlay(tmp, files); err != nil {
+		t.Fatalf("叠加生成产物: %v", err)
+	}
+	runGo(t, tmp, "build", "./internal/...")
+	runGo(t, tmp, "vet", "./internal/...")
+}
+
+// copyModuleSubset 把仓库可编译子集复制进 t.TempDir()（跳过 testdata，
+// go 工具链本就忽略它们，跳过是为了省拷贝）。
+func copyModuleSubset(t *testing.T) string {
+	t.Helper()
+	root := moduleRoot(t)
+	tmp := t.TempDir()
+	for _, name := range []string{"go.mod", "go.sum"} {
+		raw, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("读取 %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, name), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// internal（业务代码）与 migrations（internal/pkg/database 的 embed 依赖）。
+	for _, sub := range []string{"internal", "migrations"} {
+		src := filepath.Join(root, sub)
+		if err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if d.Name() == "testdata" {
+					return filepath.SkipDir
+				}
+				return os.MkdirAll(filepath.Join(tmp, strings.TrimPrefix(p, root)), 0o755)
+			}
+			return copyFile(p, filepath.Join(tmp, strings.TrimPrefix(p, root)))
+		}); err != nil {
+			t.Fatalf("复制仓库子集 %s: %v", sub, err)
+		}
+	}
+	return tmp
+}
+
+// overlay 把生成产物按相对路径写进临时模块（go/ 前缀对应仓库根）。
+func overlay(tmp string, files map[string]string) error {
+	for name, content := range files {
+		rel := strings.TrimPrefix(name, "go/")
+		target := filepath.Join(tmp, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runGo 在 dir 下执行 go 子命令，非零退出即 Fatal（带完整 stderr）。
+func runGo(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go %s：%v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// moduleRoot 从当前目录向上找 go.mod。
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("向上找不到 go.mod")
+		}
+		dir = parent
+	}
+}
+
+// copyFile 复制单个文件（保留普通文件权限）。
+func copyFile(src, dst string) error {
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, raw, 0o644)
+}

@@ -25,7 +25,7 @@
 - **数据权限**：角色维度支持「全部 / 本部门及以下 / 本部门 / 仅本人」，用户列表已接入。
 - **系统管理**：用户、角色、菜单（目录/菜单/按钮三级）、部门树、岗位、字典、租户、登录日志、操作日志。
 - **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）。
-- **代码生成器**：读取 `information_schema`，按表结构生成 Go 的 model / dto / service / api 模板与 Vue3 增删改查页面，打包 ZIP 下载；生成物是模板代码，接入工程需按 ZIP 内 README 手工放置并注册路由、菜单。
+- **代码生成器**：两种入口——元信息驱动的「owner-scoped 实体全栈脚手架」（model/dto/repository/service/api + 路由注册点 + 菜单/权限码种子 + 测试骨架 + ProTable 页面，配套装配说明），以及读取 `information_schema` 按表结构生成通用 CRUD 模板 ZIP；两者生成物都是起点，接入工程需按产物内说明手工放置并注册。
 - **前端动态路由**：菜单由后端下发，前端按组件路径动态注册，按钮权限通过 `v-if` 控制。
 - **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、演示任务）。
 
@@ -227,39 +227,36 @@ ctx = tenant.WithTenantID(ctx, claims.TenantID)
 
 ### 代码生成器
 
+生成器有两个入口（`internal/module/codegen`），能力与定位不同，生成物都需要人工接入：
+
+#### 1. 元信息驱动：owner-scoped 实体全栈脚手架（推荐，CRM 后续实体用它）
+
+给定实体元信息（表名、字段列表、权限码前缀、菜单项与能力开关），生成与 `internal/module/crm` 手写样板同形态的全栈脚手架：
+
+- 后端五层 `model / dto / repository / service / api`（方法挂在模块既有 `Service` / `Repository` / `Handler` 上），owner-scoped 语义齐备：列表套数据范围谓词（`owner_dept_id` / `owner_user_id`，空切片 + 无 self = 恒假）、详情/改/删 `scope.Permits` 范围外 404、负责人部门快照与名称补齐；
+- 路由注册点（`Register<Entity>Routes`，一行接进模块 router）、菜单/权限码种子片段（权限码 `:query/:create/:update/:delete`）；
+- 测试骨架：枚举校验/编号格式的纯函数测试（外部测试包）+ 五种数据范围矩阵与「范围外 404」的集成测试（`//go:build integration`，接线后随 `make test-integration` 生效）；
+- 前端：`web/src/api/<module>.ts` 追加片段 + `web/src/views/<module>/<entity>/index.vue`（ProTable 列/搜索/表单全套）；
+- 迁移模板与 `INTEGRATION.md` 装配说明（`tenant_tables.go`、router、app.go、seed 的接线步骤；`app.go` 等文件**不自动改写**）。
+
+配置项：字段映射（`string/text/int8/int32/int64/money/datetime/bool` → Go 类型与前端组件，登记在 `entity_mapping.go`）、字典字段（前端 select 占位，选项接系统字典）、枚举字段（模型常量 + service 400 校验）、owner 字段开关（`ownerScoped`，关闭则生成不带数据范围的简单 CRUD）、编号开关（`sequence`，owner-scoped 实体默认不带编号，开启走 `crm_sequence` 事务发放）、导入导出开关（`importExport`，仅生成 #20 接线位与 TODO 注释，不产出可用实现）。
+
+```bash
+# 用产品（product）元信息生成一次演示输出到任意目录
+go run ./cmd/codegen -spec internal/module/codegen/testdata/entity/product.json -out /tmp/gen
+```
+
+`testdata/entity/product.json` 是元信息参考样例；`testdata/demo_output/` 是同一份元信息的产物快照（测试逐字节校验，供人工 review）。生成的代码可信通过 `go build/vet/test`：`TestGeneratedProductCompiles` 会把产物叠加进仓库可编译子集跑真实 `go build/vet` 与纯函数测试。新模块（骨架尚不存在）传 `"moduleScaffold": true`，生成器会一并产出 Service/Repository/Handler 骨架与 api helpers/router。
+
+限制（如实说）：面向 `internal/module/*` 的模块化单体约定，不生成数据库迁移执行（只有模板）；不自动改 `app.go` / `router.go` / `tenant_tables.go` / `seed.go`；多实体差异大的业务逻辑（状态机、唯一性校验）仍需手写。
+
+#### 2. 表结构驱动：通用 CRUD 模板（旧入口，保留）
+
 1. 在数据库中创建业务表（`system_` / `infra_` 前缀的表会被排除）。
 2. 打开「代码生成」页面，选择表 → 自动带出字段 → 填写模块名、业务名、类名。
-3. 生成并下载 ZIP，包含：
+3. 生成并下载 ZIP，包含 model / dto / service / api / Vue 页面与 README；按 ZIP 内 README 手工放置、注册路由并配置权限码。
 
-```text
-go/internal/module/{module}/model/{business}.go
-go/internal/module/{module}/dto/{business}.go
-go/internal/module/{module}/service/{business}.go
-go/internal/module/{module}/api/{business}.go
-web/src/api/{module}/{business}.ts
-web/src/views/{module}/{business}/index.vue
-README.md
-```
-
-4. 按 ZIP 内 README 把代码放入工程、注册路由，并在「菜单管理」中新增对应权限码。
-
-生成器会校验表名、模块名、业务名、类名，避免路径穿越；生成的 Go 代码经 `go/format` 格式化，按 ZIP 内 README 放入工程后即可编译，生成器本身不做工程内装配。项目内置的 `biz_product` 演示表可通过以下 SQL 创建：
-
-```sql
-CREATE TABLE biz_product (
-  id bigint NOT NULL AUTO_INCREMENT,
-  name varchar(100) NOT NULL COMMENT '商品名称',
-  code varchar(50) NOT NULL COMMENT '商品编码',
-  price decimal(10,2) DEFAULT NULL COMMENT '价格',
-  stock int DEFAULT 0 COMMENT '库存',
-  status tinyint DEFAULT 0 COMMENT '状态',
-  description text COMMENT '描述',
-  created_at datetime DEFAULT NULL,
-  updated_at datetime DEFAULT NULL,
-  deleted_at datetime DEFAULT NULL,
-  PRIMARY KEY (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品表';
-```
+生成器会校验表名、模块名、业务名、类名，避免路径穿越；生成的 Go 代码经 `go/format` 格式化。这条路径产出的是通用模板代码，不含数据范围、租户登记与测试骨架。
 
 ### 定时任务
 
