@@ -21,6 +21,7 @@
       </template>
       <template #actions="{ row }">
         <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
+        <!-- 公海纵切（issue #13）：负责人本人或持对应权限码可释放/转移。 -->
         <el-button
           v-if="userStore.hasPerm('crm:customer:release')"
           link
@@ -45,46 +46,66 @@
       </template>
     </ProTable>
 
-    <el-drawer v-model="detailVisible" :title="detail?.name || '客户详情'" size="480px">
-      <el-descriptions v-if="detail" :column="1" border>
-        <el-descriptions-item label="客户编号">{{ detail.customerNo }}</el-descriptions-item>
-        <el-descriptions-item label="客户名称">{{ detail.name }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="statusTagType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="负责人">
-          {{ detail.ownerUserName || '公海' }}{{ detail.ownerDeptName ? `（${detail.ownerDeptName}）` : '' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="行业">{{ detail.industry || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="级别">{{ detail.level || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="来源">{{ detail.source || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="联系电话">{{ detail.phone || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="网址">{{ detail.website || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="地址">{{ detail.address || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="备注">{{ detail.remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatTime(detail.createTime) }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ formatTime(detail.updateTime) }}</el-descriptions-item>
-      </el-descriptions>
-
-      <!-- 负责人历史（issue #13）：创建/认领/释放/转移全记录，新→旧。 -->
-      <h4 class="history-title">负责人历史</h4>
-      <el-timeline v-if="history.length" class="history-list">
-        <el-timeline-item
-          v-for="h in history"
-          :key="h.id"
-          :timestamp="formatTime(h.createTime)"
-          :type="actionTagType(h.action)"
-        >
-          <el-tag size="small" :type="actionTagType(h.action)" class="history-action">
-            {{ actionLabel(h.action) }}
-          </el-tag>
-          <span class="history-text">{{ historyText(h) }}</span>
-        </el-timeline-item>
-      </el-timeline>
-      <el-empty v-else description="暂无负责人变更记录" :image-size="60" />
+    <!-- 客户详情抽屉：基本信息 + 联系人 + 负责人历史 tab
+        （issue #9 tab 结构；issue #13 融入释放/转移入口与历史 tab） -->
+    <el-drawer v-model="detailVisible" :title="detail?.name || '客户详情'" size="900px">
+      <el-tabs v-if="detail" v-model="detailTab">
+        <el-tab-pane label="基本信息" name="info">
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="客户编号">{{ detail.customerNo }}</el-descriptions-item>
+            <el-descriptions-item label="客户名称">{{ detail.name }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="statusTagType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="负责人">
+              {{ detail.ownerUserName || '公海' }}{{ detail.ownerDeptName ? `（${detail.ownerDeptName}）` : '' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="行业">{{ detail.industry || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="级别">{{ detail.level || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="来源">{{ detail.source || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="联系电话">{{ detail.phone || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="网址">{{ detail.website || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="地址">{{ detail.address || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="备注">{{ detail.remark || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ formatTime(detail.createTime) }}</el-descriptions-item>
+            <el-descriptions-item label="更新时间">{{ formatTime(detail.updateTime) }}</el-descriptions-item>
+          </el-descriptions>
+        </el-tab-pane>
+        <el-tab-pane label="联系人" name="contacts">
+          <ProTable
+            :columns="contactColumns"
+            :form-items="contactFormItems"
+            :search-items="contactSearchItems"
+            :api="contactApi"
+            :extra-query="contactExtraQuery"
+            :default-form="contactDefaultForm"
+            :before-submit="injectCustomerId"
+            perm-prefix="crm:contact"
+            title="联系人"
+          >
+            <template #cell-gender="{ row }">{{ genderLabel(row.gender) }}</template>
+          </ProTable>
+        </el-tab-pane>
+        <el-tab-pane label="负责人历史" name="owner-history">
+          <el-timeline v-if="history.length" class="history-list">
+            <el-timeline-item
+              v-for="h in history"
+              :key="h.id"
+              :timestamp="formatTime(h.createTime)"
+              :type="actionTagType(h.action)"
+            >
+              <el-tag size="small" :type="actionTagType(h.action)" class="history-action">
+                {{ actionLabel(h.action) }}
+              </el-tag>
+              <span class="history-text">{{ historyText(h) }}</span>
+            </el-timeline-item>
+          </el-timeline>
+          <el-empty v-else description="暂无负责人变更记录" :image-size="60" />
+        </el-tab-pane>
+      </el-tabs>
     </el-drawer>
 
-    <!-- 转移对话框：选择同租户其他用户作为新负责人。 -->
+    <!-- 转移对话框：选择同租户其他用户作为新负责人（issue #13）。 -->
     <el-dialog v-model="transferVisible" title="转移客户" width="420px" destroy-on-close>
       <el-form label-width="90px">
         <el-form-item label="客户">
@@ -123,6 +144,11 @@ import {
   releaseCustomer,
   transferCustomer,
   pageCustomerOwnerHistory,
+  pageContacts,
+  getContact,
+  createContact,
+  updateContact,
+  deleteContact,
 } from '@/api/crm'
 import { treeDepts, listSimpleUsers } from '@/api/system'
 import { useUserStore } from '@/stores/user'
@@ -132,6 +158,21 @@ const customerStatusOptions = [
   { label: '潜在', value: 1 },
   { label: '活跃', value: 2 },
   { label: '流失', value: 3 },
+]
+
+// 联系人性别对齐字典 sys_user_sex：0 未知 / 1 男 / 2 女（issue #9）
+const contactGenderOptions = [
+  { label: '未知', value: 0 },
+  { label: '男', value: 1 },
+  { label: '女', value: 2 },
+]
+
+// 负责人历史操作类型（issue #13）：create 创建 / claim 认领 / release 释放 / transfer 转移。
+const actionOptions = [
+  { label: '创建', value: 'create' },
+  { label: '认领', value: 'claim' },
+  { label: '释放', value: 'release' },
+  { label: '转移', value: 'transfer' },
 ]
 
 function statusLabel(status: number) {
@@ -144,13 +185,9 @@ function statusTagType(status: number) {
   return 'info'
 }
 
-// 负责人历史操作类型（issue #13）：create 创建 / claim 认领 / release 释放 / transfer 转移。
-const actionOptions = [
-  { label: '创建', value: 'create' },
-  { label: '认领', value: 'claim' },
-  { label: '释放', value: 'release' },
-  { label: '转移', value: 'transfer' },
-]
+function genderLabel(gender: number) {
+  return dictLabel(contactGenderOptions, gender)
+}
 
 function actionLabel(action: string) {
   return dictLabel(actionOptions, action)
@@ -230,13 +267,18 @@ const api = {
 
 const detail = ref<any>(null)
 const detailVisible = ref(false)
+const detailTab = ref('info')
 const history = ref<any[]>([])
 
 async function openDetail(row: any) {
   detail.value = await getCustomer(row.id)
+  detailTab.value = 'info'
   detailVisible.value = true
+  // 负责人历史（issue #13）：创建/认领/释放/转移全记录，新→旧。
   history.value = await pageCustomerOwnerHistory(row.id, { pageNo: 1, pageSize: 20 })
 }
+
+// ---------- 公海操作（issue #13）：释放到公海 / 转移给同租户其他用户 ----------
 
 // 释放到公海：填写释放原因（可空），确认后调用释放接口。
 async function handleRelease(row: any) {
@@ -257,7 +299,6 @@ async function handleRelease(row: any) {
   tableRef.value?.reload()
 }
 
-// 转移给同租户其他用户。
 const transferVisible = ref(false)
 const transferRow = ref<any>(null)
 const transferTo = ref<number>()
@@ -276,6 +317,52 @@ async function confirmTransfer() {
   tableRef.value?.reload()
 }
 
+// ---------- 联系人 tab（issue #9）：列表范围锁定当前客户，可见性跟随客户 ----------
+const contactColumns = [
+  { prop: 'name', label: '姓名', minWidth: 110 },
+  { prop: 'position', label: '职位', minWidth: 110 },
+  { prop: 'mobile', label: '手机号', width: 130 },
+  { prop: 'email', label: '邮箱', minWidth: 160 },
+  { prop: 'gender', label: '性别', width: 70, slot: true },
+  { prop: 'decisionRole', label: '决策角色', width: 100 },
+  { prop: 'remark', label: '备注', minWidth: 120 },
+]
+
+const contactSearchItems = [
+  { prop: 'name', label: '姓名' },
+  { prop: 'mobile', label: '手机号' },
+]
+
+const contactFormItems = [
+  { prop: 'name', label: '姓名', required: true },
+  { prop: 'position', label: '职位' },
+  { prop: 'mobile', label: '手机号' },
+  { prop: 'email', label: '邮箱' },
+  { prop: 'gender', label: '性别', type: 'select', options: contactGenderOptions },
+  { prop: 'decisionRole', label: '决策角色' },
+  { prop: 'remark', label: '备注', type: 'textarea' },
+]
+
+const contactDefaultForm = { gender: 0 }
+
+const contactExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
+
+// 新建联系人时注入所属客户（所属客户创建后不可漂移，更新接口不接受 customerId）。
+function injectCustomerId(payload: any, mode: 'create' | 'update') {
+  if (mode === 'create' && detail.value) {
+    return { ...payload, customerId: detail.value.id }
+  }
+  return payload
+}
+
+const contactApi = {
+  page: pageContacts,
+  detail: getContact,
+  create: createContact,
+  update: updateContact,
+  remove: deleteContact,
+}
+
 function flattenDeptTree(nodes: any[], out: { label: string; value: number }[] = []) {
   for (const n of nodes || []) {
     out.push({ label: n.name, value: n.id })
@@ -292,9 +379,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.history-title {
-  margin: 18px 0 10px;
-}
 .history-list {
   padding-left: 4px;
 }

@@ -34,4 +34,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	customer.PUT("/claim", h.requirePermission("crm:customer:claim"), h.ClaimCustomer)
 	customer.PUT("/transfer", h.TransferCustomer)
 	customer.DELETE("/:id", h.requirePermission("crm:customer:delete"), h.DeleteCustomer)
+
+	contact := rg.Group("/crm/contact")
+	contact.GET("/page", h.requirePermission("crm:contact:query"), h.PageContacts)
+	contact.GET("/:id", h.requirePermission("crm:contact:query"), h.GetContact)
+	contact.POST("", h.requirePermission("crm:contact:create"), h.CreateContact)
+	contact.PUT("", h.requirePermission("crm:contact:update"), h.UpdateContact)
+	contact.DELETE("/:id", h.requirePermission("crm:contact:delete"), h.DeleteContact)
 }
