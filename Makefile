@@ -7,7 +7,7 @@ version ?= 1
 # 刻意不用 GAP_DATABASE_DSN：那个名字会被 config.Load 读取，泄漏进其他包的测试。
 GAP_TEST_DATABASE_DSN ?= root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True
 
-.PHONY: help run build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build build-all docker-up docker-down docker-logs clean
+.PHONY: help run build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build web-type-check build-all docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
@@ -51,7 +51,8 @@ test-integration:
 	if ! grep -rhs --include='*_test.go' -e '^//go:build' -e '^// +build' $$pkgs | grep -v '!integration' | grep -q 'integration'; then \
 		echo "no integration tests found (build tag integration)"; exit 1; \
 	fi
-	GAP_TEST_DATABASE_DSN="$(GAP_TEST_DATABASE_DSN)" go test -tags=integration ./...
+	# -p 1 串行跑各包：集成测试包间会清空同一个测试库，并行必然互相冲掉数据。
+	GAP_TEST_DATABASE_DSN="$(GAP_TEST_DATABASE_DSN)" go test -tags=integration -p 1 ./...
 
 check: fmt-check build vet test
 
@@ -103,6 +104,9 @@ web-dev:
 
 web-build:
 	cd web && pnpm build
+
+web-type-check:
+	cd web && pnpm type-check
 
 build-all: web-build build
 

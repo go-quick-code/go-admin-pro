@@ -19,6 +19,7 @@ var TenantTables = []string{
 	"system_user_role",
 	"system_user_post",
 	"system_role_menu",
+	"system_role_dept",
 	"system_dict_type",
 	"system_dict_data",
 	"system_login_log",

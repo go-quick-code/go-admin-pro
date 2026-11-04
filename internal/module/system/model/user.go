@@ -40,6 +40,7 @@ type Role struct {
 	Remark    string `gorm:"size:500" json:"remark"`
 
 	MenuIDs []int64 `gorm:"-" json:"menuIds,omitempty"`
+	DeptIDs []int64 `gorm:"-" json:"deptIds,omitempty"` // 数据范围 2（自定义部门）的部门集合
 }
 
 func (Role) TableName() string { return "system_role" }
@@ -120,3 +121,12 @@ type RoleMenu struct {
 }
 
 func (RoleMenu) TableName() string { return "system_role_menu" }
+
+// RoleDept 是角色-部门关联（自定义数据范围），见 ADR 0004。关联表用复合主键 + tenant_id，不设软删除。
+type RoleDept struct {
+	RoleID   int64 `gorm:"primaryKey" json:"roleId"`
+	DeptID   int64 `gorm:"primaryKey" json:"deptId"`
+	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+}
+
+func (RoleDept) TableName() string { return "system_role_dept" }

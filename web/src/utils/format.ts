@@ -20,11 +20,13 @@ export const statusOptions = [
   { label: '停用', value: 1 },
 ]
 
+// 数据范围对齐芋道 1–5：1 全部 / 2 自定义部门 / 3 本部门 / 4 本部门及以下 / 5 仅本人
 export const dataScopeOptions = [
   { label: '全部数据', value: 1 },
-  { label: '本部门及以下', value: 2 },
+  { label: '自定义部门', value: 2 },
   { label: '本部门', value: 3 },
-  { label: '仅本人', value: 4 },
+  { label: '本部门及以下', value: 4 },
+  { label: '仅本人', value: 5 },
 ]
 
 export const menuTypeOptions = [

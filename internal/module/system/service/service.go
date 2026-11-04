@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
 	"github.com/lautung/go-admin-pro/internal/module/system/repository"
 	"github.com/lautung/go-admin-pro/internal/pkg/authn"
+	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
 	"github.com/lautung/go-admin-pro/internal/pkg/jwt"
 	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 	"golang.org/x/crypto/bcrypt"
@@ -158,52 +158,45 @@ func HasPermission(codes []string, required string) bool {
 	return false
 }
 
-// UserCenter 获取用户所属部门及允许访问的部门集合。
-// deptIDs == nil 表示不限部门；onlySelf 表示仅本人数据。
-func (s *Service) UserCenter(ctx context.Context, userID int64) (deptIDs []int64, onlySelf bool, err error) {
+// deptResolverAdapter 把 system 模块的部门子树查询适配成 datascope.DeptResolver。
+type deptResolverAdapter struct{ s *Service }
+
+func (a deptResolverAdapter) DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error) {
+	return a.s.deptWithChildren(ctx, deptID)
+}
+
+// DataScopeFilter 计算当前用户的数据范围谓词（internal/pkg/datascope 行级引擎，
+// 供 system 与后续 CRM 复用）：多角色取可见部门并集，任一角色「全部」则全可见。
+func (s *Service) DataScopeFilter(ctx context.Context, userID int64) (datascope.Filter, error) {
 	user, err := s.repo.FindUserByID(ctx, userID)
 	if err != nil {
-		return nil, false, err
+		return datascope.Filter{}, err
 	}
 	if user == nil {
-		return nil, false, nil
+		// 用户不存在（异常上下文）：按仅本人处理，宁可少看。
+		return datascope.Filter{IncludeSelf: true, UserID: userID}, nil
 	}
 	roles, err := s.repo.GetUserRoles(ctx, userID)
 	if err != nil {
-		return nil, false, err
+		return datascope.Filter{}, err
 	}
-	if len(roles) == 0 {
-		return nil, true, nil
-	}
-
-	best := int8(model.DataScopeSelf)
+	inputs := make([]datascope.RoleInput, 0, len(roles))
 	for _, role := range roles {
-		if role.Code == "super_admin" || role.DataScope == model.DataScopeAll {
-			return nil, false, nil
+		scope := datascope.Scope(role.DataScope)
+		if role.Code == "super_admin" {
+			// 内置超管不受存量 data_scope 值影响，始终全部可见。
+			scope = datascope.ScopeAll
 		}
-		if role.DataScope < best {
-			best = role.DataScope
+		input := datascope.RoleInput{Scope: scope}
+		if scope == datascope.ScopeCustom {
+			if input.CustomDeptIDs, err = s.repo.GetRoleDeptIDs(ctx, role.ID); err != nil {
+				return datascope.Filter{}, err
+			}
 		}
+		inputs = append(inputs, input)
 	}
-
-	switch best {
-	case model.DataScopeDeptAndSub:
-		ids, err := s.deptWithChildren(ctx, user.DeptID)
-		if err != nil {
-			return nil, false, err
-		}
-		if len(ids) == 0 {
-			return nil, true, nil
-		}
-		return ids, false, nil
-	case model.DataScopeDept:
-		if user.DeptID == 0 {
-			return nil, true, nil
-		}
-		return []int64{user.DeptID}, false, nil
-	default:
-		return nil, true, nil
-	}
+	subject := datascope.Subject{UserID: userID, DeptID: user.DeptID}
+	return datascope.Resolve(ctx, subject, inputs, deptResolverAdapter{s: s})
 }
 
 func (s *Service) deptWithChildren(ctx context.Context, deptID int64) ([]int64, error) {

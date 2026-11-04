@@ -25,13 +25,16 @@ func notFound(err error) error {
 
 // UserFilter 是用户列表查询条件。
 type UserFilter struct {
-	Username   string
-	Nickname   string
-	Mobile     string
-	Status     *int8
-	DeptID     int64
-	DeptIDs    []int64 // 非 nil 时按部门集合过滤，空切片表示无匹配
-	OnlyUserID int64   // >0 时只看该用户（仅本人数据权限）
+	Username string
+	Nickname string
+	Mobile   string
+	Status   *int8
+	DeptID   int64
+	// DeptIDs 与 SelfUserID 共同表达数据范围谓词（见 internal/pkg/datascope.Filter）：
+	// DeptIDs 非 nil 时按 (dept_id IN DeptIDs OR id = SelfUserID) 过滤；
+	// 空切片 + SelfUserID = 0 表示谓词恒假（无可见部门）。
+	DeptIDs    []int64
+	SelfUserID int64 // >0 时附加本人行（数据范围「仅本人」）
 }
 
 func (r *Repository) FindUserByID(ctx context.Context, id int64) (*model.User, error) {
@@ -90,15 +93,17 @@ func (r *Repository) ListUsers(ctx context.Context, f UserFilter, offset, limit 
 	if f.DeptID > 0 {
 		q = q.Where("dept_id = ?", f.DeptID)
 	}
-	if f.DeptIDs != nil {
-		if len(f.DeptIDs) == 0 {
-			q = q.Where("1 = 0")
-		} else {
+	if f.DeptIDs != nil || f.SelfUserID > 0 {
+		switch {
+		case len(f.DeptIDs) > 0 && f.SelfUserID > 0:
+			q = q.Where("(dept_id IN ? OR id = ?)", f.DeptIDs, f.SelfUserID)
+		case len(f.DeptIDs) > 0:
 			q = q.Where("dept_id IN ?", f.DeptIDs)
+		case f.SelfUserID > 0:
+			q = q.Where("id = ?", f.SelfUserID)
+		default:
+			q = q.Where("1 = 0")
 		}
-	}
-	if f.OnlyUserID > 0 {
-		q = q.Where("id = ?", f.OnlyUserID)
 	}
 
 	var total int64

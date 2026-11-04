@@ -37,7 +37,7 @@ func newTxEnv(t *testing.T) (*service.Service, *gorm.DB) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	if err := db.AutoMigrate(
-		&model.Tenant{}, &model.Dept{}, &model.Role{}, &model.RoleMenu{},
+		&model.Tenant{}, &model.Dept{}, &model.Role{}, &model.RoleMenu{}, &model.RoleDept{},
 		&model.User{}, &model.UserRole{}, &model.UserPost{},
 	); err != nil {
 		t.Fatalf("建表: %v", err)
@@ -186,10 +186,11 @@ func TestUpdateRoleRollsBackWhenMenuAssignmentFails(t *testing.T) {
 	}
 
 	err := svc.UpdateRole(txCtx(), &systemdto.RoleUpdateReq{
-		ID:      role.ID,
-		Name:    "改名后",
-		Code:    "ops",
-		MenuIDs: []int64{6, 6}, // 重复 menuId → system_role_menu 主键冲突
+		ID:        role.ID,
+		Name:      "改名后",
+		Code:      "ops",
+		DataScope: model.DataScopeAll, // 非法数据范围会被 400 拒绝（issue #5），这里取合法值
+		MenuIDs:   []int64{6, 6},      // 重复 menuId → system_role_menu 主键冲突
 	})
 	if err == nil {
 		t.Fatal("重复 menuId 应导致更新失败")
@@ -220,10 +221,11 @@ func TestUpdateRoleReplacesMenus(t *testing.T) {
 	}
 
 	if err := svc.UpdateRole(txCtx(), &systemdto.RoleUpdateReq{
-		ID:      role.ID,
-		Name:    "菜单角色",
-		Code:    "menu-op",
-		MenuIDs: []int64{6, 7},
+		ID:        role.ID,
+		Name:      "菜单角色",
+		Code:      "menu-op",
+		DataScope: model.DataScopeAll,
+		MenuIDs:   []int64{6, 7},
 	}); err != nil {
 		t.Fatalf("更新角色: %v", err)
 	}

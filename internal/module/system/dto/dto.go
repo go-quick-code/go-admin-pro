@@ -110,6 +110,7 @@ type RoleCreateReq struct {
 	Status    int8    `json:"status"`
 	Remark    string  `json:"remark"`
 	MenuIDs   []int64 `json:"menuIds"`
+	DeptIDs   []int64 `json:"deptIds"` // 数据范围 2（自定义部门）时生效
 }
 
 type RoleUpdateReq struct {
@@ -121,6 +122,7 @@ type RoleUpdateReq struct {
 	Status    int8    `json:"status"`
 	Remark    string  `json:"remark"`
 	MenuIDs   []int64 `json:"menuIds"`
+	DeptIDs   []int64 `json:"deptIds"` // 数据范围 2（自定义部门）时生效
 }
 
 type RolePageReq struct {

@@ -85,6 +85,7 @@ go-admin-pro
 │       ├── middleware/         # CORS、日志、Recovery
 │       ├── excel/              # Excel 导入导出与模板
 │       ├── money/              # 金额值类型（int64 分，decimal(12,2)）
+│       ├── datascope/          # 行级数据权限谓词引擎（角色范围 1–5、多角色并集）
 │       ├── response/ xerr/     # 统一响应与业务错误
 │       └── web/ utils/         # 分页、通用工具
 ├── web/                        # Vue3 前端
