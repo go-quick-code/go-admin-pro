@@ -1,7 +1,9 @@
 // Package repository 是 crm 模块的 DAL 层。
-// 所有查询/写入通过租户插件自动带 tenant_id 条件（crm_customer、crm_sequence
-// 已登记 TenantTables），本层不手工拼租户条件；序列发放是唯一的裸 SQL 路径，
-// 租户值显式入参（见 NextSequenceValue）。
+// 所有查询/写入通过租户插件自动带 tenant_id 条件（crm_customer、crm_contact、
+// crm_sequence 已登记 TenantTables），本层不手工拼主表的租户条件；
+// 两条例外路径都显式说明：序列发放的裸 SQL（租户值显式入参，见
+// NextSequenceValue）与联系人 join 父客户时对被关联表的手工租户条件
+// （插件只给主表追加条件，见 ListContacts）。
 package repository
 
 import (

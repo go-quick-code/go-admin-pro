@@ -167,6 +167,12 @@ func seedMenus(db *gorm.DB) error {
 		btn(4011, 401, "客户新增", "crm:customer:create", 1),
 		btn(4012, 401, "客户修改", "crm:customer:update", 2),
 		btn(4013, 401, "客户删除", "crm:customer:delete", 3),
+		// 联系人（issue #9）：无独立页面，作为客户详情的 tab 呈现，
+		// 按钮权限码挂客户管理菜单下（可见性也跟随客户的数据范围）。
+		btn(4014, 401, "联系人查询", "crm:contact:query", 4),
+		btn(4015, 401, "联系人新增", "crm:contact:create", 5),
+		btn(4016, 401, "联系人修改", "crm:contact:update", 6),
+		btn(4017, 401, "联系人删除", "crm:contact:delete", 7),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err
