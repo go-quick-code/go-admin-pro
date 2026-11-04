@@ -4,9 +4,14 @@ app:
   port: 8080
   api-prefix: /admin-api
   web-root: ./web/dist
+  # 业务时区：IANA 时区名，默认 Asia/Shanghai，启动时用 LoadLocation 校验，
+  # 非法值直接启动失败。Excel 导入的无时区日期与数据库 DSN 的 loc 都由它驱动。
+  timezone: Asia/Shanghai
 
 database:
-  dsn: root:123456@tcp(127.0.0.1:3306)/go_admin_pro?charset=utf8mb4&parseTime=True&loc=Local
+  # DSN 的 loc 参数由 app.timezone 生成并覆盖（URL 编码，如 loc=Asia%2FShanghai），
+  # 这里无需再写 loc；旧配置遗留的 loc=Local 会被覆盖，服务器 TZ 不再影响时间解释。
+  dsn: root:123456@tcp(127.0.0.1:3306)/go_admin_pro?charset=utf8mb4&parseTime=True
   max-idle-conns: 10
   max-open-conns: 100
   seed: true
