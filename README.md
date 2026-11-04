@@ -348,6 +348,7 @@ make migrate-stamp version=1 # 已有库标记基线版本
 make migrate-create name=add_xxx # 新建迁移文件
 make test         # 运行测试
 make test-integration # 运行集成测试（构建标签 integration）
+make check        # fmt-check + build + vet + test-race
 make vet          # 静态检查
 make fmt          # gofmt
 make web-dev      # 启动前端开发服务器
