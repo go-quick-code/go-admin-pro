@@ -34,7 +34,6 @@
 - 术语表：[GLOSSARY.md](GLOSSARY.md)
 - 架构决策：[docs/adr/](docs/adr/)
 - CRM 详细规格：[docs/crm-mvp-spec.md](docs/crm-mvp-spec.md)
-- 迁移与验证：[docs/agents/verification.md](docs/agents/verification.md)
 
 ## 技术栈
 

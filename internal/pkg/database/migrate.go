@@ -81,7 +81,7 @@ func MigrateStatus(ctx context.Context, db *sql.DB) error {
 
 // MigrateStamp 把已有库标记为指定迁移版本，不执行任何 DDL。
 // 仅用于结构已存在但没有 goose 版本记录的库（例如旧 AutoMigrate 建的库）；
-// 为避免覆盖已有迁移历史，只允许在未应用任何版本时使用。
+// 它不校验表结构，调用方需自行核对，stamp 后应执行 migrate up 应用后续版本。
 func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
 	if err := initGoose(); err != nil {
 		return err
@@ -92,9 +92,6 @@ func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
 	}
 	if !slices.Contains(versions, version) {
 		return fmt.Errorf("version %d is not an embedded migration (known versions: %v)", version, versions)
-	}
-	if latest := versions[len(versions)-1]; version != latest {
-		return fmt.Errorf("only the latest embedded version (%d) can be stamped; got %d", latest, version)
 	}
 
 	current, err := goose.EnsureDBVersionContext(ctx, db)
@@ -124,6 +121,7 @@ func MigrateStamp(ctx context.Context, db *sql.DB, version int64) error {
 	if _, err := db.ExecContext(ctx, query, version); err != nil {
 		return fmt.Errorf("stamp version %d: %w", version, err)
 	}
+	fmt.Printf("database stamped at version %d; run `make migrate-up` to apply later migrations\n", version)
 	return nil
 }
 
