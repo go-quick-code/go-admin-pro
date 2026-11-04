@@ -337,6 +337,32 @@ func TestImportGuardValidationError(t *testing.T) {
 	}
 }
 
+// TestImportGuardDataRowErrorNotHeader 锁定 isHeaderError 依赖的公开契约
+// （见 import.go：第一行是表头、数据从第 2 行开始）：数据行（第 2 行起）
+// 的错误必须归类为 ValidationError，不会被归为表头错误 GuardErrInvalidHeader。
+// TestImportGuardValidationError 覆盖了同一分支（第 3、4 行错误），这条把
+// 契约本身显式成测试。
+func TestImportGuardDataRowErrorNotHeader(t *testing.T) {
+	g := excel.NewImportGuard[guardRow](1)
+	data := buildGuardWorkbook(t, "数据", [][]any{
+		guardHeader,
+		{"张三", 30, "2026-01-02"},
+		{"李四", "abc", "2026-03-04"}, // 第 3 行：数据行单元格解析错误
+	})
+	_, err := g.Import(bytes.NewReader(data), excel.GuardOptions[guardRow]{})
+	var ve *excel.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %v (%T), want *excel.ValidationError（数据行错误不应归类为表头错误）", err, err)
+	}
+	var ge *excel.GuardError
+	if errors.As(err, &ge) {
+		t.Fatalf("数据行错误被归类为 *GuardError kind=%d，want ValidationError", ge.Kind)
+	}
+	if len(ve.Errors) != 1 || ve.Errors[0].Row != 3 || ve.Errors[0].Column != "年龄" {
+		t.Errorf("errors = %+v, want 第 3 行 年龄列", ve.Errors)
+	}
+}
+
 func TestImportGuardInternalError(t *testing.T) {
 	marker := errors.New("内部数据库连接串 postgres://root:p@ssw0rd 与堆栈细节")
 	g := excel.NewImportGuard[guardRow](1)

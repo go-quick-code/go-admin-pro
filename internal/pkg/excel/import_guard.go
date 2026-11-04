@@ -163,9 +163,13 @@ func wrapGuardError(err error) error {
 	return &GuardError{Kind: GuardErrInternal, Msg: "服务器内部错误", Err: err}
 }
 
-// isHeaderError 判断明细错误是否全部来自表头行。helper 的表头错误
-// （未知列、缺少必填列、重复表头）都记在第 1 行，数据行从第 2 行开始，
-// 且两类错误不会混合在同一次导入里。
+// isHeaderError 判断明细错误是否全部来自表头行。
+//
+// 依赖 Import 的公开契约（见 import.go 的 Import 文档）：第一行必须是
+// 表头，数据从第 2 行开始。在该契约下，表头错误（未知列、缺少必填列、
+// 重复表头，见 matchHeader）全部记在第 1 行，数据行错误全部记在第 2 行
+// 起，且两类错误不会混合在同一次导入里，因此「明细全部在第 1 行」
+// 等价于「纯表头错误」。
 func isHeaderError(ie *ImportError) bool {
 	for _, item := range ie.Errors {
 		if item.Row != 1 {
