@@ -108,3 +108,34 @@ func TestImportDateSerialOutOfRange(t *testing.T) {
 		})
 	}
 }
+
+func TestImportNonPaddedHyphenDateText(t *testing.T) {
+	tz := time.FixedZone("CST", 8*3600)
+	data := buildWorkbook(t, "数据", [][]any{
+		{"客户名称", "加入日期"},
+		{"甲", "2026-1-2"},
+		{"乙", "2026-1-2 15:04"},
+		{"丙", "2026-1-2 15:04:05"},
+	})
+	rows, err := excel.Import[importRow](bytes.NewReader(data), excel.ImportOptions[importRow]{Location: tz})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	wants := []time.Time{
+		time.Date(2026, time.January, 2, 0, 0, 0, 0, tz),
+		time.Date(2026, time.January, 2, 15, 4, 0, 0, tz),
+		time.Date(2026, time.January, 2, 15, 4, 5, 0, tz),
+	}
+	for i, want := range wants {
+		got := rows[i].JoinedAt
+		if !got.Equal(want) {
+			t.Errorf("row %d joined at = %v, want %v", i, got, want)
+		}
+		if got.Location() != tz {
+			t.Errorf("row %d location = %v, want %v", i, got.Location(), tz)
+		}
+	}
+}
