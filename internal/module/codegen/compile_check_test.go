@@ -29,6 +29,11 @@ func TestGeneratedProductCompiles(t *testing.T) {
 		t.Skip("找不到 go 命令，跳过编译验证")
 	}
 	spec := loadProductSpec(t)
+	// 追加 datetime 字段：生成物必须走 Service.businessLocation（ADR 0006）的
+	// location-aware 解析，编译检查覆盖该分支。
+	spec.Fields = append(spec.Fields, codegen.FieldSpec{
+		Name: "listed_at", Type: "datetime", Comment: "上架时间",
+	})
 	files, err := codegen.GenerateEntity(spec)
 	if err != nil {
 		t.Fatalf("GenerateEntity: %v", err)
@@ -98,6 +103,11 @@ func TestGeneratedFreshModuleCompiles(t *testing.T) {
 			spec.Fields[i].Dict = "erp_product_status"
 		}
 	}
+	// 追加 datetime 字段：模块骨架生成的 Service.location/businessLocation
+	// 必须让 per-entity 解析助手可编译（ADR 0006）。
+	spec.Fields = append(spec.Fields, codegen.FieldSpec{
+		Name: "expire_at", Type: "datetime", Comment: "过期时间",
+	})
 	files, err := codegen.GenerateEntity(spec)
 	if err != nil {
 		t.Fatalf("GenerateEntity: %v", err)

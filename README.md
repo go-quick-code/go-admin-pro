@@ -289,7 +289,7 @@ ctx = tenant.WithTenantID(ctx, claims.TenantID)
 | 4 | 本部门及以下 |
 | 5 | 仅本人 |
 
-`service.UserCenter` 会汇总用户所有角色，取最大范围并计算可见部门集合；用户列表查询据此追加条件。其他业务模块可复用同一方法扩展数据权限。
+数据权限由 `internal/pkg/datascope` 的行级引擎计算：`system.Service.DataScopeFilter` 汇总用户所有角色，按角色范围产出可见部门（自定义部门读 `system_role_dept`，本部门及以下展开子树，仅本人产出 `IncludeSelf`），多角色取可见部门并集，任一角色为「全部」则全可见；用户列表据此追加条件。其他业务模块通过 `SystemGateway.DataScopeFilter` 拿到同一个 `datascope.Filter`，再翻译成模块自己的谓词（CRM 为 `owner_dept_id` / `owner_user_id`，见 ADR 0004）。
 
 ### 权限模型
 

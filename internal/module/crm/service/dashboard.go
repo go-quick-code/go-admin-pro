@@ -65,9 +65,16 @@ func (s *Service) DashboardSummary(ctx context.Context) (*DashboardSummary, erro
 	var ownerDeptIDs []int64
 	var selfOwnerUserID int64
 	applyCustomerScope(scope, &ownerDeptIDs, &selfOwnerUserID)
+	// 公海可见性（spec §4.1）：只有持 crm:customer:pool:view 的用户才把
+	// 公海客户计入客户总数（super_admin 以 "*" 通配）；无权限者只统计有负责人客户。
+	includePool, err := s.sys.UserHasPermission(ctx, CurrentUserID(ctx), PermCustomerPoolView)
+	if err != nil {
+		return nil, err
+	}
 	filter := repository.DashboardFilter{
 		OwnerDeptIDs:    ownerDeptIDs,
 		SelfOwnerUserID: selfOwnerUserID,
+		IncludePool:     includePool,
 	}
 
 	loc := s.businessLocation()

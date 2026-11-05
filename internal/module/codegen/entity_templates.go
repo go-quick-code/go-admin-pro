@@ -198,9 +198,9 @@ const tmplEntityService = `package service
 
 import (
 	"context"
-[[if or .HasSequence .HasTime]][[if .HasSequence]]	"fmt"
-[[end]]	"strings"
-	"time"
+[[if .HasSequence]]	"fmt"
+[[end]][[if .HasTime]]	"strings"
+[[end]][[if or .HasSequence .HasTime]]	"time"
 [[end]]
 	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/dto"
 	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/model"
@@ -431,18 +431,20 @@ func (s *Service) fetch[[ .ClassName ]]OwnerNames(ctx context.Context, userIDs, 
 	return names, deptNames
 }
 [[end]][[if .HasTime]]
-// parse[[ .ClassName ]]Time 把前端提交的时间字符串（YYYY-MM-DD HH:mm:ss）解析为可空时间：
-// 空串返回 nil；格式非法返回 nil（选填时间字段按无值处理；按本地时区解释，CODING_STANDARDS）。
-func parse[[ .ClassName ]]Time(value string) *time.Time {
+// parse[[ .ClassName ]]Time 把前端提交的时间字符串解析为可空时间：空串返回 nil；
+// 格式非法返回 nil（选填时间字段按无值处理）；按业务时区解释（ADR 0006）。
+// 业务时区由 app 装配时 Service.SetLocation 注入，未注入才退回 time.Local。
+func (s *Service) parse[[ .ClassName ]]Time(value string) *time.Time {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
 	}
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
-	if err != nil {
-		return nil
+	for _, layout := range []string{"2006-01-02", "2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.ParseInLocation(layout, value, s.businessLocation()); err == nil {
+			return &t
+		}
 	}
-	return &t
+	return nil
 }
 [[end]][[if .ImportExport]]
 // TODO(#20): Excel 导入导出接线（internal/pkg/excel，docs/crm-mvp-spec.md §7）——
@@ -731,11 +733,29 @@ type SystemGateway interface {
 type Service struct {
 	repo *repository.Repository
 	sys  SystemGateway
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
+	// nil 表示未注入（退回 time.Local，见 businessLocation）。
+	location *time.Location
 }
 
 // New 创建 [[ .Module ]] Service。
 func New(repo *repository.Repository, sys SystemGateway) *Service {
 	return &Service{repo: repo, sys: sys}
+}
+
+// SetLocation 注入业务时区（ADR 0006：唯一来源是 config.Location()）。nil 忽略。
+func (s *Service) SetLocation(loc *time.Location) {
+	if loc != nil {
+		s.location = loc
+	}
+}
+
+// businessLocation 返回业务时区；未注入时退回 time.Local（测试/工具场景）。
+func (s *Service) businessLocation() *time.Location {
+	if s.location != nil {
+		return s.location
+	}
+	return time.Local
 }
 
 // CurrentUserID 返回 context 中的当前用户 ID。

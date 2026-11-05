@@ -27,7 +27,7 @@
       <template #cell-contractAmount="{ row }">{{ row.contractAmount ?? '0.00' }}</template>
       <template #cell-dueDate="{ row }">{{ formatDate(row.dueDate) }}</template>
       <template #cell-status="{ row }">
-        <el-tag :type="statusTagType(row.status)" size="small">{{ row.statusName || statusLabel(row.status) }}</el-tag>
+        <el-tag :type="statusTagType(row.status, receivableStatusTagTypes)" size="small">{{ row.statusName || statusLabel(row.status) }}</el-tag>
         <el-tag v-if="row.overdue" type="danger" size="small" effect="plain" class="overdue-tag">逾期</el-tag>
       </template>
       <template #actions="{ row }">
@@ -76,7 +76,7 @@
           <el-descriptions-item label="已收金额">{{ planRow.receivedAmount ?? '0.00' }} 元</el-descriptions-item>
           <el-descriptions-item label="到期日">{{ formatDate(planRow.dueDate) }}</el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag :type="statusTagType(planRow.status)" size="small">
+            <el-tag :type="statusTagType(planRow.status, receivableStatusTagTypes)" size="small">
               {{ planRow.statusName || statusLabel(planRow.status) }}
             </el-tag>
           </el-descriptions-item>
@@ -136,7 +136,13 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
-import { formatTime, dictLabel } from '@/utils/format'
+import {
+  formatTime,
+  formatDate,
+  dictLabel,
+  statusTagType,
+  type StatusTagType,
+} from '@/utils/format'
 import {
   pageReceivablePlans,
   createReceivablePlan,
@@ -159,21 +165,16 @@ const statusOptions = [
   { label: '逾期', value: 4 },
 ]
 
+const receivableStatusTagTypes: Record<number, StatusTagType> = {
+  2: 'warning',
+  3: 'success',
+  4: 'danger',
+}
+
 const methodOptions = ['银行转账', '现金', '支票', '其他']
 
 function statusLabel(status?: number) {
   return dictLabel(statusOptions, status)
-}
-
-function statusTagType(status?: number) {
-  if (status === 2) return 'warning'
-  if (status === 3) return 'success'
-  if (status === 4) return 'danger'
-  return 'info'
-}
-
-function formatDate(value?: string) {
-  return value ? String(value).slice(0, 10) : '-'
 }
 
 // 本地日历日（与后端 DateKey/逾期口径一致，避免 toISOString 的 UTC 偏移）。

@@ -112,7 +112,7 @@ func (s *Service) CreateOpportunity(ctx context.Context, req *dto.OpportunityCre
 	if err != nil {
 		return nil, err
 	}
-	closeDate, err := ParseExpectedCloseDate(req.ExpectedCloseDate)
+	closeDate, err := ParseExpectedCloseDate(req.ExpectedCloseDate, s.businessLocation())
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (s *Service) UpdateOpportunity(ctx context.Context, req *dto.OpportunityUpd
 			return err
 		}
 	}
-	closeDate, err := ParseExpectedCloseDate(req.ExpectedCloseDate)
+	closeDate, err := ParseExpectedCloseDate(req.ExpectedCloseDate, s.businessLocation())
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,8 @@ func (s *Service) UpdateOpportunity(ctx context.Context, req *dto.OpportunityUpd
 	})
 }
 
-// AdvanceOpportunityStage 阶段推进（唯一阶段入口）：终态拒绝、非法拒绝（400），
+// AdvanceOpportunityStage 阶段推进（创建可设 1–4；创建后的阶段变更只走本入口）：
+// 终态拒绝、非法拒绝（400），
 // 条件更新防并发推进覆盖（行数为 0 报冲突）。
 func (s *Service) AdvanceOpportunityStage(ctx context.Context, req *dto.OpportunityStageReq) (*model.Opportunity, error) {
 	o, err := s.findVisibleOpportunity(ctx, req.ID)

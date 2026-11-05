@@ -27,7 +27,7 @@
         />
       </template>
       <template #cell-status="{ row }">
-        <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+        <el-tag :type="statusTagType(row.status, customerStatusTagTypes)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
       <template #cell-ownerUserName="{ row }">
         <span v-if="row.ownerUserName">{{ row.ownerUserName }}（{{ row.ownerDeptName || '-' }}）</span>
@@ -69,7 +69,7 @@
             <el-descriptions-item label="客户编号">{{ detail.customerNo }}</el-descriptions-item>
             <el-descriptions-item label="客户名称">{{ detail.name }}</el-descriptions-item>
             <el-descriptions-item label="状态">
-              <el-tag :type="statusTagType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag>
+              <el-tag :type="statusTagType(detail.status, customerStatusTagTypes)" size="small">{{ statusLabel(detail.status) }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="负责人">
               {{ detail.ownerUserName || '公海' }}{{ detail.ownerDeptName ? `（${detail.ownerDeptName}）` : '' }}
@@ -226,7 +226,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
-import { formatTime, dictLabel } from '@/utils/format'
+import { formatTime, dictLabel, statusTagType, type StatusTagType } from '@/utils/format'
 import {
   pageCustomers,
   getCustomer,
@@ -266,6 +266,11 @@ const customerStatusOptions = [
   { label: '流失', value: 3 },
 ]
 
+const customerStatusTagTypes: Record<number, StatusTagType> = {
+  2: 'success',
+  3: 'danger',
+}
+
 // 联系人性别对齐字典 sys_user_sex：0 未知 / 1 男 / 2 女（issue #9）
 const contactGenderOptions = [
   { label: '未知', value: 0 },
@@ -292,12 +297,6 @@ const actionOptions = [
 
 function statusLabel(status: number) {
   return dictLabel(customerStatusOptions, status)
-}
-
-function statusTagType(status: number) {
-  if (status === 2) return 'success'
-  if (status === 3) return 'danger'
-  return 'info'
 }
 
 function genderLabel(gender: number) {

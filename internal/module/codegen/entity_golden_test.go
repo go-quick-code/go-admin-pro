@@ -168,7 +168,11 @@ func TestGenerateEntityVariations(t *testing.T) {
 			t.Fatalf("GenerateEntity: %v", err)
 		}
 		svc := files["go/internal/module/crm/service/product.go"]
-		for _, want := range []string{"parseProductTime(req.ListedAt)", "func parseProductTime(value string) *time.Time"} {
+		for _, want := range []string{
+			"s.parseProductTime(req.ListedAt)",
+			"func (s *Service) parseProductTime(value string) *time.Time",
+			"s.businessLocation()",
+		} {
 			if !strings.Contains(svc, want) {
 				t.Errorf("datetime 字段应生成 %q", want)
 			}

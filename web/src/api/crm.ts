@@ -111,6 +111,11 @@ export function createProduct(data: any) {
 export function updateProduct(data: any) {
   return request.put('/crm/product', data) as Promise<any>
 }
+// 状态切换（spec §5 PUT /product/status，crm:product:update）：只改 status，
+// 0 下架 / 1 上架，不触碰其他字段。
+export function updateProductStatus(id: number, status: number) {
+  return request.put('/crm/product/status', { id, status }) as Promise<any>
+}
 export function deleteProduct(id: number) {
   return request.delete(`/crm/product/${id}`) as Promise<any>
 }
@@ -133,8 +138,8 @@ export function updateOpportunity(data: any) {
 export function deleteOpportunity(id: number) {
   return request.delete(`/crm/opportunity/${id}`) as Promise<any>
 }
-// 阶段推进（唯一阶段入口，crm:opportunity:stage）：5 赢单 / 6 输单为终态，
-// 终态后再推进后端返回 400。
+// 阶段推进（创建时可指定 1–4；此后阶段变更只走本入口，crm:opportunity:stage）：
+// 5 赢单 / 6 输单为终态，终态后再推进后端返回 400。
 export function advanceOpportunityStage(id: number, stage: number) {
   return request.put('/crm/opportunity/stage', { id, stage }) as Promise<any>
 }

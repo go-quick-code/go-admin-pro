@@ -1,6 +1,7 @@
-// product_refs.go 是产品删除约束的扩展点（issue #11，docs/crm-mvp-spec.md §4.1：
-// 产品被商机/合同行项目引用时禁止删除）。本工单只落产品侧接口与 v1 空实现；
-// 商机（#15）/合同（#16）落地行项目后，各自的行项目仓储提供实现并在 app 装配处注册。
+// product_refs.go 是产品删除约束的扩展点（issue #11，docs/crm-mvp-spec.md §4.5：
+// 产品被商机/合同行项目引用时禁止删除）。商机（#15）与合同（#16）各自提供
+// 行项目侧实现，app 装配处用 RefCheckerChain 组合注册（见 contract_refs.go）；
+// 未注册实现时退回空实现放行，仅用于轻量测试/工具场景。
 package service
 
 import (
@@ -14,13 +15,14 @@ type ProductRefCountChecker interface {
 	CheckProductRefs(ctx context.Context, productID int64) error
 }
 
-// noopProductRefCountChecker 是 v1 空实现：商机/合同行项目（#15/#16）尚未落地，无引用可查。
+// noopProductRefCountChecker 是空实现：未注册校验器时无引用可查；
+// 正常装配会注册商机 + 合同两侧实现（internal/app），生产路径不会静默放行。
 type noopProductRefCountChecker struct{}
 
 func (noopProductRefCountChecker) CheckProductRefs(context.Context, int64) error { return nil }
 
 // SetProductRefCountChecker 注册删除引用校验实现（幂等，后注册覆盖先注册）。
-// 装配点：internal/app 在 #15/#16 落地后传入商机/合同侧实现；v1 不调用即用空实现。
+// 装配点：internal/app 传入 RefCheckerChain（商机侧 + 合同侧实现）。
 func (s *Service) SetProductRefCountChecker(checker ProductRefCountChecker) {
 	s.productRefs = checker
 }

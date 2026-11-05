@@ -17,9 +17,6 @@ import (
 //
 // 非法值一律 400，文案说清哪个字段、期望什么格式（CODING_STANDARDS「错误与文案」）。
 
-// followUpTimeLayouts 是下次跟进时间接受的格式：前端 value-format、纯日期与 RFC3339。
-var followUpTimeLayouts = []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"}
-
 // ValidateFollowUpType 校验跟进类型：未传（nil）放行（服务层缺省「其他」），
 // 传了必须是 1–5 枚举，非法值返回用户可读的 400 错误。
 func ValidateFollowUpType(t *int8) error {
@@ -34,15 +31,14 @@ func ValidateFollowUpType(t *int8) error {
 
 // ValidateFollowUpNextTime 校验并解析下次跟进时间：空值放行（选填字段，返回 nil），
 // 非空必须匹配已知格式，非法格式返回 400 并带回原始输入。
-func ValidateFollowUpNextTime(value string) (*time.Time, error) {
+// 日期文本按 loc（业务时区，ADR 0006）解释，调用方传 Service.businessLocation()。
+func ValidateFollowUpNextTime(value string, loc *time.Location) (*time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, nil
 	}
-	for _, layout := range followUpTimeLayouts {
-		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
-			return &t, nil
-		}
+	if t, ok := parseDateIn(crmDateLayouts, value, loc); ok {
+		return &t, nil
 	}
 	return nil, xerr.BadRequest(fmt.Sprintf("下次跟进时间 %q 格式不正确：应为 2026-01-02 15:04:05 形式", value))
 }

@@ -276,7 +276,8 @@ func (d *entityData) serviceAssign(f entityFieldData) string {
 	case f.IsEnum:
 		return f.GoName
 	case f.IsTime:
-		return fmt.Sprintf("parse%sTime(req.%s)", d.ClassName, f.GoName)
+		// 解析助手挂在模块 Service 上，用业务时区（ADR 0006）。
+		return fmt.Sprintf("s.parse%sTime(req.%s)", d.ClassName, f.GoName)
 	default:
 		return "req." + f.GoName
 	}

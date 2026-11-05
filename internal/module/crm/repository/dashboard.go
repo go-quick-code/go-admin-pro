@@ -32,6 +32,11 @@ import (
 type DashboardFilter struct {
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
+
+	// IncludePool 表示当前用户持 crm:customer:pool:view（spec §4.1）：
+	// 客户计数把公海（owner_user_id IS NULL）计入，且公海不受数据范围过滤。
+	// 其他指标不涉及公海，忽略该字段。
+	IncludePool bool
 }
 
 // DashboardStageRow 是商机按阶段聚合的原始行。
@@ -72,12 +77,36 @@ func applyDashboardOwnerScope(q *gorm.DB, f DashboardFilter, deptColumn, userCol
 	}
 }
 
-// CountDashboardCustomers 统计当前数据范围内可见的客户数（含公海客户：
-// owner 为空的客户在「全部」范围下可见，在部门/本人范围下被谓词排除）。
+// CountDashboardCustomers 统计当前用户可见的客户数（spec §4.1）：
+//   - 无 crm:customer:pool:view（IncludePool=false）：公海不可见，只统计
+//     owner_user_id IS NOT NULL，再套普通数据范围谓词；
+//   - 有该权限（IncludePool=true）：公海计入，且公海不受数据范围过滤——
+//     结果为「数据范围谓词 OR owner_user_id IS NULL」；数据范围为「全部」时
+//     不过滤（含公海）。
 func (r *Repository) CountDashboardCustomers(ctx context.Context, f DashboardFilter) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Customer{})
-	q = applyDashboardOwnerScope(q, f, "crm_customer.owner_dept_id", "crm_customer.owner_user_id")
+	switch {
+	case !f.IncludePool:
+		q = q.Where("crm_customer.owner_user_id IS NOT NULL")
+		q = applyDashboardOwnerScope(q, f, "crm_customer.owner_dept_id", "crm_customer.owner_user_id")
+	case f.OwnerDeptIDs == nil && f.SelfOwnerUserID == 0:
+		// 全部数据范围 + 公海可见：不过滤。
+	default:
+		// 公海与数据范围取并集：范围外的有负责人客户仍不可见。
+		switch {
+		case len(f.OwnerDeptIDs) > 0 && f.SelfOwnerUserID > 0:
+			q = q.Where("(crm_customer.owner_dept_id IN ? OR crm_customer.owner_user_id = ?"+
+				" OR crm_customer.owner_user_id IS NULL)", f.OwnerDeptIDs, f.SelfOwnerUserID)
+		case len(f.OwnerDeptIDs) > 0:
+			q = q.Where("(crm_customer.owner_dept_id IN ? OR crm_customer.owner_user_id IS NULL)", f.OwnerDeptIDs)
+		case f.SelfOwnerUserID > 0:
+			q = q.Where("(crm_customer.owner_user_id = ? OR crm_customer.owner_user_id IS NULL)", f.SelfOwnerUserID)
+		default:
+			// 无可见部门且不含本人：只剩公海。
+			q = q.Where("crm_customer.owner_user_id IS NULL")
+		}
+	}
 	err := q.Count(&count).Error
 	return count, err
 }

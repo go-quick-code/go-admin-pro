@@ -6,7 +6,6 @@ import (
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
 	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
 	"github.com/lautung/go-admin-pro/internal/pkg/web"
 	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
 )
@@ -135,24 +134,6 @@ func (s *Service) findVisibleContact(ctx context.Context, id int64) (*model.Cont
 		return nil, xerr.NotFound("联系人不存在")
 	}
 	return contact, nil
-}
-
-// applyCustomerScope 把 datascope.Filter 翻译成父客户 owner_* 谓词
-// （与 ListCustomers 的翻译一致，供联系人 join 路径复用）。
-func applyCustomerScope(scope datascope.Filter, ownerDeptIDs *[]int64, selfOwnerUserID *int64) {
-	if scope.All {
-		return
-	}
-	if scope.IncludeSelf {
-		*selfOwnerUserID = scope.UserID
-	}
-	switch {
-	case len(scope.DeptIDs) > 0:
-		*ownerDeptIDs = scope.DeptIDs
-	case !scope.IncludeSelf:
-		// 无可见部门且不含本人：谓词恒假（fail-closed，绝不回退全部）。
-		*ownerDeptIDs = []int64{}
-	}
 }
 
 // validateContactFields 校验手机/邮箱/性别，非法值返回 400。

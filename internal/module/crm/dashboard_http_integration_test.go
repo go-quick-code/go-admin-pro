@@ -518,3 +518,47 @@ func TestIntegrationDashboardPermissionDenied(t *testing.T) {
 		t.Fatalf("admin 查询仪表盘：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 	}
 }
+
+// TestIntegrationDashboardCustomerCountPoolVisibility 客户总数遵循公海可见性
+// （spec §4.1）：持 crm:customer:pool:view 者（含 super_admin 通配）计入公海客户，
+// 且不受数据范围过滤；无该权限者只统计有负责人的客户。
+func TestIntegrationDashboardCustomerCountPoolVisibility(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	// 2 个有负责人客户 + 1 个释放到公海的客户。
+	createCustomer(t, env, admin, "公海计数客户甲", nil)
+	createCustomer(t, env, admin, "公海计数客户乙", nil)
+	pooled := createCustomer(t, env, admin, "公海计数客户丙", nil)
+	if status, api := releaseCustomerRaw(t, env, admin, int64(pooled["id"].(float64)), "仪表盘公海计数"); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("释放客户到公海：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+
+	// admin（super_admin ⇒ "*"）可见全部客户，公海计入：3。
+	if got := dashboardCards(t, fetchDashboardSummary(t, env, admin))["customerCount"]; got != float64(3) {
+		t.Fatalf("admin 客户总数 = %v，期望 3（含公海）", got)
+	}
+
+	// 仪表盘权限但无公海权限：公海不计入，只剩 2 个有负责人客户。
+	noPoolRole := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "仪表盘无公海角色", "code": "db_no_pool", "dataScope": 1,
+		"menuIds": []int64{crmDashboardMenuID, 4141},
+	})
+	createUserByAPI(t, env, admin, "db_no_pool_user", 102, []int64{noPoolRole})
+	noPool := env.Login(t, "db_no_pool_user", "123456")
+	if got := dashboardCards(t, fetchDashboardSummary(t, env, noPool))["customerCount"]; got != float64(2) {
+		t.Fatalf("无 crm:customer:pool:view 用户客户总数 = %v，期望 2（不含公海）", got)
+	}
+
+	// 有公海权限但数据范围「仅本人」：公海不受数据范围过滤，仍计入；
+	// 他人负责的 2 个客户不可见：1。
+	poolRole := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "仪表盘含公海角色", "code": "db_with_pool", "dataScope": 5,
+		"menuIds": []int64{crmDashboardMenuID, 4141, poolCustomerMenuID},
+	})
+	createUserByAPI(t, env, admin, "db_with_pool_user", 102, []int64{poolRole})
+	withPool := env.Login(t, "db_with_pool_user", "123456")
+	if got := dashboardCards(t, fetchDashboardSummary(t, env, withPool))["customerCount"]; got != float64(1) {
+		t.Fatalf("持公海权限的仅本人用户客户总数 = %v，期望 1（仅公海，不受数据范围过滤）", got)
+	}
+}
