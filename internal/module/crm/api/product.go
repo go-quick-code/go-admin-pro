@@ -82,13 +82,13 @@ func (h *Handler) DeleteProduct(c *gin.Context) {
 func (h *Handler) RegisterProductRoutes(rg *gin.RouterGroup) {
 	product := rg.Group("/crm/product")
 	product.GET("/page", h.requirePermission("crm:product:query"), h.PageProducts)
+	// Excel（issue #20）：导入/模板挂 crm:product:import，导出挂 crm:product:export；
+	// 静态路由先于 /:id 注册。
+	product.GET("/import-template", h.requirePermission("crm:product:import"), h.ProductImportTemplate)
+	product.POST("/import", h.requirePermission("crm:product:import"), h.ImportProducts)
+	product.GET("/export-excel", h.requirePermission("crm:product:export"), h.ExportProducts)
 	product.GET("/:id", h.requirePermission("crm:product:query"), h.GetProduct)
 	product.POST("", h.requirePermission("crm:product:create"), h.CreateProduct)
 	product.PUT("", h.requirePermission("crm:product:update"), h.UpdateProduct)
 	product.DELETE("/:id", h.requirePermission("crm:product:delete"), h.DeleteProduct)
-
-	// TODO(#20): Excel 导入导出接线（internal/pkg/excel）——路由先行留位，实现随 #20：
-	//	product.POST("/import", h.requirePermission("crm:product:import"), h.ImportProduct)
-	//	product.GET("/export", h.requirePermission("crm:product:export"), h.ExportProduct)
-	//	product.GET("/import-template", h.requirePermission("crm:product:import"), h.ImportProductTemplate)
 }

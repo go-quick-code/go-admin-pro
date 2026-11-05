@@ -123,7 +123,8 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil
 	})
 
-	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission)
+	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
+	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
 
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)

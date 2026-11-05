@@ -14,6 +14,16 @@
       dialog-width="900px"
       @row-click="openDetail"
     >
+      <template #toolbar>
+        <!-- Excel 导出（issue #20）：挂 crm:contract:export，复用当前列表筛选；
+             后端再套数据范围谓词，导出内容与列表可见范围一致。 -->
+        <ExcelActions
+          title="合同"
+          export-perm="crm:contract:export"
+          :export-action="exportContracts"
+          :export-params="contractExportParams"
+        />
+      </template>
       <template #cell-status="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
@@ -331,6 +341,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { formatTime, formatSize, dictLabel } from '@/utils/format'
 import {
   pageContracts,
@@ -342,6 +353,7 @@ import {
   listContractFiles,
   uploadContractFile,
   deleteContractFile,
+  exportContracts,
   pageCustomers,
   pageOpportunities,
   pageProducts,
@@ -446,6 +458,16 @@ const tableRef = ref()
 const customers = ref<any[]>([])
 const products = ref<any[]>([])
 const opportunities = ref<any[]>([])
+
+// 合同导出复用当前列表筛选（空值由 ExcelActions 剔除）。
+function contractExportParams() {
+  const q = tableRef.value?.query || {}
+  return {
+    name: q.name,
+    status: q.status,
+    customerId: q.customerId,
+  }
+}
 
 const searchItems = [
   { prop: 'name', label: '合同名称' },

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/module/crm/service"
 )
@@ -8,14 +10,20 @@ import (
 // Handler 是 crm 模块的 HTTP 入口。
 // requirePermission 复用 system 模块的权限中间件（codegen 同款装配方式），
 // 权限码与菜单种子保持一致（crm:customer:*）。
+// location 是应用业务时区（ADR 0006），CRM Excel 导入的日期解析统一使用它。
 type Handler struct {
 	svc               *service.Service
 	requirePermission func(string) gin.HandlerFunc
+	location          *time.Location
 }
 
-// New 创建 crm Handler。
-func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc) *Handler {
-	return &Handler{svc: svc, requirePermission: requirePermission}
+// New 创建 crm Handler。location 为 nil 时由 excel helper 回退到 time.Local
+// （生产装配固定传 config.Location()）。
+func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc, location *time.Location) *Handler {
+	if location == nil {
+		location = time.Local
+	}
+	return &Handler{svc: svc, requirePermission: requirePermission, location: location}
 }
 
 // RegisterProtected 注册需要登录的 CRM 接口，rg 上应已挂载 Auth 中间件。
@@ -24,6 +32,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	customer := rg.Group("/crm/customer")
 	customer.GET("/page", h.requirePermission("crm:customer:query"), h.PageCustomers)
 	customer.GET("/pool/page", h.requirePermission("crm:customer:pool:view"), h.PagePoolCustomers)
+	// Excel（issue #20）：导入/模板挂 crm:customer:import，导出挂 crm:customer:export；
+	// 静态路由必须注册在 /:id 之前，否则 "import-template" 会被当成客户 ID。
+	customer.GET("/import-template", h.requirePermission("crm:customer:import"), h.CustomerImportTemplate)
+	customer.POST("/import", h.requirePermission("crm:customer:import"), h.ImportCustomers)
+	customer.GET("/export-excel", h.requirePermission("crm:customer:export"), h.ExportCustomers)
 	customer.GET("/:id", h.requirePermission("crm:customer:query"), h.GetCustomer)
 	customer.GET("/:id/owner-history", h.requirePermission("crm:customer:query"), h.PageCustomerOwnerHistory)
 	customer.POST("", h.requirePermission("crm:customer:create"), h.CreateCustomer)
@@ -37,6 +50,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 
 	contact := rg.Group("/crm/contact")
 	contact.GET("/page", h.requirePermission("crm:contact:query"), h.PageContacts)
+	// Excel 导入（issue #20）：导入/模板挂 crm:contact:import，静态路由先于 /:id。
+	contact.GET("/import-template", h.requirePermission("crm:contact:import"), h.ContactImportTemplate)
+	contact.POST("/import", h.requirePermission("crm:contact:import"), h.ImportContacts)
 	contact.GET("/:id", h.requirePermission("crm:contact:query"), h.GetContact)
 	contact.POST("", h.requirePermission("crm:contact:create"), h.CreateContact)
 	contact.PUT("", h.requirePermission("crm:contact:update"), h.UpdateContact)
@@ -71,6 +87,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 校验 crm:contract:approve，无码 403；作废走 VoidContractGuard 守卫）。
 	contract := rg.Group("/crm/contract")
 	contract.GET("/page", h.requirePermission("crm:contract:query"), h.PageContracts)
+	// Excel 导出（issue #20）：挂 crm:contract:export，静态路由先于 /:id。
+	contract.GET("/export-excel", h.requirePermission("crm:contract:export"), h.ExportContracts)
 	contract.GET("/:id", h.requirePermission("crm:contract:query"), h.GetContract)
 	contract.POST("", h.requirePermission("crm:contract:create"), h.CreateContract)
 	contract.PUT("", h.requirePermission("crm:contract:update"), h.UpdateContract)
@@ -95,6 +113,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 记录编号 HK+yyyyMMdd+4 位序号（crm_sequence 同款）。
 	receivable := rg.Group("/crm/receivable")
 	receivable.GET("/plan/page", h.requirePermission("crm:receivable:query"), h.PageReceivablePlans)
+	// Excel 导出（issue #20）：挂 crm:receivable:export。
+	receivable.GET("/plan/export-excel", h.requirePermission("crm:receivable:export"), h.ExportReceivablePlans)
 	receivable.POST("/plan", h.requirePermission("crm:receivable:create"), h.CreateReceivablePlan)
 	receivable.PUT("/plan", h.requirePermission("crm:receivable:update"), h.UpdateReceivablePlan)
 	receivable.DELETE("/plan/:id", h.requirePermission("crm:receivable:delete"), h.DeleteReceivablePlan)

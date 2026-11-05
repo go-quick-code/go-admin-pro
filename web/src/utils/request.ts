@@ -25,14 +25,29 @@ service.interceptors.response.use(
       if (body.code === 0) {
         return body.data
       }
+      const err: any = new Error(body.msg || '请求失败')
+      // 业务错误码与 data 一并挂到错误上：Excel 导入失败（code=4201）需要
+      // 在页面上按行展示 data.errors，而不是只弹一条概要。
+      err.responseBody = body
       ElMessage.error(body.msg || '请求失败')
-      return Promise.reject(new Error(body.msg || '请求失败'))
+      return Promise.reject(err)
     }
     return body
   },
-  (error) => {
+  async (error) => {
     const status = error.response?.status
-    const msg = error.response?.data?.msg || error.message || '网络异常'
+    let msg = error.response?.data?.msg
+    // responseType=blob 时后端错误体也是 Blob，需要先读文本再解析信封。
+    const raw = error.response?.data
+    if (!msg && raw instanceof Blob) {
+      try {
+        const body = JSON.parse(await raw.text())
+        msg = body?.msg
+      } catch {
+        // 非 JSON 错误体按状态码兜底
+      }
+    }
+    msg = msg || error.message || '网络异常'
     if (status === 401) {
       removeToken()
       if (!window.location.pathname.startsWith('/login')) {

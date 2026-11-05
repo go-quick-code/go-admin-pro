@@ -35,9 +35,24 @@ import (
 func (s *Service) ListContracts(ctx context.Context, req *dto.ContractPageReq) ([]model.Contract, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
+	filter, err := s.contractFilter(ctx, req)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	list, total, err := s.repo.ListContracts(ctx, filter, page.Offset(), page.PageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.fillContractNames(ctx, list)
+	return list, total, nil
+}
+
+// contractFilter 构造合同列表/导出的筛选与数据范围谓词（导出复用同一口径）。
+func (s *Service) contractFilter(ctx context.Context, req *dto.ContractPageReq) (repository.ContractFilter, error) {
 	if req.Status != nil {
 		if err := ValidateContractStatus(*req.Status); err != nil {
-			return nil, 0, err
+			return repository.ContractFilter{}, err
 		}
 	}
 
@@ -48,17 +63,11 @@ func (s *Service) ListContracts(ctx context.Context, req *dto.ContractPageReq) (
 	}
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
-		return nil, 0, err
+		return repository.ContractFilter{}, err
 	}
 	// 复用 applyCustomerScope（与商机 join 路径同一翻译，ADR 0004 同构）。
 	applyCustomerScope(scope, &filter.OwnerDeptIDs, &filter.SelfOwnerUserID)
-
-	list, total, err := s.repo.ListContracts(ctx, filter, page.Offset(), page.PageSize)
-	if err != nil {
-		return nil, 0, err
-	}
-	s.fillContractNames(ctx, list)
-	return list, total, nil
+	return filter, nil
 }
 
 // GetContract 查询合同详情（含行项目与合计）。数据范围外一律 404。

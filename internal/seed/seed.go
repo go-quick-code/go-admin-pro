@@ -233,6 +233,17 @@ func seedMenus(db *gorm.DB) error {
 		btn(4122, 4120, "回款新增", "crm:receivable:create", 2),
 		btn(4123, 4120, "回款修改", "crm:receivable:update", 3),
 		btn(4124, 4120, "回款删除", "crm:receivable:delete", 4),
+		// Excel 导入导出（issue #20）：按钮码 4160–4166（#19 用 4140–4141，
+		// 4080–4085/4100–4105/4120–4124 已占用，grep 去重确认）。
+		// 导入/模板挂 :import，导出挂 :export；按钮挂在各实体所属菜单下，
+		// 权限判定只看权限码，菜单层级只影响角色分配时的可见性。
+		btn(4160, 401, "客户导入", "crm:customer:import", 14),
+		btn(4161, 401, "客户导出", "crm:customer:export", 15),
+		btn(4162, 401, "联系人导入", "crm:contact:import", 16),
+		btn(4163, 4061, "产品导入", "crm:product:import", 5),
+		btn(4164, 4061, "产品导出", "crm:product:export", 6),
+		btn(4165, 4100, "合同导出", "crm:contract:export", 6),
+		btn(4166, 4120, "回款导出", "crm:receivable:export", 5),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err

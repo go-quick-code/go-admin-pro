@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
+	"gorm.io/gorm"
 )
 
 // ---------- 产品（本文件由 codegen 生成（issue #10 样板），接入步骤见生成包 INTEGRATION.md）----------
@@ -43,6 +44,30 @@ func (r *Repository) FindProductByCode(ctx context.Context, code string) (*model
 
 // ListProducts 按筛选分页查询产品。
 func (r *Repository) ListProducts(ctx context.Context, f ProductFilter, offset, limit int) ([]model.Product, int64, error) {
+	q := r.productQuery(ctx, f)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.Product
+	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	return list, total, nil
+}
+
+// ListAllProducts 按筛选查询全部产品（Excel 导出用，不分页）。
+func (r *Repository) ListAllProducts(ctx context.Context, f ProductFilter) ([]model.Product, error) {
+	var list []model.Product
+	if err := r.productQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// productQuery 构造产品列表/导出的公共查询。
+func (r *Repository) productQuery(ctx context.Context, f ProductFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.Product{})
 	if f.Name != "" {
 		q = q.Where("name LIKE ?", "%"+f.Name+"%")
@@ -59,16 +84,29 @@ func (r *Repository) ListProducts(ctx context.Context, f ProductFilter, offset, 
 	if f.CategoryID != nil {
 		q = q.Where("category_id = ?", *f.CategoryID)
 	}
+	return q
+}
 
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
+// FindProductsByCodes 按编码批量查产品（导入编码唯一性预检用；租户插件自动过滤，
+// 软删除行不可见——其占码由唯一键兜底）。
+func (r *Repository) FindProductsByCodes(ctx context.Context, codes []string) ([]model.Product, error) {
+	unique := make([]string, 0, len(codes))
+	seen := make(map[string]bool, len(codes))
+	for _, code := range codes {
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		unique = append(unique, code)
+	}
+	if len(unique) == 0 {
+		return nil, nil
 	}
 	var list []model.Product
-	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error; err != nil {
-		return nil, 0, err
+	if err := r.db.WithContext(ctx).Where("code IN ?", unique).Find(&list).Error; err != nil {
+		return nil, err
 	}
-	return list, total, nil
+	return list, nil
 }
 
 // CreateProduct 创建产品；撞 uk_crm_product_tenant_code 时返回 IsDuplicateEntry 可识别的错误。

@@ -12,6 +12,16 @@
       title="回款计划"
       :action-width="190"
     >
+      <template #toolbar>
+        <!-- Excel 导出（issue #20）：挂 crm:receivable:export，复用当前列表筛选；
+             导出含已收金额与派生状态/逾期，数据权限 join 合同。 -->
+        <ExcelActions
+          title="回款计划"
+          export-perm="crm:receivable:export"
+          :export-action="exportReceivablePlans"
+          :export-params="receivableExportParams"
+        />
+      </template>
       <template #cell-amount="{ row }">{{ row.amount ?? '0.00' }}</template>
       <template #cell-receivedAmount="{ row }">{{ row.receivedAmount ?? '0.00' }}</template>
       <template #cell-contractAmount="{ row }">{{ row.contractAmount ?? '0.00' }}</template>
@@ -125,6 +135,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { formatTime, dictLabel } from '@/utils/format'
 import {
   pageReceivablePlans,
@@ -134,6 +145,7 @@ import {
   pageReceivableRecords,
   createReceivableRecord,
   deleteReceivableRecord,
+  exportReceivablePlans,
   pageContracts,
 } from '@/api/crm'
 import { useUserStore } from '@/stores/user'
@@ -178,6 +190,16 @@ const canDelete = computed(() => userStore.hasPerm('crm:receivable:delete'))
 
 const tableRef = ref()
 const contracts = ref<any[]>([])
+
+// 回款计划导出复用当前列表筛选（空值由 ExcelActions 剔除）。
+function receivableExportParams() {
+  const q = tableRef.value?.query || {}
+  return {
+    contractId: q.contractId,
+    status: q.status,
+    overdue: q.overdue,
+  }
+}
 
 const searchItems = computed(() => [
   {
