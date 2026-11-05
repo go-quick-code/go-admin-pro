@@ -401,6 +401,7 @@ func seedDicts(db *gorm.DB) error {
 	types := []sysmodel.DictType{
 		{BaseEntity: sysmodel.BaseEntity{ID: 1}, TenantID: 1, Name: "用户性别", Type: "sys_user_sex", Status: sysmodel.StatusEnable},
 		{BaseEntity: sysmodel.BaseEntity{ID: 2}, TenantID: 1, Name: "通用状态", Type: "sys_normal_disable", Status: sysmodel.StatusEnable},
+		{BaseEntity: sysmodel.BaseEntity{ID: 3}, TenantID: 1, Name: "CRM 产品单位", Type: "crm_product_unit", Status: sysmodel.StatusEnable},
 	}
 	if err := tenant.Skip(db).Create(&types).Error; err != nil {
 		return err
@@ -411,6 +412,12 @@ func seedDicts(db *gorm.DB) error {
 		{TenantID: 1, DictType: "sys_user_sex", Label: "未知", Value: "0", Sort: 3, Status: sysmodel.StatusEnable, ColorType: "info"},
 		{TenantID: 1, DictType: "sys_normal_disable", Label: "开启", Value: "0", Sort: 1, Status: sysmodel.StatusEnable, ColorType: "success"},
 		{TenantID: 1, DictType: "sys_normal_disable", Label: "停用", Value: "1", Sort: 2, Status: sysmodel.StatusEnable, ColorType: "danger"},
+		{TenantID: 1, DictType: "crm_product_unit", Label: "件", Value: "件", Sort: 1, Status: sysmodel.StatusEnable},
+		{TenantID: 1, DictType: "crm_product_unit", Label: "台", Value: "台", Sort: 2, Status: sysmodel.StatusEnable},
+		{TenantID: 1, DictType: "crm_product_unit", Label: "套", Value: "套", Sort: 3, Status: sysmodel.StatusEnable},
+		{TenantID: 1, DictType: "crm_product_unit", Label: "个", Value: "个", Sort: 4, Status: sysmodel.StatusEnable},
+		{TenantID: 1, DictType: "crm_product_unit", Label: "箱", Value: "箱", Sort: 5, Status: sysmodel.StatusEnable},
+		{TenantID: 1, DictType: "crm_product_unit", Label: "人天", Value: "人天", Sort: 6, Status: sysmodel.StatusEnable},
 	}
 	return tenant.Skip(db).Create(&data).Error
 }

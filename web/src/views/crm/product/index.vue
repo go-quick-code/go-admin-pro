@@ -52,6 +52,7 @@ import { ElMessage } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
 import { useUserStore } from '@/stores/user'
+import { useDictOptions } from '@/composables/useDict'
 import { dictLabel, formatTime } from '@/utils/format'
 import {
   pageProducts,
@@ -73,8 +74,8 @@ const productStatusOptions = [
   { label: '下架', value: 0 },
   { label: '上架', value: 1 },
 ]
-// TODO：单位选项接入系统字典 crm_product_unit（web 尚无字典读取封装，先留空选项）。
-const productUnitOptions: { label: string; value: any }[] = []
+// 单位选项来自系统字典 crm_product_unit（种子见 internal/seed/seed.go）。
+const productUnitOptions = useDictOptions('crm_product_unit')
 
 const tableRef = ref()
 const categoryTree = ref<any[]>([])
