@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/module/infra/dto"
-	"github.com/lautung/go-admin-pro/internal/module/infra/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
 
 // PermissionMiddleware 由 system 模块提供权限中间件。

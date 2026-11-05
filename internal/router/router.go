@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/module/codegen"
-	crmapi "github.com/lautung/go-admin-pro/internal/module/crm/api"
-	infraapi "github.com/lautung/go-admin-pro/internal/module/infra/api"
-	systemapi "github.com/lautung/go-admin-pro/internal/module/system/api"
-	"github.com/lautung/go-admin-pro/internal/pkg/middleware"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
+	crmapi "github.com/go-quick-code/go-admin-pro/internal/module/crm/api"
+	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
+	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/middleware"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // New 构建 HTTP 引擎，完成公开接口、鉴权接口与静态资源的装配。

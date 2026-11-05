@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // currentDateKey 返回当天 yyyyMMdd（与服务端 DateKey 同格式，仅测试断言用）。

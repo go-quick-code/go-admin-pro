@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // TestIntegrationReceivablePlanExcelExport 回款计划导出：金额/日期/派生状态、

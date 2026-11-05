@@ -1,7 +1,7 @@
 package dto
 
 import (
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // ---------- 产品（本文件由 codegen 生成（issue #10 样板），契约与 crm 客户/联系人同款）----------

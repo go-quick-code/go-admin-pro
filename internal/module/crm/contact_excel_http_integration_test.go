@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // TestIntegrationContactExcelImport 联系人导入：成功按客户编号关联；未知客户、

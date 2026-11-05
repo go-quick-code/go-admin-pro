@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // 合同纯函数测试（issue #16，docs/crm-mvp-spec.md §4.4 状态机、§4.3 金额不变量）：

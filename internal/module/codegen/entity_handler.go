@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // GenerateEntityReq 与 EntitySpec 同形；直接反序列化 EntitySpec（JSON tag 齐全）。

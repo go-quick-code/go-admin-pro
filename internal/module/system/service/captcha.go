@@ -3,8 +3,8 @@ package service
 import (
 	"strings"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"github.com/mojocn/base64Captcha"
 )
 

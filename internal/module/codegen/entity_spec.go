@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/utils"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/utils"
 )
 
 // 本文件定义「owner-scoped 实体全栈脚手架」的元信息（EntitySpec）与校验/命名推导。

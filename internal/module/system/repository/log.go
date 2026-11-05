@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 )
 
 type LoginLogFilter struct {

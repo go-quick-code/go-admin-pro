@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 )
 
 // 产品枚举校验（本文件由 codegen 生成（issue #10 样板）的测试骨架，跑在 service 纯函数外部测试包）。

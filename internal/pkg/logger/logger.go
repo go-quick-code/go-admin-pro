@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lautung/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
 )
 
 // Init 初始化全局 slog logger。

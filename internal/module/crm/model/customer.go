@@ -6,7 +6,7 @@ package model
 import (
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 )
 
 // 客户状态枚举（docs/crm-mvp-spec.md §3：1 潜在 / 2 活跃 / 3 流失）。

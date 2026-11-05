@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 )
 
 // ---------- 跨模块网关方法 ----------

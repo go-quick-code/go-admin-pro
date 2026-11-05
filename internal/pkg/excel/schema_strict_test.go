@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 )
 
 // 带 excel 标签的未导出字段会让映射失效，必须在构建 schema 时立即报错，

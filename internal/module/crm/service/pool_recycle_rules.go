@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 )
 
 // ContractChecker 是 crm 对合同模块的依赖面（依赖接口而非实现）：

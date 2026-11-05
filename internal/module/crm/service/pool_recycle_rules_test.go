@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 )
 
 // 公海自动回收纯函数（issue #14，docs/crm-mvp-spec.md §4.2）：

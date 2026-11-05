@@ -1,6 +1,6 @@
 package model
 
-import "github.com/lautung/go-admin-pro/internal/pkg/model"
+import "github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 
 // PoolConfig 是租户级公海配置（issue #14，docs/crm-mvp-spec.md §4.2）：
 // 每租户一行（tenant_id 唯一），自动回收天数与认领上限按租户生效。

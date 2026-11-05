@@ -90,9 +90,9 @@ import (
 	"strings"
 	"time"
 [[end]]
-	"github.com/lautung/go-admin-pro/internal/module/[[.ModuleName]]/dto"
-	"github.com/lautung/go-admin-pro/internal/module/[[.ModuleName]]/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[.ModuleName]]/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[.ModuleName]]/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"gorm.io/gorm"
 )
 
@@ -199,9 +199,9 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/module/[[.ModuleName]]/dto"
-	"github.com/lautung/go-admin-pro/internal/module/[[.ModuleName]]/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[.ModuleName]]/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[.ModuleName]]/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // [[.ClassName]]Handler [[.TableComment]]接口。

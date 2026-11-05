@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // uploadBodyWithPadding 构造一个「小文件 + 超大非文件字段」的 multipart 请求体：

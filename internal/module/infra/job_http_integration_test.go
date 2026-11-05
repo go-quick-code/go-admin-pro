@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // systemJobHandler 是系统级 handler 名（公海回收，app 装配处 RegisterSystem）。

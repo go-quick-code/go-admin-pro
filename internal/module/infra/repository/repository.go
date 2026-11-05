@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/lautung/go-admin-pro/internal/module/infra/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
 )
 

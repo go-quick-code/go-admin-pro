@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // customerNoRe 校验编号形状：KH + yyyyMMdd + 至少 4 位序号（超 9999 自然扩位）。

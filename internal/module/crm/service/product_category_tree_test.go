@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 )
 
 // 产品分类树纯函数单测（issue #11）：扁平列表 → 树的组装与父分类合法性校验。

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 )
 
 // validProductSpec 返回一份合法的产品实体元信息（与 testdata/entity/product.json 同构），

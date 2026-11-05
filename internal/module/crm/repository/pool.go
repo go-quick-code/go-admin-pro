@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 )
 
 // CountCustomersByOwner 统计负责人名下未删除客户总数（认领上限口径，

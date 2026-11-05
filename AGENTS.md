@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-GitHub Issues in `lautung/go-admin-pro`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
+GitHub Issues in `go-quick-code/go-admin-pro`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

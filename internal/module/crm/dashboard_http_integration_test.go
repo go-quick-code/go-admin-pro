@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // crmDashboardMenuID 是种子中的 CRM 仪表盘菜单 ID（权限码 crm:dashboard:view）。

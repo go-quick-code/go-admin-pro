@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	"gorm.io/gorm"
 )
 

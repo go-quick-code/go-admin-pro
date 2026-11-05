@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 )
 
 // TestWriteFiles 落盘助手：默认拒绝覆盖，-overwrite 解锁；路径按 / 分隔。

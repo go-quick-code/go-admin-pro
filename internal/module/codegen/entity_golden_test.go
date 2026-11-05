@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 )
 
 // updateGolden 由 -update 打开：重新生成 demo_output（产品实体产物快照）。

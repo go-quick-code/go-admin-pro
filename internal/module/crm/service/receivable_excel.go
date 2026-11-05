@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 )
 
 // ---------- 回款计划 Excel 导出（issue #20，docs/crm-mvp-spec.md §7）----------

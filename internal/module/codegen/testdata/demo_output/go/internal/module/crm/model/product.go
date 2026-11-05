@@ -1,8 +1,8 @@
 package model
 
 import (
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // 产品状态枚举（ProductStatus，生成自字段元信息：状态）。

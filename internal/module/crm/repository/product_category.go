@@ -7,7 +7,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 )
 
 // product_category.go 是产品分类树的数据访问（issue #11，手写：codegen 不生成树逻辑）。

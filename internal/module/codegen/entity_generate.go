@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/utils"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/utils"
 )
 
 // GenerateEntity 按实体元信息生成「owner-scoped 实体全栈脚手架」，返回
