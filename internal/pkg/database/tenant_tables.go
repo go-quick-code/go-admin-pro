@@ -40,4 +40,7 @@ var TenantTables = []string{
 	// 商机（issue #15）：商机 owner-scoped；行项目为关联表，tenant_id 入键隔离。
 	"crm_opportunity",
 	"crm_opportunity_product",
+	// 合同（issue #16）：合同 owner-scoped；行项目为关联表，tenant_id 入键隔离。
+	"crm_contract",
+	"crm_contract_product",
 }
