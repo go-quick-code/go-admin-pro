@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // crmOpportunityMenuID 是种子中的商机管理菜单 ID（含 crm:opportunity:query 权限码）。

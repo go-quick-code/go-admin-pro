@@ -1,7 +1,7 @@
 // scope.go 承载 datascope.Filter 到 CRM owner_* 谓词的共享翻译。
 package service
 
-import "github.com/lautung/go-admin-pro/internal/pkg/datascope"
+import "github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
 
 // applyCustomerScope 把 datascope.Filter 翻译成父客户 owner_* 谓词
 // （与 ListCustomers 的翻译一致，供联系人/跟进/回款等 join 路径复用）。

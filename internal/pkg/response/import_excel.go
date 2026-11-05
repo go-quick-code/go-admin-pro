@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 )
 
 // Excel 导入失败的业务码（#32「错误映射」：逐行校验失败 200 + 业务码，

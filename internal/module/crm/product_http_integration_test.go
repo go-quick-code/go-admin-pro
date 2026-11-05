@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // crmProductMenuID 是种子中的产品菜单 ID（含 crm:product:query 权限码）；

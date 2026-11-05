@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/utils"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/utils"
 )
 
 // GenerateReq 是代码生成参数。

@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 )
 
 // 联系人性别枚举（对齐字典 sys_user_sex：0 未知 / 1 男 / 2 女）。

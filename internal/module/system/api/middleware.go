@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/module/system/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // Handler 是 system 模块的 HTTP 入口。

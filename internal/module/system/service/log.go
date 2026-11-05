@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/dto"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/module/system/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
 
 func (s *Service) ListLoginLogs(ctx context.Context, req *dto.LoginLogPageReq) ([]model.LoginLog, int64, error) {

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/dto"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/module/system/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 func (s *Service) ListRoles(ctx context.Context, req *dto.RolePageReq) ([]model.Role, int64, error) {

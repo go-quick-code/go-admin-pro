@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // infraFile 是 infra 文件上传/分页返回的文件视图（只取用例需要的字段）。

@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // e2eCRMMenuIDs 是销售角色需要的 CRM 目录/菜单/按钮：

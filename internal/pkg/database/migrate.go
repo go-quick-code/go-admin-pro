@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/migrations"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/migrations"
 	"github.com/pressly/goose/v3"
 )
 

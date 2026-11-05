@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/dto"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // BuildDeptTree 把扁平部门列表组装成树。

@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/module/system/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
-	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
-	"github.com/lautung/go-admin-pro/internal/pkg/jwt"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"golang.org/x/crypto/bcrypt"
 )
 

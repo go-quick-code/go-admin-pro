@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 func TestParseMoney(t *testing.T) {

@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 )
 
 // ---------- 产品（本文件由 codegen 生成（issue #10 样板），接入步骤见生成包 INTEGRATION.md）----------

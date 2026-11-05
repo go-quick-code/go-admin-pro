@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"

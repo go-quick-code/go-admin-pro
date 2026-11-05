@@ -6,8 +6,8 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // OpportunityProductRefChecker 持有 crm 仓储，校验产品是否被商机行项目引用。

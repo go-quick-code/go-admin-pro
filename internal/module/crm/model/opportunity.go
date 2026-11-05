@@ -3,8 +3,8 @@ package model
 import (
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // 商机阶段枚举（docs/crm-mvp-spec.md §3/§4.4）：1–4 为进行中，5 赢单、6 输单为终态。

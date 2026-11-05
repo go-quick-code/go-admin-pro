@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/seed"
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/seed"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // assertSimpleListStatus 请求简表接口并断言状态码。

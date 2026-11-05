@@ -1,7 +1,7 @@
 package dto
 
 import (
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // ---------- 回款计划（issue #18，docs/crm-mvp-spec.md §3 回款节/§5）----------

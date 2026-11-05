@@ -8,8 +8,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // PermPoolConfigUpdate 是公海配置编辑的权限码：与菜单种子（internal/seed

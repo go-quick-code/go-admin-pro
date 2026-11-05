@@ -19,17 +19,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	crmmodel "github.com/lautung/go-admin-pro/internal/module/crm/model"
-	crmrepo "github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	crmservice "github.com/lautung/go-admin-pro/internal/module/crm/service"
-	systemrepo "github.com/lautung/go-admin-pro/internal/module/system/repository"
-	systemservice "github.com/lautung/go-admin-pro/internal/module/system/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
-	"github.com/lautung/go-admin-pro/internal/pkg/jwt"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	crmrepo "github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
+	crmservice "github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
+	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
+	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // newContractTestService 用集成环境同一 DB 装配一个 crm Service（真实仓储 +

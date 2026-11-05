@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // Body 是统一响应体，与芋道的 { code, data, msg } 保持一致。

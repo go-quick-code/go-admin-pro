@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
 )
 
 // writeConfig 把配置内容写入临时文件，返回路径。

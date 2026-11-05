@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // isNotFound 断言错误是 404 业务错误（看不见的即不存在）。

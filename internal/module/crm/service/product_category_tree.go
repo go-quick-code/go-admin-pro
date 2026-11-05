@@ -6,8 +6,8 @@ package service
 import (
 	"sort"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // BuildProductCategoryTree 把扁平分类列表组装成树（system 的 BuildDeptTree 同款）：

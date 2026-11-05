@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // 联系人字段规则（issue #9）：

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 )
 
 // 公海租户配置纯函数（issue #14，docs/crm-mvp-spec.md §4.2）：

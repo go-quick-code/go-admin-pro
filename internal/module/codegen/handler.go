@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // PermissionMiddleware 由 system 模块提供。

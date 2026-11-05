@@ -4,11 +4,11 @@ import (
 	"log/slog"
 	"time"
 
-	crmmodel "github.com/lautung/go-admin-pro/internal/module/crm/model"
-	inframodel "github.com/lautung/go-admin-pro/internal/module/infra/model"
-	sysmodel "github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/module/system/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
 )
 

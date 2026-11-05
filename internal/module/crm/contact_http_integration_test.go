@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // contactMenuIDs 是联系人 API 需要的权限码菜单：客户页面 401（含 crm:customer:query）

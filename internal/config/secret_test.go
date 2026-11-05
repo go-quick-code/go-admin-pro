@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
 )
 
 // PR #39 审查 P2：非 dev/test 环境必须显式覆盖可预测的 JWT 默认密钥，

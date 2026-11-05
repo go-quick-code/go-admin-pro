@@ -13,8 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
 
 // contractFileBodyMaxBytes 是合同附件上传的请求体上限：20MB 文件 + 1MB

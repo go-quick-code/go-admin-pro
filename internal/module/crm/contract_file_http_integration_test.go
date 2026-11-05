@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // uploadContractFile 以 multipart/form-data 上传合同附件，返回 HTTP 状态与统一响应。

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // TestIntegrationSmokeLoginAndUserPage 是集成基座的验收冒烟：

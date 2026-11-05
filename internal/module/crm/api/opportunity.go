@@ -2,8 +2,8 @@ package api
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // PageOpportunities 商机分页（名称/阶段/客户筛选 + owner-scoped 数据范围）。

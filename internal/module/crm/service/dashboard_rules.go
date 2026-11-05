@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // ---------- 仪表盘纯规则（issue #19，docs/crm-mvp-spec.md §4.1/§6/§8）----------

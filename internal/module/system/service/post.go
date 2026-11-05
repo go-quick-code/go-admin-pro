@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/dto"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/module/system/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 func (s *Service) ListPosts(ctx context.Context, req *dto.PostPageReq) ([]model.Post, int64, error) {

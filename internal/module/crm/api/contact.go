@@ -2,8 +2,8 @@ package api
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // PageContacts 联系人分页（客户/姓名/手机筛选 + 数据范围经父客户传导）。

@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 	"time"
 )
 

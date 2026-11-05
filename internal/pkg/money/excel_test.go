@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/xuri/excelize/v2"
 )
 

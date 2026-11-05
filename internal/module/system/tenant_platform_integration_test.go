@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // createTenantForPlatformTest 用平台管理员创建租户并返回租户 ID。

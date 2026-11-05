@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // crmReceivableMenuID 是种子中的回款管理菜单 ID（含 crm:receivable:query）。

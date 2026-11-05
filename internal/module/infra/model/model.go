@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	basemodel "github.com/lautung/go-admin-pro/internal/pkg/model"
+	basemodel "github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 )
 
 // BaseEntity 是统一实体底座，定义见 internal/pkg/model。

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // 数据范围 HTTP 集成测试（issue #5）：

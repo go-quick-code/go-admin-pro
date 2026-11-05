@@ -2,8 +2,8 @@ package api
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // PageContracts 合同分页（名称/状态/客户筛选 + owner-scoped 数据范围）。

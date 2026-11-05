@@ -7,7 +7,7 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
 )
 
 // VoidContractGuard 是作废/删除合同的守卫扩展点（依赖接口而非实现）。

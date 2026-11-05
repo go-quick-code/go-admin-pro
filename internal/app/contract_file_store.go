@@ -8,10 +8,10 @@ import (
 	"context"
 	"mime/multipart"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	crmservice "github.com/lautung/go-admin-pro/internal/module/crm/service"
-	inframodel "github.com/lautung/go-admin-pro/internal/module/infra/model"
-	infraservice "github.com/lautung/go-admin-pro/internal/module/infra/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	crmservice "github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
+	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
 )
 
 // contractFileStore 实现 crmservice.ContractFileStore（鸭子类型，由 app.New 注入）。

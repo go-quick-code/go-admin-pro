@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // 客户编号规则（docs/crm-mvp-spec.md、issue #8）：

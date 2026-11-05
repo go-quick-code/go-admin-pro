@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 )
 
 // 本文件验证「生成的代码 go build/vet/test 通过」这一可信目标：

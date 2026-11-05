@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // ---------- 公海接口助手（原始返回，供成功/失败双向断言） ----------

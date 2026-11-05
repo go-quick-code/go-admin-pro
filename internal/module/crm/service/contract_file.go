@@ -20,9 +20,9 @@ import (
 	"mime/multipart"
 	"strings"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // ContractFileBizType 是合同附件在 infra_file 中的业务类型标识。

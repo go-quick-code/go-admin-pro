@@ -8,10 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/config"
-	systemapi "github.com/lautung/go-admin-pro/internal/module/system/api"
-	"github.com/lautung/go-admin-pro/internal/module/system/service"
-	"github.com/lautung/go-admin-pro/internal/pkg/jwt"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
 )
 
 // tokenWithoutTenant 签发一个 tenantId 非法的 token。

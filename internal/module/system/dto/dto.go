@@ -1,7 +1,7 @@
 package dto
 
 import (
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 )
 
 // ---------- 认证 ----------

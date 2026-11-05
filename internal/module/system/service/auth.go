@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/dto"
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // Login 处理账号密码登录。

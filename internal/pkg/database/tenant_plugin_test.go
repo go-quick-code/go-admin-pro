@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/database"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

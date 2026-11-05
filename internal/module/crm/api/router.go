@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 )
 
 // Handler 是 crm 模块的 HTTP 入口。

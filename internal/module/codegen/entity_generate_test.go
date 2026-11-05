@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 )
 
 // TestGenerateEntityProductFileSet 断言产品实体（crm 模块、模块骨架已存在）生成的文件集。

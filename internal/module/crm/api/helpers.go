@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // ---------- 通用绑定助手（与 system 模块同构，保持模块自包含，便于后续固化为生成器样板）----------

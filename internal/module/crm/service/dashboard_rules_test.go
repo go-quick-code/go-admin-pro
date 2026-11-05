@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 )
 
 // 仪表盘纯函数测试（issue #19，docs/crm-mvp-spec.md §4.1/§6/§8）：

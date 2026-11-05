@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // TestIntegrationContractExcelExport 合同导出：表头、金额精度、原生日期、

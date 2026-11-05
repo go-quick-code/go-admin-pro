@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 )
 
 // RecycleJobHandlerName 是自动回收任务的处理器名（infra_job.handler_name），

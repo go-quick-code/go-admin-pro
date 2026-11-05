@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 )
 
 // maxErrorMessageRunes 是单条单元格错误消息的合理上限。

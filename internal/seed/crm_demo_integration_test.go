@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	crmmodel "github.com/lautung/go-admin-pro/internal/module/crm/model"
-	sysmodel "github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/seed"
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/seed"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 	"gorm.io/gorm"
 )
 

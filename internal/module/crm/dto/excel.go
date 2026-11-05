@@ -3,7 +3,7 @@ package dto
 import (
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // ---------- Excel 导入行与导出列（issue #20，docs/crm-mvp-spec.md §7）----------

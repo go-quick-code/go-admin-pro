@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
-	"github.com/lautung/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"gorm.io/gorm"
 )
 

@@ -13,8 +13,8 @@ import (
 	"testing/iotest"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 	"github.com/xuri/excelize/v2"
 )
 

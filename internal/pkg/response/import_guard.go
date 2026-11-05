@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 )
 
 // ImportGuardHTTPStatus 返回 excel 导入 guard 错误对应的 HTTP 状态码：

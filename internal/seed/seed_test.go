@@ -3,12 +3,12 @@ package seed_test
 import (
 	"testing"
 
-	crmmodel "github.com/lautung/go-admin-pro/internal/module/crm/model"
-	inframodel "github.com/lautung/go-admin-pro/internal/module/infra/model"
-	sysmodel "github.com/lautung/go-admin-pro/internal/module/system/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/database"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/seed"
+	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/seed"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

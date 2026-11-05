@@ -5,10 +5,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 )
 
 // ---------- 联系人 Excel 导入（issue #20）----------

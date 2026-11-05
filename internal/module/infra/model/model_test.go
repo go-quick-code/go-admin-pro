@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 
-	"github.com/lautung/go-admin-pro/internal/module/infra/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 )
 
 // TestInfraEntityModelsEmbedBaseEntity 验证 infra 模块实体模型共享统一底座：

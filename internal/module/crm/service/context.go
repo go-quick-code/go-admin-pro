@@ -4,7 +4,7 @@ package service
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 )
 
 // CurrentUserID 返回 context 中的当前用户 ID。

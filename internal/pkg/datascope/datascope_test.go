@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
 )
 
 // fakeResolver 用固定映射模拟「本部门及以下」的部门子树解析，纯内存、不连库。

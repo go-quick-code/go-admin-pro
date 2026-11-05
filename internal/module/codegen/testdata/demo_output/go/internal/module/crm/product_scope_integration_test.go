@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // crmProductMenuID 是种子中的产品菜单 ID（含 crm:product:query 权限码）。

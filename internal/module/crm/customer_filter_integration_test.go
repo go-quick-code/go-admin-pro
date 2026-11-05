@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // loginTenant 以指定租户登录（登录契约带 tenantId，同名账号跨租户共存）。

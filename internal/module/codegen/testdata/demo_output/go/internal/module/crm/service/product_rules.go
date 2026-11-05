@@ -3,8 +3,8 @@ package service
 import (
 	"fmt"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // ---------- 产品枚举校验（本文件由 codegen 生成（issue #10 样板）；非法值一律 400，文案说清字段与期望）----------

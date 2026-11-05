@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/module/infra/dto"
-	"github.com/lautung/go-admin-pro/internal/module/infra/model"
-	"github.com/lautung/go-admin-pro/internal/module/infra/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/utils"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/utils"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // MaxUploadSize 是单个上传文件的字节上限（20MB）。

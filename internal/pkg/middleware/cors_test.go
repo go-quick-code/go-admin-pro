@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/middleware"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/middleware"
 )
 
 func newCORSEngine(origins []string) *gin.Engine {

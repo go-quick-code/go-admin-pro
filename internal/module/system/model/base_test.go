@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 )
 
 // TestEntityModelsEmbedBaseEntity 验证 system 模块所有实体模型共享统一底座：

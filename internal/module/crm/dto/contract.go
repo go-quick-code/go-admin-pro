@@ -3,7 +3,7 @@ package dto
 import (
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // ---------- 合同（issue #16，docs/crm-mvp-spec.md §3 销售节/§5）----------

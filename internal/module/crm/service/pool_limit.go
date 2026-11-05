@@ -4,7 +4,7 @@ package service
 import (
 	"fmt"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // DefaultClaimLimit 是认领上限的默认值（docs/crm-mvp-spec.md §4.2：缺省 50）。

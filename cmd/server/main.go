@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/app"
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/pkg/logger"
+	"github.com/go-quick-code/go-admin-pro/internal/app"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/logger"
 )
 
 func main() {

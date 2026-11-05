@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // TestIntegrationCustomerExcelTemplateAndImport 模板下载 + 导入成功 + 整批拒绝：

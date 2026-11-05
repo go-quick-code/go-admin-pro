@@ -19,8 +19,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/config"
-	"github.com/lautung/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/config"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 )
 
 func main() {

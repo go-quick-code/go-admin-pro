@@ -2,7 +2,7 @@
 package model
 
 import (
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 )
 
 // 产品分类状态枚举（docs/crm-mvp-spec.md §3：0 启用 / 1 停用，芋道 CommonStatus 口径；

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/xuri/excelize/v2"
 )
 

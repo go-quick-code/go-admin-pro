@@ -1,4 +1,4 @@
-module github.com/lautung/go-admin-pro
+module github.com/go-quick-code/go-admin-pro
 
 go 1.26.0
 

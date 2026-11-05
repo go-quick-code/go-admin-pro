@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // ---------- 仪表盘（issue #19，docs/crm-mvp-spec.md §5/§6/§8）----------

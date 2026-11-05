@@ -3,8 +3,8 @@ package model
 import (
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // 回款计划派生状态枚举（docs/crm-mvp-spec.md §3：计划不存状态，列表用 SUM 派生）。

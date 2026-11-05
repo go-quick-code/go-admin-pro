@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/infra/dto"
-	"github.com/lautung/go-admin-pro/internal/module/infra/model"
-	"github.com/lautung/go-admin-pro/internal/module/infra/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"github.com/robfig/cron/v3"
 )
 

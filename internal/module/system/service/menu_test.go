@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 )
 
 func TestBuildMenuTree(t *testing.T) {

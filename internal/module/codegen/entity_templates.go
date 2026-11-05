@@ -35,8 +35,8 @@ const tmplEntityModel = `package model
 import (
 [[if .NeedTime]]	"time"
 
-[[end]]	"github.com/lautung/go-admin-pro/internal/pkg/model"
-[[if .NeedMoney]]	"github.com/lautung/go-admin-pro/internal/pkg/money"
+[[end]]	"github.com/go-quick-code/go-admin-pro/internal/pkg/model"
+[[if .NeedMoney]]	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 [[end]])
 [[range $f := .EnumFields]]
 // [[ $.Comment ]][[ $f.Comment ]]枚举（[[ $f.EnumConstPrefix ]]，生成自字段元信息：[[ $f.Comment ]]）。
@@ -73,7 +73,7 @@ func ([[ .ClassName ]]) TableName() string { return "[[ .TableName ]]" }
 const tmplEntityDTO = `package dto
 
 [[if .DTONeedMoney]]import (
-	"github.com/lautung/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 [[end]]// ---------- [[ .Comment ]]（[[ .GenMark ]]，契约与 crm 客户/联系人同款）----------
@@ -110,7 +110,7 @@ const tmplEntityRepository = `package repository
 import (
 	"context"
 
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/model"
 )
 
 // ---------- [[ .Comment ]]（[[ .GenMark ]]，接入步骤见生成包 INTEGRATION.md）----------
@@ -202,12 +202,12 @@ import (
 [[end]][[if .HasTime]]	"strings"
 [[end]][[if or .HasSequence .HasTime]]	"time"
 [[end]]
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/dto"
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/model"
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/repository"
-[[if .OwnerScoped]]	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
-[[end]]	"github.com/lautung/go-admin-pro/internal/pkg/web"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/repository"
+[[if .OwnerScoped]]	"github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
+[[end]]	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // ---------- [[ .Comment ]]（[[ .GenMark ]]，接入步骤见生成包 INTEGRATION.md）----------
@@ -460,8 +460,8 @@ const tmplEntityRules = `package service
 import (
 	"fmt"
 
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/model"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // ---------- [[ .Comment ]]枚举校验（[[ .GenMark ]]；非法值一律 400，文案说清字段与期望）----------
@@ -481,7 +481,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/service"
 )
 
 // [[ .Comment ]]枚举校验（[[ .GenMark ]]的测试骨架，跑在 service 纯函数外部测试包）。
@@ -533,8 +533,8 @@ const tmplEntityAPI = `package api
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/dto"
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
 // ---------- [[ .Comment ]]（[[ .GenMark ]]，接入步骤见生成包 INTEGRATION.md）----------
@@ -709,10 +709,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
-	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
-	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
 // SystemGateway 是 [[ .Module ]] 对 system 模块的依赖面（依赖接口而非实现，避免反向耦合）：
@@ -797,7 +797,7 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/module/[[ .Module ]]/service"
+	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/service"
 )
 
 // Handler 是 [[ .Module ]] 模块的 HTTP 入口。
@@ -824,8 +824,8 @@ const tmplScaffoldHelpers = `package api
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/lautung/go-admin-pro/internal/pkg/response"
-	"github.com/lautung/go-admin-pro/internal/pkg/web"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
 
 // 通用绑定助手（与 crm/system 模块同构，保持模块自包含）。
@@ -875,7 +875,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/lautung/go-admin-pro/internal/testutil"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
 // [[ .Module ]][[ .ClassName ]]MenuID 是种子中的[[ .Comment ]]菜单 ID（含 [[ .PermPrefix ]]:query 权限码）。

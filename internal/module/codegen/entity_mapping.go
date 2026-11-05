@@ -26,7 +26,7 @@ type fieldMapping struct {
 }
 
 // moneyImport 是 money 值类型的包路径。
-const moneyImport = "github.com/lautung/go-admin-pro/internal/pkg/money"
+const moneyImport = "github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 
 // defaultFieldMappings 是逻辑类型映射表；key 即 FieldSpec.Type 的合法取值。
 var defaultFieldMappings = map[string]fieldMapping{
