@@ -101,4 +101,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	receivable.GET("/record/page", h.requirePermission("crm:receivable:query"), h.PageReceivableRecords)
 	receivable.POST("/record", h.requirePermission("crm:receivable:create"), h.CreateReceivableRecord)
 	receivable.DELETE("/record/:id", h.requirePermission("crm:receivable:delete"), h.DeleteReceivableRecord)
+
+	// 仪表盘（issue #19）：只读聚合，一次返回 4 卡片 + 阶段漏斗 + 近 12 个月趋势。
+	// 权限码 crm:dashboard:view 与菜单种子 4140/4141 一致（spec §5/§6）。
+	dashboard := rg.Group("/crm/dashboard")
+	dashboard.GET("/summary", h.requirePermission("crm:dashboard:view"), h.DashboardSummary)
 }

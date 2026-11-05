@@ -55,6 +55,9 @@ type Service struct {
 	// files 是合同附件存储依赖面（issue #17，由 app 装配 infra 适配器，
 	// 见 contract_file.go；未装配时附件接口显式报错）。
 	files ContractFileStore
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
+	// nil 表示未注入（退回 time.Local，见 businessLocation）。
+	location *time.Location
 }
 
 // New 创建 crm Service。合同回收排除缺省空实现（真实实现由 app 装配处注入）；

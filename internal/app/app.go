@@ -91,6 +91,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
 	crmRepo := crmrepo.New(db)
 	crmSvc := crmservice.New(crmRepo, sysSvc)
+	// 业务时区（ADR 0006）：仪表盘按月归集与「今天」判定统一走 app.timezone，
+	// 不依赖服务器 TZ。
+	crmSvc.SetLocation(cfg.Location())
 	// 产品删除引用校验（issue #11 扩展点，#15/#16 各自提供行项目侧实现）：
 	// 商机与合同任一行项目引用的产品都禁删。RefCheckerChain 依次调用、
 	// 首个非 nil 错误即返回（组合说明见 #15/#16 提交注释）。

@@ -206,3 +206,10 @@ export function createReceivableRecord(data: any) {
 export function deleteReceivableRecord(id: number) {
   return request.delete(`/crm/receivable/record/${id}`) as Promise<any>
 }
+
+// ---------- CRM 仪表盘（issue #19：4 卡片 + 商机阶段漏斗 + 近 12 个月趋势） ----------
+// 一次返回全部聚合，金额一律十进制字符串（如 "10500.50"）；
+// 后端已按当前用户数据范围过滤，前端不再二次筛选。
+export function getDashboardSummary() {
+  return request.get('/crm/dashboard/summary') as Promise<any>
+}
