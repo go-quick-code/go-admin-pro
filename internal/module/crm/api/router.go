@@ -89,4 +89,16 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	poolConfig := rg.Group("/crm/pool-config")
 	poolConfig.GET("", h.requirePermission("crm:customer:pool:view"), h.GetPoolConfig)
 	poolConfig.PUT("", h.requirePermission("crm:pool-config:update"), h.UpdatePoolConfig)
+
+	// 回款计划 + 回款记录（issue #18）：可见性 join 合同套用合同 owner 谓词；
+	// 金额不变量（计划 ≤ 合同、记录 ≤ 计划）、派生状态与删除约束在 service 层；
+	// 记录编号 HK+yyyyMMdd+4 位序号（crm_sequence 同款）。
+	receivable := rg.Group("/crm/receivable")
+	receivable.GET("/plan/page", h.requirePermission("crm:receivable:query"), h.PageReceivablePlans)
+	receivable.POST("/plan", h.requirePermission("crm:receivable:create"), h.CreateReceivablePlan)
+	receivable.PUT("/plan", h.requirePermission("crm:receivable:update"), h.UpdateReceivablePlan)
+	receivable.DELETE("/plan/:id", h.requirePermission("crm:receivable:delete"), h.DeleteReceivablePlan)
+	receivable.GET("/record/page", h.requirePermission("crm:receivable:query"), h.PageReceivableRecords)
+	receivable.POST("/record", h.requirePermission("crm:receivable:create"), h.CreateReceivableRecord)
+	receivable.DELETE("/record/:id", h.requirePermission("crm:receivable:delete"), h.DeleteReceivableRecord)
 }

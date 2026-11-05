@@ -43,4 +43,7 @@ var TenantTables = []string{
 	// 合同（issue #16）：合同 owner-scoped；行项目为关联表，tenant_id 入键隔离。
 	"crm_contract",
 	"crm_contract_product",
+	// 回款（issue #18）：计划/记录均带 tenant_id；可见性 join 合同套用合同 owner 谓词。
+	"crm_receivable_plan",
+	"crm_receivable_record",
 }

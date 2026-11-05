@@ -102,9 +102,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 作废合同不拦截。替换 v1 空实现（恒「无合同」，见
 	// crmservice.ContractChecker 接口注释与 pool_recycle.go）。
 	crmSvc.SetContractChecker(crmservice.NewContractChecker(crmRepo))
-	// #18 接入点：回款落地后在此调用 crmSvc.SetVoidContractGuard(实现)，
-	// 替换作废/删除合同的空守卫（v1 恒放行，存在回款记录的合同禁止作废/删除，
-	// spec §4.5；接缝见 crmservice.VoidContractGuard 接口注释）。
+	// 作废/删除合同的回款拦截（issue #18 接入 #16 预留守卫）：
+	// 合同存在未删除回款记录时禁止作废/删除（spec §4.5），替换 v1 空实现
+	//（接缝见 crmservice.VoidContractGuard 接口注释）。
+	crmSvc.SetVoidContractGuard(crmservice.NewReceivableVoidGuard(crmRepo))
 	// 合同附件（issue #17）：crm 只依赖 ContractFileStore 接口，这里装配 infra 的
 	// 通用业务文件能力（infra_file 按 biz_type/biz_id 归属，见 contract_file_store.go）。
 	crmSvc.SetContractFileStore(contractFileStore{infra: infraSvc})
