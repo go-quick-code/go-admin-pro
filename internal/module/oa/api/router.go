@@ -39,6 +39,21 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	workday.PUT("", h.requirePermission("oa:workday:set"), h.SetWorkday)
 	workday.POST("/batch", h.requirePermission("oa:workday:batch"), h.BatchWorkday)
 	workday.DELETE("/:date", h.requirePermission("oa:workday:delete"), h.ClearWorkday)
+
+	// 请假类型与额度（issue #51，菜单种子 522 段）：类型列表与本人余额
+	// 登录即可（员工发起请假/查看余额的前置）；类型与额度的全部管理动作
+	// 挂 oa:leave:manage（默认审批流节点 2 的 HR/管理员码，spec §7.3）。
+	leave := oa.Group("/leave")
+	leave.GET("/type/list", h.ListLeaveTypes)
+	leave.POST("/type", h.requirePermission(manageLeave), h.CreateLeaveType)
+	leave.PUT("/type", h.requirePermission(manageLeave), h.UpdateLeaveType)
+	leave.PUT("/type/:id/status", h.requirePermission(manageLeave), h.SetLeaveTypeStatus)
+	leave.DELETE("/type/:id", h.requirePermission(manageLeave), h.DeleteLeaveType)
+	balance := leave.Group("/balance")
+	balance.GET("/page", h.requirePermission(manageLeave), h.PageBalances)
+	balance.GET("/mine", h.MyBalances)
+	balance.POST("/init", h.requirePermission(manageLeave), h.InitBalances)
+	balance.POST("/adjust", h.requirePermission(manageLeave), h.AdjustBalance)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。

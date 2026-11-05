@@ -23,6 +23,8 @@ type SystemGateway interface {
 	DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error)
 	// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合（租户内）。
 	ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error)
+	// UserNicknames 返回用户 ID 集合的昵称映射（额度管理页展示员工姓名，issue #51）。
+	UserNicknames(ctx context.Context, userIDs []int64) (map[int64]string, error)
 }
 
 // Service 汇聚 oa 模块的业务能力。

@@ -27,3 +27,66 @@ export function batchWorkday(data: {
 export function clearWorkday(date: string) {
   return request.delete(`/oa/workday/${date}`) as Promise<any>
 }
+
+// ---------- OA 请假类型与额度（issue #51，spec #42 §3.5/§4.8） ----------
+// 权限模型：类型与额度的全部管理动作挂 oa:leave:manage（菜单 522）；
+// 类型列表与本人余额登录即可（员工发起请假的前置）。
+
+export interface LeaveTypePayload {
+  id?: number
+  name: string
+  balanceManaged: boolean
+  annualQuota?: string
+  sort?: number
+  remark?: string
+}
+
+// 类型列表：status 精确（0 启用/1 停用，缺省全部）、keyword 名称/编码模糊。
+export function listLeaveTypes(params?: { status?: number; keyword?: string }) {
+  return request.get('/oa/leave/type/list', { params }) as Promise<any>
+}
+// 创建类型（code 创建后不可变；名称/编码租户内唯一）。
+export function createLeaveType(data: LeaveTypePayload & { code: string }) {
+  return request.post('/oa/leave/type', data) as Promise<any>
+}
+// 更新类型（不含 code）。
+export function updateLeaveType(data: LeaveTypePayload) {
+  return request.put('/oa/leave/type', data) as Promise<any>
+}
+// 启停类型（status 0 启用 / 1 停用）。
+export function setLeaveTypeStatus(id: number, status: number) {
+  return request.put(`/oa/leave/type/${id}/status`, { status }) as Promise<any>
+}
+// 删除类型（被请假申请引用时后端 409，只能停用）。
+export function deleteLeaveType(id: number) {
+  return request.delete(`/oa/leave/type/${id}`) as Promise<any>
+}
+
+// 额度管理分页（userId/leaveTypeId/year 精确过滤）。
+export function pageLeaveBalances(params?: {
+  pageNo?: number
+  pageSize?: number
+  userId?: number
+  leaveTypeId?: number
+  year?: number
+}) {
+  return request.get('/oa/leave/balance/page', { params }) as Promise<any>
+}
+// 额度初始化（幂等：已有 (用户, 类型, 年) 行不重复建、不覆盖）。
+export function initLeaveBalances(data: { year: number; userIds: number[]; typeIds?: number[] }) {
+  return request.post('/oa/leave/balance/init', data) as Promise<any>
+}
+// 管理员调整额度（delta 可负；原因必填并留痕）。
+export function adjustLeaveBalance(data: {
+  userId: number
+  leaveTypeId: number
+  year: number
+  delta: string
+  reason: string
+}) {
+  return request.post('/oa/leave/balance/adjust', data) as Promise<any>
+}
+// 我的额度（year 缺省当前自然年；覆盖全部启用中类型）。
+export function getMyLeaveBalances(year?: number) {
+  return request.get('/oa/leave/balance/mine', { params: year ? { year } : {} }) as Promise<any>
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -46,6 +47,14 @@ func (f *fakeSystemGateway) ListUserIDsByDeptIDs(_ context.Context, deptIDs []in
 		}
 	}
 	return ids, nil
+}
+
+func (f *fakeSystemGateway) UserNicknames(_ context.Context, userIDs []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(userIDs))
+	for _, id := range userIDs {
+		out[id] = fmt.Sprintf("用户%d", id)
+	}
+	return out, nil
 }
 
 // userContext 返回带登录主体（用户 7，租户 1）的上下文。

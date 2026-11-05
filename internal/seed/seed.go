@@ -278,6 +278,17 @@ func seedMenus(db *gorm.DB) error {
 		btn(5202, 520, "批量设置", "oa:workday:batch", 2),
 		btn(5203, 520, "恢复默认", "oa:workday:delete", 3),
 
+		// 请假类型与额度（issue #51）：522 段（协调台账分配，grep 去重确认
+		// 522/528 未被占用）。本工单所有管理动作（类型 CRUD/启停/删除、额度
+		// 初始化/调整/分页）共用单一管理码 oa:leave:manage（#43 helper 登记、
+		// 默认审批流 oa_leave_approval 节点 2 的 HR/管理员码，spec §7.3），
+		// 挂菜单本身，无独立按钮码；类型列表与本人余额登录即可（不经权限码）。
+		menu(522, 500, "请假类型与额度", "leave", "oa/leave/index", "oa:leave:manage", "List", 2),
+		// 我的额度（issue #51）：员工侧页面，权限码为空——登录即可（分配了
+		// 菜单的角色可见；后端 GET /oa/leave/balance/mine 同为登录即可）。
+		// 我的请假申请页（含额度入口）由 #52/#53 在 500–549 空位自取。
+		menu(528, 500, "我的额度", "leave-mine", "oa/leave/mine", "", "User", 8),
+
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。
