@@ -10,6 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-quick-code/go-admin-pro/internal/config"
+	bpmapi "github.com/go-quick-code/go-admin-pro/internal/module/bpm/api"
+	bpmrepo "github.com/go-quick-code/go-admin-pro/internal/module/bpm/repository"
+	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 	crmapi "github.com/go-quick-code/go-admin-pro/internal/module/crm/api"
 	crmrepo "github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
@@ -33,6 +36,10 @@ type App struct {
 	DB        *gorm.DB
 	Engine    *gin.Engine
 	Scheduler *infraservice.JobScheduler
+	// BPM 是 bpm 模块的 Service（issue #44）：BusinessHandler 注册接缝——
+	// spec §4.4 要求业务回调由 internal/app 装配时注册（#46/#47 落地真实
+	// handler 后在此接线）；集成测试经该字段注册测试替身。
+	BPM *bpmservice.Service
 }
 
 // New 初始化数据库、模块与 HTTP 引擎。
@@ -136,14 +143,20 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
 
+	// bpm 模块（issue #44）：流程定义管理。BusinessHandler 注册表在装配期
+	// 建立但暂无实现——spec §4.4：未注册 business_type 的定义不允许发布，
+	// 真实回调由 #46（运行引擎）/#47（CRM 合同）接线（app.BPM 暴露注册入口）。
+	bpmSvc := bpmservice.New(bpmrepo.New(db), bpmSystemGateway{sys: sysSvc})
+	bpmAPI := bpmapi.New(bpmSvc, sysAPI.RequirePermission)
+
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, bpmAPI)
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc}, nil
 }
 
 // Close 释放资源。

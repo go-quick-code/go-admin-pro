@@ -46,4 +46,10 @@ var TenantTables = []string{
 	// 回款（issue #18）：计划/记录均带 tenant_id；可见性 join 合同套用合同 owner 谓词。
 	"crm_receivable_plan",
 	"crm_receivable_record",
+	// bpm 内核（issue #44）：定义/实例/任务/审批记录全量租户隔离（spec §4.6：
+	// 跨租户业务 ID 一律 404，不泄露存在性）。
+	"bpm_process_definition",
+	"bpm_process_instance",
+	"bpm_task",
+	"bpm_approval_record",
 }

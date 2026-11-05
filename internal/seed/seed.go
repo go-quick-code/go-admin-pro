@@ -262,6 +262,16 @@ func seedMenus(db *gorm.DB) error {
 		btn(4164, 4061, "产品导出", "crm:product:export", 6),
 		btn(4165, 4100, "合同导出", "crm:contract:export", 6),
 		btn(4166, 4120, "回款导出", "crm:receivable:export", 5),
+
+		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
+		// grep 去重确认 510/511/5111–5114 未被占用；OA 根目录 500 由 #43 落）。
+		// 发布与停用共用 bpm:definition:publish；待办任务菜单 512/5121+ 属 #46。
+		dir(510, 0, "流程中心", "/bpm", "SetLike", 50),
+		menu(511, 510, "流程定义", "definition", "bpm/definition/index", "bpm:definition:query", "List", 1),
+		btn(5111, 511, "流程新增", "bpm:definition:create", 1),
+		btn(5112, 511, "流程修改", "bpm:definition:update", 2),
+		btn(5113, 511, "流程删除", "bpm:definition:delete", 3),
+		btn(5114, 511, "流程发布", "bpm:definition:publish", 4),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
