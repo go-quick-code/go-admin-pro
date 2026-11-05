@@ -58,6 +58,12 @@ type Service struct {
 	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
 	// nil 表示未注入（退回 time.Local，见 businessLocation）。
 	location *time.Location
+	// clock 是当前时间来源，生产固定 time.Now；测试可替换为固定时刻，
+	// 用于验证「编号日期键/今天」走业务时区而不是服务器本地时区（PR #39 审查 P2）。
+	clock func() time.Time
+	// apiPrefix 是 HTTP API 前缀（如 /admin-api），用于拼装合同附件的鉴权下载
+	// 地址（PR #39 审查 P2：附件 URL 不再指向公开静态目录）。由 app 装配注入。
+	apiPrefix string
 	// Excel 导入 guard（issue #20）：应用级组件，固定 10MB/5000 行/100 条明细
 	// 与 80MB 解压上限，按实体限制并发解析数（excel.GuardDefaultConcurrent）。
 	// 见 excel.go 与 internal/pkg/excel/import_guard.go。
@@ -72,6 +78,7 @@ func New(repo *repository.Repository, sys SystemGateway) *Service {
 	return &Service{
 		repo:            repo,
 		sys:             sys,
+		clock:           time.Now,
 		contracts:       NoopContractChecker{},
 		approvals:       NewPassthroughApprovalService(repo, sys),
 		customerImports: excel.NewImportGuard[dto.CustomerImportRow](excel.GuardDefaultConcurrent),
@@ -135,10 +142,11 @@ func (s *Service) customerFilter(ctx context.Context, req *dto.CustomerPageReq) 
 	return filter, nil
 }
 
-// GetCustomer 查询客户详情。数据范围外的客户一律 404：
-// 与列表可见性保持一致——看不见的即不存在，不泄露存在性。
+// GetCustomer 查询客户详情。可见性见 findReadableCustomer：公海客户（owner 为空）
+// 对持 crm:customer:pool:view 的用户可读（PR #39 审查 P2），其余按数据范围，
+// 范围外一律 404——与列表可见性保持一致，不泄露存在性。
 func (s *Service) GetCustomer(ctx context.Context, id int64) (*model.Customer, error) {
-	c, err := s.findVisibleCustomer(ctx, id)
+	c, err := s.findReadableCustomer(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +175,7 @@ func (s *Service) CreateCustomer(ctx context.Context, req *dto.CustomerCreateReq
 		return nil, err
 	}
 
-	now := time.Now()
+	now := s.businessNow()
 	dateKey := DateKey(now)
 	c := &model.Customer{
 		Name:        req.Name,
@@ -210,8 +218,15 @@ func (s *Service) CreateCustomer(ctx context.Context, req *dto.CustomerCreateReq
 
 // UpdateCustomer 修改客户：数据范围外一律 404；编号不可改；ownerUserId
 // 传 0 保持现负责人，传非 0 值视为一次负责人转移（规格 §4.1：负责人变更写
-// 历史，issue #13）——走条件更新 + 历史同事务，防并发覆盖；公海客户不能在
-// 编辑里直接指定负责人，获取负责人必须走认领接口（受认领上限与互斥约束）。
+// 历史，issue #13）——转移与字段更新、历史同事务；公海客户不能在编辑里
+// 直接指定负责人，获取负责人必须走认领接口（受认领上限与互斥约束）。
+//
+// 授权（PR #39 审查 P0）：经编辑接口转移负责人与 PUT /crm/customer/transfer
+// 是同一动作，必须走同一授权口径——负责人本人或 crm:customer:transfer，
+// 只有 crm:customer:update 不足以把他人客户改到自己/第三人名下（403）。
+//
+// 字段更新只写请求列（repository.UpdateCustomerFields），不回写 status/owner
+// 等读到的整行：编辑与并发状态变更/转移交错时，不会用旧快照覆盖新值。
 func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq) error {
 	c, err := s.findVisibleCustomer(ctx, req.ID)
 	if err != nil {
@@ -221,18 +236,41 @@ func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq
 		if err := ValidateCustomerStatus(*req.Status); err != nil {
 			return err
 		}
-		c.Status = *req.Status
 	}
 	if c.OwnerUserID == 0 && req.OwnerUserID > 0 {
 		return xerr.BadRequest("公海客户请先认领，再修改负责人")
 	}
-	if req.OwnerUserID > 0 && req.OwnerUserID != c.OwnerUserID {
-		newDept, err := s.ownerDeptSnapshot(ctx, req.OwnerUserID)
-		if err != nil {
+	transfer := req.OwnerUserID > 0 && req.OwnerUserID != c.OwnerUserID
+	var newDept int64
+	if transfer {
+		// 先鉴权再解析目标部门：无转移权限的用户不应借编辑接口探测用户是否存在。
+		if err := s.canOperateOwner(ctx, c.OwnerUserID, PermCustomerTransfer); err != nil {
 			return err
 		}
-		fromOwner, fromDept := c.OwnerUserID, c.OwnerDeptID
-		err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if newDept, err = s.ownerDeptSnapshot(ctx, req.OwnerUserID); err != nil {
+			return err
+		}
+	}
+
+	fields := map[string]any{
+		"name":     req.Name,
+		"industry": req.Industry,
+		"level":    req.Level,
+		"source":   req.Source,
+		"phone":    req.Phone,
+		"website":  req.Website,
+		"address":  req.Address,
+		"remark":   req.Remark,
+	}
+	if req.Status != nil {
+		fields["status"] = *req.Status
+	}
+
+	// 字段更新 + 负责人转移 + 历史同一事务：任一失败整体回滚，不留「改了一半」的客户。
+	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if transfer {
+			fromOwner, fromDept := c.OwnerUserID, c.OwnerDeptID
+			// 条件更新即乐观并发：负责人已被并发操作变更时 0 行受影响 → 冲突。
 			rows, err := tx.TransferCustomerOwner(ctx, c.ID, fromOwner, req.OwnerUserID, newDept)
 			if err != nil {
 				return err
@@ -240,7 +278,7 @@ func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq
 			if rows == 0 {
 				return xerr.Conflict("客户负责人已变更，请刷新后重试")
 			}
-			return tx.CreateOwnerHistory(ctx, &model.CustomerOwnerHistory{
+			if err := tx.CreateOwnerHistory(ctx, &model.CustomerOwnerHistory{
 				TenantID:        currentTenantID(ctx),
 				CustomerID:      c.ID,
 				Action:          model.OwnerHistoryTransfer,
@@ -249,23 +287,13 @@ func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq
 				ToOwnerUserID:   req.OwnerUserID,
 				ToOwnerDeptID:   newDept,
 				OperatorUserID:  CurrentUserID(ctx),
-			})
-		})
-		if err != nil {
-			return err
+			}); err != nil {
+				return err
+			}
 		}
-		c.OwnerUserID = req.OwnerUserID
-		c.OwnerDeptID = newDept
-	}
-	c.Name = req.Name
-	c.Industry = req.Industry
-	c.Level = req.Level
-	c.Source = req.Source
-	c.Phone = req.Phone
-	c.Website = req.Website
-	c.Address = req.Address
-	c.Remark = req.Remark
-	return s.repo.SaveCustomer(ctx, c)
+		_, err := tx.UpdateCustomerFields(ctx, c.ID, fields)
+		return err
+	})
 }
 
 // DeleteCustomer 软删除客户。删除约束（spec §4.5）：存在未作废合同
@@ -286,6 +314,8 @@ func (s *Service) DeleteCustomer(ctx context.Context, id int64) error {
 }
 
 // findVisibleCustomer 取客户并做数据范围校验：不存在或范围外都返回 404。
+// 写路径（编辑/删除/释放/转移）共用；公海客户没有 owner，数据范围谓词无法命中，
+// 写路径必须先认领（见 UpdateCustomer）。
 func (s *Service) findVisibleCustomer(ctx context.Context, id int64) (*model.Customer, error) {
 	c, err := s.repo.FindCustomerByID(ctx, id)
 	if err != nil {
@@ -294,14 +324,53 @@ func (s *Service) findVisibleCustomer(ctx context.Context, id int64) (*model.Cus
 	if c == nil {
 		return nil, xerr.NotFound("客户不存在")
 	}
-	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
+	ok, err := s.customerPermitted(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	if !scope.Permits(c.OwnerDeptID, c.OwnerUserID) {
+	if !ok {
 		return nil, xerr.NotFound("客户不存在")
 	}
 	return c, nil
+}
+
+// findReadableCustomer 是详情/负责人历史的读路径：公海客户（owner_user_id 为空）
+// 对持 crm:customer:pool:view 的用户可见（规格 §4.1：公海不受数据范围过滤，
+// PR #39 审查 P2——否则公海列表可见、点进去 404）；非公海客户仍按数据范围。
+func (s *Service) findReadableCustomer(ctx context.Context, id int64) (*model.Customer, error) {
+	c, err := s.repo.FindCustomerByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, xerr.NotFound("客户不存在")
+	}
+	if c.OwnerUserID == 0 {
+		ok, err := s.sys.UserHasPermission(ctx, CurrentUserID(ctx), PermCustomerPoolView)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return c, nil
+		}
+	}
+	ok, err := s.customerPermitted(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, xerr.NotFound("客户不存在")
+	}
+	return c, nil
+}
+
+// customerPermitted 判断客户是否在当前用户的数据范围内（ADR 0004）。
+func (s *Service) customerPermitted(ctx context.Context, c *model.Customer) (bool, error) {
+	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
+	if err != nil {
+		return false, err
+	}
+	return scope.Permits(c.OwnerDeptID, c.OwnerUserID), nil
 }
 
 // ownerDeptSnapshot 解析负责人的部门快照；负责人必须是当前租户内存在的用户。

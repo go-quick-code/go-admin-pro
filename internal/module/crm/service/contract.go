@@ -136,7 +136,7 @@ func (s *Service) CreateContract(ctx context.Context, req *dto.ContractCreateReq
 		Remark:        req.Remark,
 	}
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		now := time.Now()
+		now := s.businessNow()
 		dateKey := DateKey(now)
 		seq, err := tx.NextSequenceValue(ctx, currentTenantID(ctx), BizTypeContract, dateKey)
 		if err != nil {
@@ -204,14 +204,21 @@ func (s *Service) UpdateContract(ctx context.Context, req *dto.ContractUpdateReq
 		}
 	}
 
-	c.Name = req.Name
-	c.Amount = amount
-	c.SignDate = signDate
-	c.StartDate = startDate
-	c.EndDate = endDate
-	c.Remark = req.Remark
+	// 只写请求列（PR #39 审查 P1）：编号/客户/来源商机/状态/驳回原因/owner_*
+	// 不在编辑路径写入，并发状态流转或归属变更不会被旧快照回写覆盖。
+	fields := map[string]any{
+		"name":       req.Name,
+		"sign_date":  signDate,
+		"start_date": startDate,
+		"end_date":   endDate,
+		"remark":     req.Remark,
+	}
+	if !signed {
+		// 已签合同金额锁定（req.Amount 忽略）；其余状态按不变量裁决。
+		fields["amount"] = amount
+	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.SaveContract(ctx, c); err != nil {
+		if _, err := tx.UpdateContractFields(ctx, c.ID, fields); err != nil {
 			return err
 		}
 		if req.Products != nil {
@@ -290,11 +297,11 @@ func (s *Service) findVisibleContract(ctx context.Context, id int64) (*model.Con
 	if c == nil {
 		return nil, xerr.NotFound("合同不存在")
 	}
-	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
+	ok, err := s.contractPermitted(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	if !scope.Permits(c.OwnerDeptID, c.OwnerUserID) {
+	if !ok {
 		return nil, xerr.NotFound("合同不存在")
 	}
 	return c, nil

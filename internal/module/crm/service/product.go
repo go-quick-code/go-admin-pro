@@ -95,7 +95,8 @@ func (s *Service) CreateProduct(ctx context.Context, req *dto.ProductCreateReq) 
 	return row, nil
 }
 
-// UpdateProduct 修改产品：字段全量覆盖。
+// UpdateProduct 修改产品：只写请求列（PR #39 审查 P1）。status 仅在请求携带时
+// 写入（PUT /product/status 是独立入口），不会把读到的旧状态回写覆盖并发下架/上架。
 func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) error {
 	row, err := s.findVisibleProduct(ctx, req.ID)
 	if err != nil {
@@ -105,7 +106,6 @@ func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) 
 		if err := ValidateProductStatus(*req.Status); err != nil {
 			return err
 		}
-		row.Status = *req.Status
 	}
 	if err := s.validateProductCategory(ctx, req.CategoryId); err != nil {
 		return err
@@ -113,13 +113,18 @@ func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) 
 	if err := s.checkProductCodeFree(ctx, req.Code, req.ID); err != nil {
 		return err
 	}
-	row.CategoryId = req.CategoryId
-	row.Name = req.Name
-	row.Code = req.Code
-	row.Unit = req.Unit
-	row.Price = req.Price
-	row.Description = req.Description
-	if err := s.repo.SaveProduct(ctx, row); err != nil {
+	fields := map[string]any{
+		"category_id": req.CategoryId,
+		"name":        req.Name,
+		"code":        req.Code,
+		"unit":        req.Unit,
+		"price":       req.Price,
+		"description": req.Description,
+	}
+	if req.Status != nil {
+		fields["status"] = *req.Status
+	}
+	if _, err := s.repo.UpdateProductFields(ctx, row.ID, fields); err != nil {
 		if repository.IsDuplicateEntry(err) {
 			return xerr.BadRequest("产品编码已存在")
 		}

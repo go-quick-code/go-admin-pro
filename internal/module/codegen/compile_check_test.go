@@ -68,6 +68,10 @@ func pruneOverlaidEntityFiles(t *testing.T, tmp string) {
 		"internal/module/crm/product_excel_http_integration_test.go",
 		"internal/module/crm/service/product_excel.go",
 		"internal/module/crm/api/product_excel.go",
+		// PR #39 审查新增的字段级更新测试依赖真实产品字段（CategoryId/Code/
+		// Description）与 UpdateProductFields；生成样板的产品模型/仓储不含这些，
+		// 与上面同类冲突，随产品实体一起跳过编译验证。
+		"internal/module/crm/repository/update_fields_test.go",
 		"internal/seed/crm_demo.go",
 	} {
 		if err := os.Remove(filepath.Join(tmp, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {

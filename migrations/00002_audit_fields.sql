@@ -2,7 +2,8 @@
 -- 审计字段：17 张表统一补 creator/updater（varchar(64)，默认 '0' 即系统账号，见 ADR 0002）；
 -- 关联表补 tenant_id；infra 三张实体表补 deleted_at，与统一 BaseEntity 对齐。
 -- ADD COLUMN ... NOT NULL DEFAULT 会就地回填存量行：creator/updater 落 '0'（系统账号）、
--- 关联表 tenant_id 营默认租户 1，升级不丢数据、不留 NULL。
+-- 关联表 tenant_id 先落默认租户 1（仅作为占位，随后按父表回填真实租户，
+-- 见文件末尾的 UPDATE ... JOIN），升级不丢数据、不留 NULL。
 
 ALTER TABLE `system_tenant`
   ADD COLUMN `creator` varchar(64) NOT NULL DEFAULT '0' AFTER `deleted_at`,
@@ -86,6 +87,22 @@ ALTER TABLE `infra_job`
 ALTER TABLE `infra_job_log`
   ADD COLUMN `creator` varchar(64) NOT NULL DEFAULT '0' AFTER `created_at`,
   ADD COLUMN `updater` varchar(64) NOT NULL DEFAULT '0' AFTER `creator`;
+
+-- 存量多租户数据回填（PR #39 审查）：ADD COLUMN 的默认值 1 只是占位；
+-- 在已有多个租户的库上升级时，关联行的 tenant_id 必须跟随父表，否则
+-- 租户 2 的用户角色/岗位与角色菜单会在 JOIN 时被过滤掉（权限丢失）。
+-- 空库上三条 UPDATE 不命中任何行，结果不变。
+UPDATE `system_user_role` ur
+  JOIN `system_user` u ON u.`id` = ur.`user_id`
+  SET ur.`tenant_id` = u.`tenant_id`;
+
+UPDATE `system_user_post` up
+  JOIN `system_user` u ON u.`id` = up.`user_id`
+  SET up.`tenant_id` = u.`tenant_id`;
+
+UPDATE `system_role_menu` rm
+  JOIN `system_role` r ON r.`id` = rm.`role_id`
+  SET rm.`tenant_id` = r.`tenant_id`;
 
 -- +goose Down
 -- 回滚审计字段：删除 Up 段新增的列与索引。

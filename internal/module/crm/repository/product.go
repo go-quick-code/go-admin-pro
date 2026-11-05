@@ -114,9 +114,15 @@ func (r *Repository) CreateProduct(ctx context.Context, row *model.Product) erro
 	return wrapDuplicateEntry(r.db.WithContext(ctx).Create(row).Error)
 }
 
-// SaveProduct 全量保存产品（更新路径）；撞唯一键时返回 IsDuplicateEntry 可识别的错误。
-func (r *Repository) SaveProduct(ctx context.Context, row *model.Product) error {
-	return wrapDuplicateEntry(r.db.WithContext(ctx).Save(row).Error)
+// UpdateProductFields 只更新请求字段（编辑接口），status 仅在调用方显式放入
+// fields 时写入（PUT /product/status 走 UpdateProductStatus 的独立入口）；
+// 用 map 更新而不是整行 Save：只写请求列、能写空值，且不覆盖并发状态变更。
+// 撞唯一键时返回 IsDuplicateEntry 可识别的错误。
+func (r *Repository) UpdateProductFields(ctx context.Context, id int64, fields map[string]any) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.Product{}).
+		Where("id = ?", id).
+		Updates(fields)
+	return res.RowsAffected, wrapDuplicateEntry(res.Error)
 }
 
 // UpdateProductStatus 只更新产品状态列（PUT /crm/product/status，spec §5），

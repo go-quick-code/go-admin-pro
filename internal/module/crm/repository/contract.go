@@ -6,6 +6,7 @@ import (
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
 	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ContractFilter 是合同列表查询条件。
@@ -100,10 +101,28 @@ func (r *Repository) CreateContract(ctx context.Context, c *model.Contract) erro
 	return r.db.WithContext(ctx).Create(c).Error
 }
 
-// SaveContract 全量保存合同（更新路径），编号列由 service 层保证不改写；
-// 状态与驳回原因不在编辑路径变更（状态流转走条件更新 TransitionContractStatus）。
-func (r *Repository) SaveContract(ctx context.Context, c *model.Contract) error {
-	return r.db.WithContext(ctx).Save(c).Error
+// UpdateContractFields 只更新请求字段（编辑接口），不写编号、客户/来源商机、
+// 状态/驳回原因与 owner_*（状态流转走 TransitionContractStatus，归属不随编辑变更）。
+// 用 map 更新而不是整行 Save：不只更新请求列，还能写空值，且不会覆盖并发改动。
+func (r *Repository) UpdateContractFields(ctx context.Context, id int64, fields map[string]any) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.Contract{}).
+		Where("id = ?", id).
+		Updates(fields)
+	return res.RowsAffected, res.Error
+}
+
+// LockContractByID 在事务内以 SELECT ... FOR UPDATE 锁定合同行并返回，
+// 供回款金额不变量校验串行化使用（同一合同的并发计划创建/修改在此排队）。
+// 必须由调用方在 Transaction 内调用；租户插件自动带 tenant_id 条件。
+func (r *Repository) LockContractByID(ctx context.Context, id int64) (*model.Contract, error) {
+	var c model.Contract
+	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).
+		First(&c, id).Error
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return &c, nil
 }
 
 // DeleteContract 按 ID 软删除合同（GORM deleted_at，租户插件自动带租户条件）。
