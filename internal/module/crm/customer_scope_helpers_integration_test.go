@@ -9,15 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
-
-// currentDateKey 返回当天 yyyyMMdd（与服务端 DateKey 同格式，仅测试断言用）。
-func currentDateKey() string {
-	return time.Now().Format("20060102")
-}
 
 // mustOK 断言业务成功（HTTP 200 且 code 0）。
 func mustOK(t *testing.T, phase string, status int, api testutil.APIResponse) {

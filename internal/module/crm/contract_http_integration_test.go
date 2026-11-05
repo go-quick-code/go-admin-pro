@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
@@ -122,7 +121,7 @@ func TestIntegrationContractCRUDAndNumber(t *testing.T) {
 	if !contractNoRe.MatchString(no1) {
 		t.Fatalf("合同编号 %q 不符合 HT+yyyyMMdd+4位序号", no1)
 	}
-	if want := "HT" + time.Now().Format("20060102") + "0001"; no1 != want {
+	if want := "HT" + env.DateKey() + "0001"; no1 != want {
 		t.Fatalf("租户当日首号应为 %s，实际 %s", want, no1)
 	}
 	if id := first["ownerUserId"]; id != float64(1) {
