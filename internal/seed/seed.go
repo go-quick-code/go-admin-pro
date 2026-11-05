@@ -266,9 +266,19 @@ func seedMenus(db *gorm.DB) error {
 		// OA（issue #43）：业务套件根目录（spec §7.2 菜单段 500，权限码为空——
 		// 目录不可授权动作）。子菜单与按钮码由各域工单按 500 段号段落地
 		//（501 公告、503 请假、504 报销、505 考勤、506 日程、507 会议室、
-		// 508 文档；510+ 为 bpm 根），开工前先 grep 本文件去重再取号。
+		// 508 文档），开工前先 grep 本文件去重再取号。
 		// OA 业务记录的共享可见范围见 oa/service.VisibilityScopeOf（spec §4.6）。
 		dir(500, 0, "OA", "/oa", "Calendar", 50),
+
+		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
+		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
+		// 发布与停用共用 bpm:definition:publish。
+		dir(510, 0, "流程中心", "/bpm", "SetLike", 51),
+		menu(511, 510, "流程定义", "definition", "bpm/definition/index", "bpm:definition:query", "List", 1),
+		btn(5111, 511, "流程新增", "bpm:definition:create", 1),
+		btn(5112, 511, "流程修改", "bpm:definition:update", 2),
+		btn(5113, 511, "流程删除", "bpm:definition:delete", 3),
+		btn(5114, 511, "流程发布", "bpm:definition:publish", 4),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。

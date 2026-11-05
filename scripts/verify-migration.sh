@@ -8,14 +8,16 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=32  断言 up 后的业务表数量（默认 32；CI 继承此默认值；
+#   EXPECTED_TABLES=36  断言 up 后的业务表数量（默认 36；CI 继承此默认值；
 #                       00003 新增 system_role_dept，00004 新增 crm_customer、crm_sequence，
 #                       00005 新增 crm_contact，00006 新增 crm_customer_owner_history，
 #                       00007 新增 crm_follow_up，00008 新增 crm_pool_config，
 #                       00009 新增 crm_product_category、crm_product，
 #                       00010 新增 crm_opportunity、crm_opportunity_product，
 #                       00011 新增 crm_contract、crm_contract_product，
-#                       00013 新增 crm_receivable_plan、crm_receivable_record
+#                       00013 新增 crm_receivable_plan、crm_receivable_record，
+#                       00014 新增 bpm_process_definition、bpm_process_instance、
+#                       bpm_task、bpm_approval_record
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -23,7 +25,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-32}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-36}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
