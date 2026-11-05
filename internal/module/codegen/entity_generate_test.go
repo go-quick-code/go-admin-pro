@@ -133,7 +133,7 @@ func TestGenerateEntityProductKeyContent(t *testing.T) {
 			"tenant_tables.go",
 			"crm_product",
 			"RegisterProductRoutes",
-			"#20",
+			"导入导出接线位",
 		}},
 	}
 	for _, tc := range cases {

@@ -144,7 +144,7 @@ func TestGenerateEntityVariations(t *testing.T) {
 		}
 	})
 
-	t.Run("导入导出开关关闭：不生成 #20 接线位", func(t *testing.T) {
+	t.Run("导入导出开关关闭：不生成导入导出接线位", func(t *testing.T) {
 		spec := loadProductSpec(t)
 		spec.ImportExport = false
 		files, err := codegen.GenerateEntity(spec)
@@ -152,8 +152,8 @@ func TestGenerateEntityVariations(t *testing.T) {
 			t.Fatalf("GenerateEntity: %v", err)
 		}
 		for name, content := range files {
-			if strings.Contains(content, "TODO(#20)") {
-				t.Errorf("%s 不应包含 #20 接线位", name)
+			if strings.Contains(content, "导入导出接线位") {
+				t.Errorf("%s 不应包含导入导出接线位", name)
 			}
 		}
 	})

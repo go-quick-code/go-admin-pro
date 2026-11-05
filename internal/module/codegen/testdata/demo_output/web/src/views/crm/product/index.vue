@@ -27,6 +27,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
+import { useDictOptions } from '@/composables/useDict'
 import { dictLabel, formatTime } from '@/utils/format'
 import {
   pageProducts,
@@ -42,8 +43,8 @@ const productStatusOptions = [
   { label: '在售', value: 1 },
   { label: '下架', value: 2 },
 ]
-// TODO：单位选项接入系统字典 crm_product_unit（web 尚无字典读取封装，先留空选项）。
-const productUnitOptions: { label: string; value: any }[] = []
+// 单位选项来自系统字典 crm_product_unit（异步加载，失败时回退显示原值）。
+const productUnitOptions = useDictOptions('crm_product_unit')
 
 const tableRef = ref()
 const users = ref<any[]>([])

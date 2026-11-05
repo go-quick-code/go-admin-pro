@@ -184,6 +184,11 @@ make run-demo              # 启动后端并写入 CRM 演示数据（等价于 
 种子之后写入 CRM 演示组织与业务数据；只有 `crm_customer` 为空时才写入，
 重复启动不会重复插入。只想要基础种子（无演示数据）时正常 `make run` 即可。
 
+种子是「空表才写」的一次性逻辑：菜单、角色、字典等各段种子在对应表非空时整体跳过。
+已有库升级到新版本后，新增的菜单/按钮/字典不会自动补写（例如 `simple-list` 按钮
+1014/1024/1054、`crm_product_unit` 字典），需手工补建或重建种子库（开发库可 drop
+后执行 `make migrate-up` 再启动）。
+
 演示账号（租户 1，密码均为 `123456`）：
 
 | 账号 | 角色 | 数据范围 | 演示视角 |
@@ -315,7 +320,7 @@ ctx = tenant.WithTenantID(ctx, claims.TenantID)
 - 前端：`web/src/api/<module>.ts` 追加片段 + `web/src/views/<module>/<entity>/index.vue`（ProTable 列/搜索/表单全套）；
 - 迁移模板与 `INTEGRATION.md` 装配说明（`tenant_tables.go`、router、app.go、seed 的接线步骤；`app.go` 等文件**不自动改写**）。
 
-配置项：字段映射（`string/text/int8/int32/int64/money/datetime/bool` → Go 类型与前端组件，登记在 `entity_mapping.go`）、字典字段（前端 select 占位，选项接系统字典）、枚举字段（模型常量 + service 400 校验）、owner 字段开关（`ownerScoped`，关闭则生成不带数据范围的简单 CRUD）、编号开关（`sequence`，owner-scoped 实体默认不带编号，开启走 `crm_sequence` 事务发放）、导入导出开关（`importExport`，仅生成 #20 接线位与 TODO 注释，不产出可用实现）。
+配置项：字段映射（`string/text/int8/int32/int64/money/datetime/bool` → Go 类型与前端组件，登记在 `entity_mapping.go`）、字典字段（前端 select 通过 `useDictOptions` 读系统字典）、枚举字段（模型常量 + service 400 校验）、owner 字段开关（`ownerScoped`，关闭则生成不带数据范围的简单 CRUD）、编号开关（`sequence`，owner-scoped 实体默认不带编号，开启走 `crm_sequence` 事务发放）、导入导出开关（`importExport`，仅生成接线位注释，不产出可用实现；接入参考 CRM 手写实现）。
 
 ```bash
 # 用产品（product）元信息生成一次演示输出到任意目录
@@ -456,11 +461,11 @@ make docker-down  # 停止容器
 ## 后续计划
 
 - [ ] Redis 缓存与登录态管理
-- [ ] Excel 导入导出
+- [x] Excel 导入导出（helper + CRM 客户/联系人/产品导入，客户/合同/产品/回款导出）
 - [ ] 对象存储（OSS / S3 / MinIO）
 - [ ] 代码生成器支持树形表与主子表
 - [ ] OpenAPI 文档（swaggo）
-- [ ] 数据权限扩展到更多业务模块
+- [x] 数据权限扩展到更多业务模块（CRM 客户/商机/合同/回款/公海已接入）
 
 ## 贡献
 
