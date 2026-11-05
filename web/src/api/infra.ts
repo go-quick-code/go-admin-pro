@@ -14,6 +14,11 @@ export function uploadFile(file: File) {
 export function deleteFile(id: number) {
   return request.delete(`/infra/file/${id}`) as Promise<any>
 }
+// 鉴权下载（PR #39 残余风险 A）：文件不再有公开静态地址，下载走该端点并带
+// Authorization；responseType=blob 由页面按 Content-Disposition 保存。
+export function downloadFile(id: number) {
+  return request.get(`/infra/file/${id}/download`, { responseType: 'blob' }) as Promise<any>
+}
 
 // ---------- 参数配置 ----------
 export function pageConfigs(params: any) {

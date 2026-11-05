@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"os"
@@ -171,11 +172,13 @@ func (s *Service) uploadFile(ctx context.Context, fh *multipart.FileHeader, bizT
 		return nil, xerr.Internal(err)
 	}
 
-	url := s.cfg.Storage.Local.PublicPrefix + "/" + filepath.ToSlash(relPath)
+	// URL 列不再保存公开静态地址（PR #39 残余风险 A）：公开目录已关闭，
+	// 文件的唯一读取入口是鉴权下载端点。新建记录留空，返回前按 ID 拼装
+	// 下载地址；存量行里的旧公开地址由读取路径统一覆盖。
 	f := &model.File{
 		Name:     filepath.Base(fh.Filename),
 		Path:     filepath.ToSlash(relPath),
-		URL:      url,
+		URL:      "",
 		Size:     written,
 		Type:     fh.Header.Get("Content-Type"),
 		Provider: "local",
@@ -186,6 +189,7 @@ func (s *Service) uploadFile(ctx context.Context, fh *multipart.FileHeader, bizT
 		_ = os.Remove(absPath)
 		return nil, err
 	}
+	f.URL = s.FileDownloadURL(f.ID)
 	return f, nil
 }
 
@@ -193,7 +197,37 @@ func (s *Service) ListFiles(ctx context.Context, req *dto.FilePageReq) ([]model.
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
 	filter := repository.FileFilter{Name: req.Name, Type: req.Type}
-	return s.repo.ListFiles(ctx, filter, page.Offset(), page.PageSize)
+	list, total, err := s.repo.ListFiles(ctx, filter, page.Offset(), page.PageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	// 存量行的 URL 可能还是旧的公开静态地址：读取路径统一覆盖为鉴权下载地址。
+	for i := range list {
+		list[i].URL = s.FileDownloadURL(list[i].ID)
+	}
+	return list, total, nil
+}
+
+// OpenFile 打开文件供鉴权下载（PR #39 残余风险 A）：按 ID 查文件
+// （租户插件保证同租户），磁盘内容缺失与跨租户一样按 404 处理，
+// 不把内部存储路径暴露给调用方。调用方负责关闭返回的文件句柄。
+func (s *Service) OpenFile(ctx context.Context, id int64) (*model.File, *os.File, error) {
+	f, err := s.repo.FindFileByID(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if f == nil {
+		return nil, nil, xerr.NotFound("文件不存在")
+	}
+	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
+	fh, err := os.Open(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, xerr.NotFound("文件不存在")
+		}
+		return nil, nil, xerr.Internal(err)
+	}
+	return f, fh, nil
 }
 
 func (s *Service) DeleteFile(ctx context.Context, id int64) error {
@@ -207,9 +241,14 @@ func (s *Service) DeleteFile(ctx context.Context, id int64) error {
 	return s.deleteFile(ctx, f)
 }
 
-// FilePublicURL 返回文件的公开访问地址。
-func (s *Service) FilePublicURL(f *model.File) string {
-	return f.URL
+// FileDownloadURL 返回文件的鉴权下载地址（GET /infra/file/:id/download）。
+// 公开静态目录已关闭，所有对外的文件 URL 都由这里统一拼装。
+func (s *Service) FileDownloadURL(id int64) string {
+	prefix := strings.TrimRight(s.cfg.App.APIPrefix, "/")
+	if prefix == "" {
+		prefix = "/admin-api"
+	}
+	return fmt.Sprintf("%s/infra/file/%d/download", prefix, id)
 }
 
 // ---------- 参数配置 ----------

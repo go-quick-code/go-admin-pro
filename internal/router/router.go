@@ -42,11 +42,9 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	codegenAPI.RegisterProtected(protected)
 	crmAPI.RegisterProtected(protected)
 
-	// 本地文件访问
-	if err := os.MkdirAll(cfg.Storage.Local.BasePath, 0o755); err != nil {
-		panic(err)
-	}
-	engine.Static(cfg.Storage.Local.PublicPrefix, cfg.Storage.Local.BasePath)
+	// 上传文件不挂公开静态目录（PR #39 残余风险 A）：任何匿名用户都不能
+	// 通过 /files/* 直链读取文件，唯一入口是 GET /infra/file/:id/download
+	//（挂 infra:file:query，按租户过滤）。
 
 	// 前端打包产物（生产环境由 Go 直接托管）
 	webRoot := cfg.App.WebRoot

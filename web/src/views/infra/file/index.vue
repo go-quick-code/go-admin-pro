@@ -21,11 +21,11 @@
         <span class="tip">支持图片、文档、压缩包等，单文件不超过 20MB</span>
       </template>
       <template #cell-name="{ row }">
-        <a :href="row.url" target="_blank" class="file-link">{{ row.name }}</a>
+        <el-link type="primary" @click="handleDownload(row)">{{ row.name }}</el-link>
       </template>
       <template #cell-size="{ row }">{{ formatSize(row.size) }}</template>
       <template #actions="{ row }">
-        <el-button link type="primary" @click="preview(row)">预览</el-button>
+        <el-button link type="primary" @click="handleDownload(row)">下载</el-button>
       </template>
     </ProTable>
   </div>
@@ -37,7 +37,8 @@ import { ElMessage } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { useUserStore } from '@/stores/user'
 import { formatSize, formatTime } from '@/utils/format'
-import { pageFiles, uploadFile, deleteFile } from '@/api/infra'
+import { saveBlobAs } from '@/utils/download'
+import { pageFiles, uploadFile, deleteFile, downloadFile } from '@/api/infra'
 
 const userStore = useUserStore()
 const tableRef = ref()
@@ -66,16 +67,14 @@ async function handleUpload(options: any) {
   return data
 }
 
-function preview(row: any) {
-  window.open(row.url, '_blank')
+// 文件读取统一走鉴权下载端点（不再使用 row.url 直链 / window.open）。
+async function handleDownload(row: any) {
+  const response = await downloadFile(row.id)
+  saveBlobAs(response, row.name)
 }
 </script>
 
 <style scoped>
-.file-link {
-  color: #409eff;
-}
-
 .tip {
   color: #909399;
   font-size: 12px;

@@ -48,8 +48,9 @@ security:
 
 storage:
   local:
+    # 上传文件只落磁盘，不挂公开静态目录；读取统一走鉴权下载端点
+    # GET /infra/file/:id/download（PR #39 残余风险 A）。
     base-path: ./uploads
-    public-prefix: /files
 
 tenant:
   enabled: true
