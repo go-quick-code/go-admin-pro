@@ -27,6 +27,13 @@ type User struct {
 
 func (User) TableName() string { return "system_user" }
 
+// SimpleUser 是用户精简项：表单选项（如 CRM 负责人选择）用，不含敏感字段。
+type SimpleUser struct {
+	ID       int64  `json:"id"`
+	Nickname string `json:"nickname"`
+	DeptID   int64  `json:"deptId"`
+}
+
 // Role 是角色，数据权限挂在角色上。
 type Role struct {
 	BaseEntity
@@ -40,6 +47,7 @@ type Role struct {
 	Remark    string `gorm:"size:500" json:"remark"`
 
 	MenuIDs []int64 `gorm:"-" json:"menuIds,omitempty"`
+	DeptIDs []int64 `gorm:"-" json:"deptIds,omitempty"` // 数据范围 2（自定义部门）的部门集合
 }
 
 func (Role) TableName() string { return "system_role" }
@@ -94,26 +102,38 @@ type Post struct {
 
 func (Post) TableName() string { return "system_post" }
 
-// UserRole 是用户-角色关联。
+// UserRole 是用户-角色关联。关联表用复合主键 + tenant_id，不设软删除。
 type UserRole struct {
-	UserID int64 `gorm:"primaryKey" json:"userId"`
-	RoleID int64 `gorm:"primaryKey" json:"roleId"`
+	UserID   int64 `gorm:"primaryKey" json:"userId"`
+	RoleID   int64 `gorm:"primaryKey" json:"roleId"`
+	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
 }
 
 func (UserRole) TableName() string { return "system_user_role" }
 
-// UserPost 是用户-岗位关联。
+// UserPost 是用户-岗位关联。关联表用复合主键 + tenant_id，不设软删除。
 type UserPost struct {
-	UserID int64 `gorm:"primaryKey" json:"userId"`
-	PostID int64 `gorm:"primaryKey" json:"postId"`
+	UserID   int64 `gorm:"primaryKey" json:"userId"`
+	PostID   int64 `gorm:"primaryKey" json:"postId"`
+	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
 }
 
 func (UserPost) TableName() string { return "system_user_post" }
 
-// RoleMenu 是角色-菜单关联。
+// RoleMenu 是角色-菜单关联。关联表用复合主键 + tenant_id，不设软删除。
 type RoleMenu struct {
-	RoleID int64 `gorm:"primaryKey" json:"roleId"`
-	MenuID int64 `gorm:"primaryKey" json:"menuId"`
+	RoleID   int64 `gorm:"primaryKey" json:"roleId"`
+	MenuID   int64 `gorm:"primaryKey" json:"menuId"`
+	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
 }
 
 func (RoleMenu) TableName() string { return "system_role_menu" }
+
+// RoleDept 是角色-部门关联（自定义数据范围），见 ADR 0004。关联表用复合主键 + tenant_id，不设软删除。
+type RoleDept struct {
+	RoleID   int64 `gorm:"primaryKey" json:"roleId"`
+	DeptID   int64 `gorm:"primaryKey" json:"deptId"`
+	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+}
+
+func (RoleDept) TableName() string { return "system_role_dept" }

@@ -11,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/config"
 	"github.com/lautung/go-admin-pro/internal/module/codegen"
+	crmapi "github.com/lautung/go-admin-pro/internal/module/crm/api"
+	crmrepo "github.com/lautung/go-admin-pro/internal/module/crm/repository"
+	crmservice "github.com/lautung/go-admin-pro/internal/module/crm/service"
 	infraapi "github.com/lautung/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/lautung/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/lautung/go-admin-pro/internal/module/infra/service"
@@ -55,8 +58,12 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		}
 	}
 
+	if err := db.Use(database.NewAuditPlugin()); err != nil {
+		return nil, fmt.Errorf("install audit plugin: %w", err)
+	}
+
 	if cfg.Database.Seed {
-		if err := seed.Run(db); err != nil {
+		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}
 	}
@@ -71,7 +78,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraSvc := infraservice.New(infraRepo, cfg, scheduler)
 
 	// 注册日志清理任务，可在“定时任务”中把 handlerName 配置为 cleanLogs。
-	scheduler.Register("cleanLogs", func(ctx context.Context, param string) error {
+	// 清理跨租户执行（tenant.Skip，见 system repository），属系统级处理器：
+	// 只有平台租户管理员可创建/修改/启用/运行（PR #39 审查 P0）。
+	scheduler.RegisterSystem("cleanLogs", func(ctx context.Context, param string) error {
 		days, err := strconv.Atoi(strings.TrimSpace(param))
 		if err != nil || days <= 0 {
 			days = 30
@@ -80,10 +89,57 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	})
 
 	sysAPI := systemapi.New(sysSvc, cfg)
+
+	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
+	crmRepo := crmrepo.New(db)
+	crmSvc := crmservice.New(crmRepo, sysSvc)
+	// 业务时区（ADR 0006）：仪表盘按月归集与「今天」判定统一走 app.timezone，
+	// 不依赖服务器 TZ。
+	crmSvc.SetLocation(cfg.Location())
+	// 产品删除引用校验（issue #11 扩展点，#15/#16 各自提供行项目侧实现）：
+	// 商机与合同任一行项目引用的产品都禁删。RefCheckerChain 依次调用、
+	// 首个非 nil 错误即返回（组合说明见 #15/#16 提交注释）。
+	crmSvc.SetProductRefCountChecker(crmservice.RefCheckerChain{
+		crmservice.NewOpportunityProductRefChecker(crmRepo),
+		crmservice.NewContractProductRefChecker(crmRepo),
+	})
+	// 公海自动回收的合同排除（issue #14 接 #16）：有未作废合同的客户不被回收，
+	// 作废合同不拦截。替换 v1 空实现（恒「无合同」，见
+	// crmservice.ContractChecker 接口注释与 pool_recycle.go）。
+	crmSvc.SetContractChecker(crmservice.NewContractChecker(crmRepo))
+	// 作废/删除合同的回款拦截（issue #18 接入 #16 预留守卫）：
+	// 合同存在未删除回款记录时禁止作废/删除（spec §4.5），替换 v1 空实现
+	//（接缝见 crmservice.VoidContractGuard 接口注释）。
+	crmSvc.SetVoidContractGuard(crmservice.NewReceivableVoidGuard(crmRepo))
+	// 合同附件（issue #17）：crm 只依赖 ContractFileStore 接口，这里装配 infra 的
+	// 通用业务文件能力（infra_file 按 biz_type/biz_id 归属，见 contract_file_store.go）。
+	crmSvc.SetContractFileStore(contractFileStore{infra: infraSvc})
+	// 附件 URL 走鉴权下载端点（PR #39 审查 P2）：拼装地址需要 HTTP API 前缀。
+	crmSvc.SetAPIPrefix(cfg.App.APIPrefix)
+
+	// 注册公海自动回收任务（issue #14）：handlerName 为 recyclePoolCustomers，
+	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed
+	// 的 seedJobs 注释）。回收是系统级动作：handler 忽略 job 所属租户上下文，
+	// 由 crm service 以 tenant.Skip 列出启用租户后逐租户执行。
+	//
+	// 系统级注册（PR #39 审查 P0）：普通租户管理员即使持 super_admin（"*"）
+	// 也不能创建/运行该 handler，否则可经 infra_job 触发跨租户公海回收。
+	scheduler.RegisterSystem(crmservice.RecycleJobHandlerName, func(ctx context.Context, param string) error {
+		result, err := crmSvc.RunPoolRecycle(ctx)
+		if err != nil {
+			return err
+		}
+		slog.Info("pool auto-recycle job finished", "tenants", result.Tenants, "recycled", result.Recycled)
+		return nil
+	})
+
+	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
+	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
+
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI)
 
 	scheduler.Start(context.Background())
 

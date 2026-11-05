@@ -21,6 +21,18 @@ import (
 // HandlerFunc 是任务处理器签名。
 type HandlerFunc func(ctx context.Context, param string) error
 
+// PlatformTenantID 是平台租户 ID：种子租户 1（内置管理后台）。
+// 系统级任务处理器（跨租户动作，如公海自动回收/日志清理）只允许该租户的管理员
+// 创建、修改、启用与运行；普通租户即使持有 super_admin（"*"）也不能操作。
+// 与 tenant.DefaultID 取同值，但语义不同：这里是「平台管理员」的准入边界，
+// 不是缺省租户回退值（PR #39 审查 P0）。
+const PlatformTenantID int64 = 1
+
+// errSystemJobForbidden 是系统级任务越权操作的统一文案（HTTP 403）。
+func errSystemJobForbidden() error {
+	return xerr.Forbidden("系统级任务仅平台管理员可操作")
+}
+
 var cronParser = cron.NewParser(
 	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )
@@ -32,14 +44,18 @@ type JobScheduler struct {
 	mu       sync.Mutex
 	entries  map[int64]cron.EntryID
 	handlers map[string]HandlerFunc
+	// systemHandlers 记录系统级处理器（跨租户动作）：只有平台租户可注册任务、
+	// 查看处理器与执行；调度/执行入口另有二次防线，防止修复前遗留的行被触发。
+	systemHandlers map[string]struct{}
 }
 
 func NewJobScheduler(repo *repository.Repository) *JobScheduler {
 	s := &JobScheduler{
-		repo:     repo,
-		cron:     cron.New(cron.WithSeconds()),
-		entries:  make(map[int64]cron.EntryID),
-		handlers: make(map[string]HandlerFunc),
+		repo:           repo,
+		cron:           cron.New(cron.WithSeconds()),
+		entries:        make(map[int64]cron.EntryID),
+		handlers:       make(map[string]HandlerFunc),
+		systemHandlers: make(map[string]struct{}),
 	}
 	// 内置演示任务，便于验证定时任务链路。
 	s.Register("demoJob", func(ctx context.Context, param string) error {
@@ -49,19 +65,53 @@ func NewJobScheduler(repo *repository.Repository) *JobScheduler {
 	return s
 }
 
-// Register 注册任务处理器。
+// Register 注册普通任务处理器（任何租户可用）。
 func (s *JobScheduler) Register(name string, fn HandlerFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handlers[name] = fn
 }
 
-// Handlers 返回已注册的处理器名称。
+// RegisterSystem 注册系统级任务处理器：处理器会跨租户执行，只有平台租户
+// （PlatformTenantID）的管理员可创建/修改/启用/运行，其他租户一律 403。
+func (s *JobScheduler) RegisterSystem(name string, fn HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handlers[name] = fn
+	s.systemHandlers[name] = struct{}{}
+}
+
+// IsSystemHandler 判断处理器是否为系统级（跨租户）动作。
+func (s *JobScheduler) IsSystemHandler(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.systemHandlers[name]
+	return ok
+}
+
+// Handlers 返回已注册的处理器名称（全量，供平台租户与内部使用）。
 func (s *JobScheduler) Handlers() []string {
+	return s.handlersFor(0)
+}
+
+// HandlersForTenant 返回指定租户可见的处理器名称：非平台租户过滤掉系统级
+// 处理器，避免普通租户管理员在「定时任务」页面看到不可用的跨租户动作。
+func (s *JobScheduler) HandlersForTenant(tenantID int64) []string {
+	return s.handlersFor(tenantID)
+}
+
+// handlersFor 是全量列表的实现：tenantID 为 PlatformTenantID（或 0，表示
+// 内部调用）时返回全部，其余租户过滤系统级处理器。
+func (s *JobScheduler) handlersFor(tenantID int64) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	names := make([]string, 0, len(s.handlers))
 	for name := range s.handlers {
+		if tenantID != 0 && tenantID != PlatformTenantID {
+			if _, system := s.systemHandlers[name]; system {
+				continue
+			}
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -115,6 +165,11 @@ func (s *JobScheduler) Stop() {
 func (s *JobScheduler) Schedule(job model.Job) error {
 	if job.Status != 0 {
 		return nil
+	}
+	// 二次防线：修复前遗留的「普通租户 + 系统级 handler」行不得进入调度，
+	// 即使绕过创建/修改入口直接改库也不会被执行。
+	if s.IsSystemHandler(job.HandlerName) && job.TenantID != PlatformTenantID {
+		return errSystemJobForbidden()
 	}
 	if err := s.Validate(job.CronExpression); err != nil {
 		return err
@@ -172,6 +227,12 @@ func (s *JobScheduler) Execute(job model.Job) {
 	var lastErr error
 	if !ok {
 		lastErr = fmt.Errorf("未注册的任务处理器：%s", job.HandlerName)
+		attempts = 1
+	} else if s.IsSystemHandler(job.HandlerName) && job.TenantID != PlatformTenantID {
+		// 二次防线（PR #39 审查 P0）：系统级 handler 会以 tenant.Skip 跨租户
+		// 执行，非平台租户的任务即使已落库也不得真正运行。
+		ok = false
+		lastErr = errSystemJobForbidden()
 		attempts = 1
 	}
 	for i := 0; i < attempts && ok; i++ {
@@ -247,12 +308,30 @@ func (s *Service) GetJob(ctx context.Context, id int64) (*model.Job, error) {
 	return job, nil
 }
 
+// ListJobHandlers 返回当前租户可注册的处理器名称：系统级处理器
+// （跨租户动作）只对平台租户展示（PR #39 审查 P0）。
+func (s *Service) ListJobHandlers(ctx context.Context) []string {
+	return s.scheduler.HandlersForTenant(tenant.ID(ctx))
+}
+
+// ensureJobHandlerAllowed 校验当前租户能否操作该系统级处理器：
+// 系统级处理器跨租户执行，只有平台租户管理员可创建/修改/启用/运行。
+func (s *Service) ensureJobHandlerAllowed(ctx context.Context, handlerName string) error {
+	if s.scheduler.IsSystemHandler(handlerName) && tenant.ID(ctx) != PlatformTenantID {
+		return errSystemJobForbidden()
+	}
+	return nil
+}
+
 func (s *Service) CreateJob(ctx context.Context, req *dto.JobCreateReq) error {
 	if err := s.scheduler.Validate(req.CronExpression); err != nil {
 		return err
 	}
 	if _, ok := s.scheduler.handler(req.HandlerName); !ok {
 		return xerr.BadRequest("未注册的任务处理器：" + req.HandlerName)
+	}
+	if err := s.ensureJobHandlerAllowed(ctx, req.HandlerName); err != nil {
+		return err
 	}
 	if req.Status != 0 && req.Status != 1 {
 		return xerr.BadRequest("非法的任务状态")
@@ -289,6 +368,14 @@ func (s *Service) UpdateJob(ctx context.Context, req *dto.JobUpdateReq) error {
 	if _, ok := s.scheduler.handler(req.HandlerName); !ok {
 		return xerr.BadRequest("未注册的任务处理器：" + req.HandlerName)
 	}
+	// 同时校验原 handler 与新 handler：禁止普通租户把遗留的系统级任务
+	// 改成别的名字后继续操作，也禁止把普通任务改成系统级 handler。
+	if err := s.ensureJobHandlerAllowed(ctx, job.HandlerName); err != nil {
+		return err
+	}
+	if err := s.ensureJobHandlerAllowed(ctx, req.HandlerName); err != nil {
+		return err
+	}
 	job.Name = req.Name
 	job.HandlerName = req.HandlerName
 	job.HandlerParam = req.HandlerParam
@@ -318,6 +405,9 @@ func (s *Service) UpdateJobStatus(ctx context.Context, id int64, status int8) er
 	}
 	if status != 0 && status != 1 {
 		return xerr.BadRequest("非法的任务状态")
+	}
+	if err := s.ensureJobHandlerAllowed(ctx, job.HandlerName); err != nil {
+		return err
 	}
 	job.Status = status
 	if err := s.repo.SaveJob(ctx, job); err != nil {
@@ -350,6 +440,9 @@ func (s *Service) RunJob(ctx context.Context, id int64) error {
 	}
 	if job == nil {
 		return xerr.NotFound("定时任务不存在")
+	}
+	if err := s.ensureJobHandlerAllowed(ctx, job.HandlerName); err != nil {
+		return err
 	}
 	go s.scheduler.Execute(*job)
 	return nil

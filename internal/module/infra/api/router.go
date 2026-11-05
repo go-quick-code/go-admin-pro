@@ -6,6 +6,8 @@ import "github.com/gin-gonic/gin"
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	file := rg.Group("/infra/file")
 	file.GET("/page", h.perm("infra:file:query"), h.PageFiles)
+	// 鉴权下载（PR #39 残余风险 A）：公开 /files 静态目录已关闭，文件只能经此读取。
+	file.GET("/:id/download", h.perm("infra:file:query"), h.DownloadFile)
 	file.POST("/upload", h.perm("infra:file:upload"), h.UploadFile)
 	file.DELETE("/:id", h.perm("infra:file:delete"), h.DeleteFile)
 

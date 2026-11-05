@@ -2,9 +2,14 @@ package tenant
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 )
+
+// ErrNoTenantContext 是 fail-closed 的哨兵错误：对租户表的操作缺少租户上下文。
+// 系统级操作（seed、定时任务等）应改用 tenant.Skip 显式跳过，而不是靠插件放行。
+var ErrNoTenantContext = errors.New("缺少租户上下文")
 
 // ContextKey 用于在 context 中携带租户 ID。
 type contextKey struct{}

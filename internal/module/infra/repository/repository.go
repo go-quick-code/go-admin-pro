@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/lautung/go-admin-pro/internal/module/infra/model"
+	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
 )
 
@@ -54,6 +55,31 @@ func (r *Repository) ListFiles(ctx context.Context, f FileFilter, offset, limit 
 func (r *Repository) FindFileByID(ctx context.Context, id int64) (*model.File, error) {
 	var f model.File
 	if err := r.db.WithContext(ctx).First(&f, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &f, nil
+}
+
+// ListFilesByBiz 按业务归属（biz_type + biz_id）列出文件，新上传的在前。
+// 租户条件由租户插件追加；调用方须已校验归属键合法。
+func (r *Repository) ListFilesByBiz(ctx context.Context, bizType string, bizID int64) ([]model.File, error) {
+	var list []model.File
+	if err := r.db.WithContext(ctx).
+		Where("biz_type = ? AND biz_id = ?", bizType, bizID).
+		Order("id DESC").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// FindFileByBiz 按 ID + 业务归属查文件：不属于该业务（或跨租户）时返回 nil。
+// 这是「文件归属校验」的唯一入口（删除前必须经过它），调用方据此返回 404。
+func (r *Repository) FindFileByBiz(ctx context.Context, id int64, bizType string, bizID int64) (*model.File, error) {
+	var f model.File
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND biz_type = ? AND biz_id = ?", id, bizType, bizID).
+		First(&f).Error; err != nil {
 		return nil, notFound(err)
 	}
 	return &f, nil
@@ -152,9 +178,10 @@ func (r *Repository) ListJobs(ctx context.Context, f JobFilter, offset, limit in
 }
 
 // ListEnabledJobs 跨租户加载所有启用任务，供调度器启动时使用。
+// 调度器启动没有租户上下文，这里显式 tenant.Skip（系统级路径）。
 func (r *Repository) ListEnabledJobs(ctx context.Context) ([]model.Job, error) {
 	var list []model.Job
-	err := r.db.WithContext(ctx).Where("status = ?", int8(0)).Find(&list).Error
+	err := tenant.Skip(r.db.WithContext(ctx)).Where("status = ?", int8(0)).Find(&list).Error
 	return list, err
 }
 

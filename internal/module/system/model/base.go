@@ -1,18 +1,13 @@
 package model
 
 import (
-	"time"
+	basemodel "github.com/lautung/go-admin-pro/internal/pkg/model"
 
-	"gorm.io/gorm"
+	datascope "github.com/lautung/go-admin-pro/internal/pkg/datascope"
 )
 
-// BaseEntity 是通用实体基类，包含主键、时间戳与软删除。
-type BaseEntity struct {
-	ID        int64          `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time      `json:"createTime"`
-	UpdatedAt time.Time      `json:"updateTime"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-}
+// BaseEntity 是统一实体底座，定义见 internal/pkg/model。
+type BaseEntity = basemodel.BaseEntity
 
 // 状态常量：0 启用 / 1 停用，与芋道保持一致。
 const (
@@ -27,10 +22,12 @@ const (
 	MenuTypeButton = 3
 )
 
-// 数据权限范围。
+// 数据权限范围：枚举收口在 internal/pkg/datascope（行级谓词引擎，CRM 复用），
+// 对齐芋道 1–5：1 全部 / 2 自定义部门 / 3 本部门 / 4 本部门及以下 / 5 仅本人。
 const (
-	DataScopeAll        = 1 // 全部数据
-	DataScopeDeptAndSub = 2 // 本部门及以下
-	DataScopeDept       = 3 // 本部门
-	DataScopeSelf       = 4 // 仅本人
+	DataScopeAll        = int8(datascope.ScopeAll)        // 全部数据
+	DataScopeCustom     = int8(datascope.ScopeCustom)     // 自定义部门
+	DataScopeDept       = int8(datascope.ScopeDept)       // 本部门
+	DataScopeDeptAndSub = int8(datascope.ScopeDeptAndSub) // 本部门及以下
+	DataScopeSelf       = int8(datascope.ScopeSelf)       // 仅本人
 )

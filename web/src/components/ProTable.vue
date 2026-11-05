@@ -416,7 +416,8 @@ watch(
 
 onMounted(load)
 
-defineExpose({ reload: load, openCreate })
+// query 暴露给父页面：Excel 导出需要复用当前列表筛选（issue #20）。
+defineExpose({ reload: load, openCreate, query })
 </script>
 
 <style scoped>

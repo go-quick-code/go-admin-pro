@@ -7,6 +7,13 @@ app:
   # 业务时区：IANA 时区名，默认 Asia/Shanghai，启动时用 LoadLocation 校验，
   # 非法值直接启动失败。Excel 导入的无时区日期与数据库 DSN 的 loc 都由它驱动。
   timezone: Asia/Shanghai
+  # CORS 白名单：Origin 精确匹配（含端口），非白名单来源不返回任何 CORS 头；
+  # 为空表示不放行任何跨域。下面是开发态默认值（Vite 开发服务器），
+  # 生产环境改成真实前端域名列表，或用 GAP_CORS_ALLOWED_ORIGINS（逗号分隔）覆盖。
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
 
 database:
   # DSN 的 loc 参数由 app.timezone 生成并覆盖（URL 编码，如 loc=Asia%2FShanghai），
@@ -15,8 +22,16 @@ database:
   max-idle-conns: 10
   max-open-conns: 100
   seed: true
+  # CRM 演示数据（销售角色/账号、产品、客户、商机、合同、回款与仪表盘时间分布）。
+  # 默认关闭：演示数据只在显式开启时写入（GAP_SEED_DEMO=true 或 make run-demo），
+  # 避免生产/真实环境被演示账号与示例业务数据污染（PR #39 审查 P2）。
+  # 开启后仅在 crm_customer 为空时写入；集成测试基座始终显式关闭。
+  seed-demo: false
 
 jwt:
+  # 生产环境（app.env 不是 dev/test）必须改成唯一强密钥，或用 GAP_JWT_SECRET 覆盖：
+  # 空值、go-admin-pro-dev-secret 与下面这个示例值都在已知默认密钥清单里，
+  # 启动校验会直接报错拒绝启动（PR #39 审查 P2）。dev/test 保留默认值便于本地开发。
   secret: change-me-in-production-9f8a7b6c5d4e3f2a
   expire: 24h
   issuer: go-admin-pro
@@ -33,8 +48,9 @@ security:
 
 storage:
   local:
+    # 上传文件只落磁盘，不挂公开静态目录；读取统一走鉴权下载端点
+    # GET /infra/file/:id/download（PR #39 残余风险 A）。
     base-path: ./uploads
-    public-prefix: /files
 
 tenant:
   enabled: true

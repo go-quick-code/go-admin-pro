@@ -86,6 +86,9 @@ func (r *Repository) DeleteRole(ctx context.Context, id int64) error {
 		if err := tx.Where("role_id = ?", id).Delete(&model.RoleMenu{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("role_id = ?", id).Delete(&model.RoleDept{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&model.Role{}, id).Error
 	})
 }
@@ -113,6 +116,29 @@ func (r *Repository) ReplaceRoleMenus(ctx context.Context, roleID int64, menuIDs
 		rows := make([]model.RoleMenu, 0, len(menuIDs))
 		for _, menuID := range menuIDs {
 			rows = append(rows, model.RoleMenu{RoleID: roleID, MenuID: menuID})
+		}
+		return tx.Create(&rows).Error
+	})
+}
+
+func (r *Repository) GetRoleDeptIDs(ctx context.Context, roleID int64) ([]int64, error) {
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.RoleDept{}).Where("role_id = ?", roleID).Pluck("dept_id", &ids).Error
+	return ids, err
+}
+
+// ReplaceRoleDepts 整体替换角色的自定义部门集合（删除 + 重建）。
+func (r *Repository) ReplaceRoleDepts(ctx context.Context, roleID int64, deptIDs []int64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("role_id = ?", roleID).Delete(&model.RoleDept{}).Error; err != nil {
+			return err
+		}
+		if len(deptIDs) == 0 {
+			return nil
+		}
+		rows := make([]model.RoleDept, 0, len(deptIDs))
+		for _, deptID := range deptIDs {
+			rows = append(rows, model.RoleDept{RoleID: roleID, DeptID: deptID})
 		}
 		return tx.Create(&rows).Error
 	})

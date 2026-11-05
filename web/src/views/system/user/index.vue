@@ -68,6 +68,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
+import { useUserStore } from '@/stores/user'
 import { formatTime, statusOptions } from '@/utils/format'
 import {
   pageUsers,
@@ -82,6 +83,7 @@ import {
   listSimplePosts,
 } from '@/api/system'
 
+const userStore = useUserStore()
 const tableRef = ref()
 const deptTree = ref<any[]>([])
 const roles = ref<any[]>([])
@@ -161,7 +163,13 @@ function clearDept() {
 }
 
 onMounted(async () => {
-  const [depts, roleList, postList] = await Promise.all([treeDepts(), listSimpleRoles(), listSimplePosts()])
+  // 简表接口已按权限码收口：无权限时不发请求，下拉保持为空，
+  // 避免自定义角色进入用户页时看到 403 报错（普通角色由 seed 绑定三条简表权限）。
+  const [depts, roleList, postList] = await Promise.all([
+    treeDepts(),
+    userStore.hasPerm('system:role:simple-list') ? listSimpleRoles() : Promise.resolve([]),
+    userStore.hasPerm('system:post:simple-list') ? listSimplePosts() : Promise.resolve([]),
+  ])
   deptTree.value = depts
   roles.value = roleList
   posts.value = postList

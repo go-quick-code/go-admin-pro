@@ -42,6 +42,12 @@ func (h *Handler) Auth() gin.HandlerFunc {
 			response.Abort(c, xerr.Unauthorized("登录状态已失效，请重新登录"))
 			return
 		}
+		// fail-closed：没有合法租户的 token 无法提供租户上下文，
+		// 直接拒绝，避免带着空租户进入业务链路。
+		if claims.TenantID <= 0 {
+			response.Abort(c, xerr.Unauthorized("登录状态已失效，请重新登录"))
+			return
+		}
 
 		ctx := tenant.WithTenantID(c.Request.Context(), claims.TenantID)
 		ctx = authn.With(ctx, authn.Principal{
@@ -60,6 +66,24 @@ func (h *Handler) Auth() gin.HandlerFunc {
 		c.Set(ContextTenantID, claims.TenantID)
 		c.Set(ContextUsername, user.Username)
 		c.Set(ContextUser, user)
+		c.Next()
+	}
+}
+
+// PlatformTenantID 是平台租户（内置管理后台）的 ID。
+// 租户 CRUD 只允许平台租户调用：租户管理员在自己租户内是 super_admin（"*"），
+// 仅靠权限码无法区分平台与业务租户（PR #39 残余风险 B）。
+const PlatformTenantID int64 = tenant.DefaultID
+
+// RequirePlatformTenant 限制接口只能由平台租户调用，非平台租户返回 403。
+// super_admin 在本租户内的 system:* 管理权限保持不动，本中间件只收口
+// /system/tenant/*（跨租户的平台级管理面）。
+func (h *Handler) RequirePlatformTenant() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if tenant.ID(c.Request.Context()) != PlatformTenantID {
+			response.Abort(c, xerr.Forbidden("仅平台租户可管理租户"))
+			return
+		}
 		c.Next()
 	}
 }

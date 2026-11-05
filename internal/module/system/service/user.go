@@ -25,7 +25,7 @@ func (s *Service) GetActiveUser(ctx context.Context, id int64) (*model.User, err
 	return user, nil
 }
 
-// ListUsers 分页查询用户，并应用数据权限。
+// ListUsers 分页查询用户，并按数据范围谓词过滤（行级权限引擎，见 internal/pkg/datascope）。
 func (s *Service) ListUsers(ctx context.Context, req *dto.UserPageReq) ([]model.User, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
@@ -38,14 +38,21 @@ func (s *Service) ListUsers(ctx context.Context, req *dto.UserPageReq) ([]model.
 		DeptID:   req.DeptID,
 	}
 
-	deptIDs, onlySelf, err := s.UserCenter(ctx, CurrentUserID(ctx))
+	scope, err := s.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
 		return nil, 0, err
 	}
-	if onlySelf {
-		filter.OnlyUserID = CurrentUserID(ctx)
-	} else {
-		filter.DeptIDs = deptIDs
+	if !scope.All {
+		if scope.IncludeSelf {
+			filter.SelfUserID = scope.UserID
+		}
+		switch {
+		case len(scope.DeptIDs) > 0:
+			filter.DeptIDs = scope.DeptIDs
+		case !scope.IncludeSelf:
+			// 无可见部门且不含本人：谓词恒假（fail-closed，绝不回退全部）。
+			filter.DeptIDs = []int64{}
+		}
 	}
 
 	list, total, err := s.repo.ListUsers(ctx, filter, page.Offset(), page.PageSize)
@@ -85,7 +92,8 @@ func (s *Service) GetUser(ctx context.Context, id int64) (*model.User, error) {
 	return user, nil
 }
 
-// CreateUser 创建用户。
+// CreateUser 创建用户。用户行、角色绑定、岗位绑定在同一事务里落库，
+// 任一步失败整体回滚，不会留下没有角色/岗位的半套账号。
 func (s *Service) CreateUser(ctx context.Context, req *dto.UserCreateReq) error {
 	total, err := s.repo.CountUserByUsername(ctx, req.Username, 0)
 	if err != nil {
@@ -111,13 +119,15 @@ func (s *Service) CreateUser(ctx context.Context, req *dto.UserCreateReq) error 
 		Status:   req.Status,
 		Remark:   req.Remark,
 	}
-	if err := s.repo.CreateUser(ctx, user); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserPosts(ctx, user.ID, req.PostIDs); err != nil {
+	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.CreateUser(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
+			return err
+		}
+		return tx.ReplaceUserPosts(ctx, user.ID, req.PostIDs)
+	}); err != nil {
 		return err
 	}
 	s.ClearPermissionCache(user.ID)
@@ -148,13 +158,16 @@ func (s *Service) UpdateUser(ctx context.Context, req *dto.UserUpdateReq) error 
 		}
 		user.Password = hash
 	}
-	if err := s.repo.SaveUser(ctx, user); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
-		return err
-	}
-	if err := s.repo.ReplaceUserPosts(ctx, user.ID, req.PostIDs); err != nil {
+	// 用户资料与角色/岗位绑定在同一事务里落库，绑定失败时资料修改一并回滚。
+	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.SaveUser(ctx, user); err != nil {
+			return err
+		}
+		if err := tx.ReplaceUserRoles(ctx, user.ID, req.RoleIDs); err != nil {
+			return err
+		}
+		return tx.ReplaceUserPosts(ctx, user.ID, req.PostIDs)
+	}); err != nil {
 		return err
 	}
 	s.ClearPermissionCache(user.ID)
