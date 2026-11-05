@@ -234,6 +234,17 @@ func seedMenus(db *gorm.DB) error {
 		btn(4123, 4120, "回款修改", "crm:receivable:update", 3),
 		btn(4124, 4120, "回款删除", "crm:receivable:delete", 4),
 	}
+	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
+	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
+	// 页面与查询按钮共用权限码 crm:dashboard:view（API 路由同码）。
+	// 菜单名与系统首页同为「仪表盘」，组件名单独设为 CrmDashboard：
+	// 前端动态路由以 componentName 作 route name，重名会让 Vue Router 告警并互相覆盖。
+	crmDashboard := menu(4140, 400, "仪表盘", "dashboard", "crm/dashboard/index", "crm:dashboard:view", "DataLine", 0)
+	crmDashboard.ComponentName = "CrmDashboard"
+	menus = append(menus,
+		crmDashboard,
+		btn(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
+	)
 	if err := db.Create(&menus).Error; err != nil {
 		return err
 	}
