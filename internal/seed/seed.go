@@ -270,6 +270,14 @@ func seedMenus(db *gorm.DB) error {
 		// OA 业务记录的共享可见范围见 oa/service.VisibilityScopeOf（spec §4.6）。
 		dir(500, 0, "OA", "/oa", "Calendar", 50),
 
+		// 工作日历（issue #50）：520 段（协调台账分配），按钮段 5201+（菜单ID×10+n，
+		// grep 去重确认 520/5201–5203 未被占用）。查询码挂菜单（月视图入口），
+		// 单日/批量/恢复默认三个维护动作各挂独立按钮码。
+		menu(520, 500, "工作日历", "workday", "oa/workday/index", "oa:workday:query", "AlarmClock", 1),
+		btn(5201, 520, "单日设置", "oa:workday:set", 1),
+		btn(5202, 520, "批量设置", "oa:workday:batch", 2),
+		btn(5203, 520, "恢复默认", "oa:workday:delete", 3),
+
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。

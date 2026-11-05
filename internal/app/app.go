@@ -24,6 +24,7 @@ import (
 	notifyrepo "github.com/go-quick-code/go-admin-pro/internal/module/notify/repository"
 	notifyservice "github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
+	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
@@ -148,10 +149,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
 
-	// OA 模块（issue #43）：可见范围判定复用 system 的权限/部门解析
-	//（oa/service.SystemGateway 直接受 *systemservice.Service 满足）；
-	// 业务表与领域路由由后续 OA 工单按 docs/oa-mvp-spec.md §2 落地。
-	oaSvc := oaservice.New(sysSvc)
+	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
+	// 判定复用 system 的权限/部门解析（oa/service.SystemGateway 直接受
+	// *systemservice.Service 满足）；其余领域路由由后续 OA 工单按
+	// docs/oa-mvp-spec.md §2 落地。
+	oaSvc := oaservice.New(sysSvc, repository.New(db))
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
