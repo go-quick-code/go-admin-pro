@@ -163,3 +163,29 @@ export function deleteContract(id: number) {
 export function changeContractStatus(id: number, status: number, reason = '') {
   return request.put('/crm/contract/status', { id, status, reason }) as Promise<any>
 }
+
+// ---------- 回款计划 + 回款记录（issue #18：可见性 join 合同套用合同数据范围） ----------
+// 金额一律十进制字符串（如 "3000.00"）。计划状态不落库：列表返回派生状态
+// status（1 待回款 / 2 部分回款 / 3 已回款 / 4 逾期）、statusName 与 overdue。
+// 计划不单独编号（periodNo 标识期次）；记录编号 HK+yyyyMMdd+4 位序号由后端发放。
+export function pageReceivablePlans(params: any) {
+  return request.get('/crm/receivable/plan/page', { params }) as Promise<any>
+}
+export function createReceivablePlan(data: any) {
+  return request.post('/crm/receivable/plan', data) as Promise<any>
+}
+export function updateReceivablePlan(data: any) {
+  return request.put('/crm/receivable/plan', data) as Promise<any>
+}
+export function deleteReceivablePlan(id: number) {
+  return request.delete(`/crm/receivable/plan/${id}`) as Promise<any>
+}
+export function pageReceivableRecords(params: any) {
+  return request.get('/crm/receivable/record/page', { params }) as Promise<any>
+}
+export function createReceivableRecord(data: any) {
+  return request.post('/crm/receivable/record', data) as Promise<any>
+}
+export function deleteReceivableRecord(id: number) {
+  return request.delete(`/crm/receivable/record/${id}`) as Promise<any>
+}

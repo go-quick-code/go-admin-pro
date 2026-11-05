@@ -224,6 +224,15 @@ func seedMenus(db *gorm.DB) error {
 		btn(4103, 4100, "合同修改", "crm:contract:update", 3),
 		btn(4104, 4100, "合同删除", "crm:contract:delete", 4),
 		btn(4105, 4100, "合同审批", "crm:contract:approve", 5),
+		// 回款计划 + 回款记录（issue #18）：菜单 ID 从 4120 起（4060–4070 产品、
+		// 4080–4085 商机、4100–4105 合同已占用，grep 去重确认）。
+		// 计划与记录共用一个页面（记录以每行「记录」抽屉录入），按钮码共用
+		// crm:receivable:query/create/update/delete。
+		menu(4120, 400, "回款管理", "receivable", "crm/receivable/index", "crm:receivable:query", "Money", 6),
+		btn(4121, 4120, "回款查询", "crm:receivable:query", 1),
+		btn(4122, 4120, "回款新增", "crm:receivable:create", 2),
+		btn(4123, 4120, "回款修改", "crm:receivable:update", 3),
+		btn(4124, 4120, "回款删除", "crm:receivable:delete", 4),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err
