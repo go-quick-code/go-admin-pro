@@ -251,6 +251,44 @@ func (r *Repository) ListDeptIDsByLeader(ctx context.Context, leaderUserID int64
 	return ids, err
 }
 
+// ---------- bpm 审批人候选池解析（issue #46，spec #42 §4.2）----------
+
+// ListActiveUserIDsByRole 返回持有指定角色且自身启用的用户 ID 集合。
+// bpm 候选池物化用：角色与用户都要启用，停用用户不进候选池（spec §4.2）。
+// 主表 system_user 经租户插件限定租户；跨租户的角色绑定不可能命中本租户用户。
+func (r *Repository) ListActiveUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error) {
+	if roleID <= 0 {
+		return nil, nil
+	}
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Joins("JOIN system_user_role ur ON ur.user_id = system_user.id").
+		Joins("JOIN system_role ro ON ro.id = ur.role_id AND ro.status = ? AND ro.deleted_at IS NULL", model.StatusEnable).
+		Where("ur.role_id = ?", roleID).
+		Where("system_user.status = ?", model.StatusEnable).
+		Pluck("system_user.id", &ids).Error
+	return ids, err
+}
+
+// ListActiveUserIDsByPermission 返回持有指定权限码且自身启用的用户 ID 集合：
+// 用户经启用角色绑定到持有该权限码的启用菜单，或角色为内置超管
+// （super_admin 持全部权限码，与 service.Permissions 的 "*" 口径一致）。
+func (r *Repository) ListActiveUserIDsByPermission(ctx context.Context, permission string) ([]int64, error) {
+	if permission == "" {
+		return nil, nil
+	}
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Joins("JOIN system_user_role ur ON ur.user_id = system_user.id").
+		Joins("JOIN system_role ro ON ro.id = ur.role_id AND ro.status = ? AND ro.deleted_at IS NULL", model.StatusEnable).
+		Joins("LEFT JOIN system_role_menu rm ON rm.role_id = ro.id").
+		Joins("LEFT JOIN system_menu m ON m.id = rm.menu_id AND m.status = ? AND m.deleted_at IS NULL AND m.permission = ?", model.StatusEnable, permission).
+		Where("system_user.status = ?", model.StatusEnable).
+		Where("m.id IS NOT NULL OR ro.code = ?", "super_admin").
+		Pluck("system_user.id", &ids).Error
+	return ids, err
+}
+
 // ---------- 岗位 ----------
 
 type PostFilter struct {

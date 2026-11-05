@@ -19,6 +19,10 @@ type Repository struct {
 // New 创建 bpm Repository。
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
+// DB 返回底层句柄（事务内的 *gorm.DB）：BusinessHandler 回调（spec §4.4
+// 入参即事务）与 notify seam 需要原生事务句柄，业务仓储操作仍走本仓储方法。
+func (r *Repository) DB() *gorm.DB { return r.db }
+
 func notFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil
