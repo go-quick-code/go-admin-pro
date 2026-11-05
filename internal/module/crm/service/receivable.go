@@ -182,19 +182,39 @@ func (s *Service) UpdateReceivablePlan(ctx context.Context, req *dto.ReceivableP
 }
 
 // DeleteReceivablePlan 删除回款计划：存在回款记录时禁止删除（spec §4.5）。
+//
+// 并发保护（PR #39 审查 P1）：与登记回款同一锁序（先合同、后计划），计数与
+// 软删在同一事务内完成——并发登记在合同/计划行锁上排队，不会删出「已删计划
+// + 新增回款记录」。
 func (s *Service) DeleteReceivablePlan(ctx context.Context, id int64) error {
 	plan, _, err := s.findVisibleReceivablePlan(ctx, id)
 	if err != nil {
 		return err
 	}
-	count, err := s.repo.CountReceivableRecordsByPlan(ctx, plan.ID)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return xerr.BadRequest("回款计划存在回款记录，禁止删除：请先删除相关回款记录")
-	}
-	return s.repo.DeleteReceivablePlan(ctx, plan.ID)
+	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		contract, err := tx.LockContractByID(ctx, plan.ContractID)
+		if err != nil {
+			return err
+		}
+		if contract == nil {
+			return xerr.NotFound("回款计划不存在")
+		}
+		locked, err := tx.LockReceivablePlanByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("回款计划不存在")
+		}
+		count, err := tx.CountReceivableRecordsByPlan(ctx, locked.ID)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return xerr.BadRequest("回款计划存在回款记录，禁止删除：请先删除相关回款记录")
+		}
+		return tx.DeleteReceivablePlan(ctx, locked.ID)
+	})
 }
 
 // ListReceivableRecords 分页查询回款记录（合同/计划筛选 + 数据范围）。
@@ -222,11 +242,13 @@ func (s *Service) ListReceivableRecords(ctx context.Context, req *dto.Receivable
 // CreateReceivableRecord 登记回款记录：计划须可见、父合同未作废（PR #39 审查
 // P2），金额不变量按计划金额校验，HK 编号与记录落库同事务（失败回滚、不消耗序号）。
 //
-// 并发保护（PR #39 审查 P1）：事务先对计划行 SELECT ... FOR UPDATE 加锁，再顺序
-// SUM 记录、校验、取号、插入。同一计划的并发登记在锁上排队，后到者看到先到者
-// 已提交的记录，不会各自按旧合计通过校验造成「记录合计 > 计划金额」。
+// 并发保护（PR #39 审查 P1）：统一「先合同、后计划」锁序——事务内先对父合同行
+// SELECT ... FOR UPDATE 并复核未作废，再锁计划行，然后 SUM/校验/取号/插入。
+// 合同作废路径同样先锁合同行，因此「作废守卫计数通过 → 记录插入 → 合同置作废」
+// 的旧竞态被串行化：两种顺序必有一方失败。
 func (s *Service) CreateReceivableRecord(ctx context.Context, req *dto.ReceivableRecordCreateReq) (*model.ReceivableRecord, error) {
-	if _, _, err := s.findVisibleReceivablePlan(ctx, req.PlanID); err != nil {
+	visiblePlan, _, err := s.findVisibleReceivablePlan(ctx, req.PlanID)
+	if err != nil {
 		return nil, err
 	}
 	receiptDate, err := s.requireReceivableDate("到账日期", req.ReceiptDate)
@@ -245,22 +267,24 @@ func (s *Service) CreateReceivableRecord(ctx context.Context, req *dto.Receivabl
 	var plan *model.ReceivablePlan
 	var contract *model.Contract
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		lockedPlan, err := tx.LockReceivablePlanByID(ctx, req.PlanID)
-		if err != nil {
-			return err
-		}
-		if lockedPlan == nil {
-			return xerr.NotFound("回款计划不存在")
-		}
-		lockedContract, err := tx.FindContractByID(ctx, lockedPlan.ContractID)
+		// 锁序固定：合同在前、计划在后（与作废/删除合同、计划创建/修改一致）。
+		lockedContract, err := tx.LockContractByID(ctx, visiblePlan.ContractID)
 		if err != nil {
 			return err
 		}
 		if lockedContract == nil {
 			return xerr.NotFound("回款计划不存在")
 		}
+		// 锁内复核：预检之后合同可能已被并发作废（守卫在锁内计数，见作废路径）。
 		if err := ensureContractAcceptsReceivable(lockedContract, "登记回款记录"); err != nil {
 			return err
+		}
+		lockedPlan, err := tx.LockReceivablePlanByID(ctx, req.PlanID)
+		if err != nil {
+			return err
+		}
+		if lockedPlan == nil || lockedPlan.ContractID != lockedContract.ID {
+			return xerr.NotFound("回款计划不存在")
 		}
 		otherTotal, err := tx.SumReceivableRecordsByPlan(ctx, lockedPlan.ID)
 		if err != nil {

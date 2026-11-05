@@ -180,8 +180,10 @@ func (h *Handler) GetJob(c *gin.Context) {
 	response.OK(c, job)
 }
 
+// ListJobHandlers 返回当前租户可用的处理器：系统级处理器只对平台租户展示
+// （PR #39 审查 P0，客户端不能据此发现跨租户动作）。
 func (h *Handler) ListJobHandlers(c *gin.Context) {
-	response.OK(c, h.svc.Scheduler().Handlers())
+	response.OK(c, h.svc.ListJobHandlers(c.Request.Context()))
 }
 
 func (h *Handler) CreateJob(c *gin.Context) {

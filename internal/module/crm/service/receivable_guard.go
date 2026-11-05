@@ -27,6 +27,21 @@ func (g ReceivableVoidGuard) CanVoidContract(ctx context.Context, contractID int
 	if err != nil {
 		return err
 	}
+	return rejectVoidWithRecords(count)
+}
+
+// CanVoidContractTx 实现 TxVoidContractGuard：回款记录计数与合同作废/删除共用
+// 同一事务（调用方已锁定合同行），PR #39 审查 P1 的锁内复核口径。
+func (g ReceivableVoidGuard) CanVoidContractTx(ctx context.Context, tx *repository.Repository, contractID int64) error {
+	count, err := tx.CountReceivableRecordsByContract(ctx, contractID)
+	if err != nil {
+		return err
+	}
+	return rejectVoidWithRecords(count)
+}
+
+// rejectVoidWithRecords 把「存在回款记录」翻译成用户可读 400（作废/删除共用）。
+func rejectVoidWithRecords(count int64) error {
 	if count > 0 {
 		return xerr.BadRequest("合同存在回款记录，禁止作废或删除：请先删除相关回款记录")
 	}
