@@ -188,3 +188,70 @@ func TestMoneyAddSub(t *testing.T) {
 		}
 	})
 }
+
+// TestMoneyMul 金额乘数量（issue #15 行项目金额 = 数量 × 单价；#16 合同行项目同规则复用）：
+// 精确十进制运算、符号语义正确、int64 与 decimal(12,2) 双重越界拒绝。
+func TestMoneyMul(t *testing.T) {
+	parse := func(t *testing.T, s string) money.Money {
+		t.Helper()
+		m, err := money.ParseMoney(s)
+		if err != nil {
+			t.Fatalf("ParseMoney(%q): %v", s, err)
+		}
+		return m
+	}
+
+	t.Run("常规乘法", func(t *testing.T) {
+		cases := []struct {
+			price string
+			qty   int64
+			want  string
+		}{
+			{"1234.56", 3, "3703.68"},
+			{"0.01", 1, "0.01"},
+			{"99.99", 100, "9999.00"},
+			{"0.00", 5, "0.00"},
+			{"12.34", 0, "0.00"},
+		}
+		for _, tc := range cases {
+			got, err := parse(t, tc.price).Mul(tc.qty)
+			if err != nil {
+				t.Fatalf("Mul(%s, %d) 返回错误：%v", tc.price, tc.qty, err)
+			}
+			if got.String() != tc.want {
+				t.Fatalf("Mul(%s, %d) = %q, 期望 %q", tc.price, tc.qty, got.String(), tc.want)
+			}
+		}
+	})
+
+	t.Run("负数量语义正确（校验正整数是 service 层职责）", func(t *testing.T) {
+		got, err := parse(t, "12.50").Mul(-2)
+		if err != nil {
+			t.Fatalf("Mul 返回错误：%v", err)
+		}
+		if got.String() != "-25.00" {
+			t.Fatalf("Mul(12.50, -2) = %q, 期望 -25.00", got.String())
+		}
+	})
+
+	t.Run("decimal 越界拒绝", func(t *testing.T) {
+		got, err := parse(t, "9999999999.99").Mul(100000)
+		if !errors.Is(err, money.ErrOutOfRange) {
+			t.Fatalf("乘积超 decimal(12,2) 应返回 ErrOutOfRange, 得到 %v", err)
+		}
+		if got != (money.Money{}) {
+			t.Fatalf("失败时应返回零值, 得到 %v", got)
+		}
+	})
+
+	t.Run("int64 溢出拒绝", func(t *testing.T) {
+		// 999999999999 分 × 10^12 分已超 int64；数学上必溢出，不得环绕。
+		got, err := money.FromCents(999999999999).Mul(1000000000000)
+		if !errors.Is(err, money.ErrOutOfRange) {
+			t.Fatalf("int64 溢出应返回 ErrOutOfRange, 得到 %v", err)
+		}
+		if got != (money.Money{}) {
+			t.Fatalf("失败时应返回零值, 得到 %v", got)
+		}
+	})
+}
