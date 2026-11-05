@@ -34,6 +34,7 @@
           </el-breadcrumb>
         </div>
         <div class="navbar-right">
+          <NotifyBell />
           <el-tag size="small" type="info" effect="plain">租户 {{ userStore.userInfo?.tenantId || 1 }}</el-tag>
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-entry">
@@ -65,6 +66,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import NotifyBell from '@/components/NotifyBell.vue'
 import SidebarItem from './SidebarItem.vue'
 
 const route = useRoute()

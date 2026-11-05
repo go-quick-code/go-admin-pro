@@ -57,4 +57,8 @@ var TenantTables = []string{
 	"bpm_process_instance",
 	"bpm_task",
 	"bpm_approval_record",
+
+	// 站内通知（issue #45）：通知按接收人物化，严格本人 + 租户隔离
+	//（docs/oa-mvp-spec.md §4.13）；写入/查询的租户条件由插件自动追加。
+	"notify_message",
 }
