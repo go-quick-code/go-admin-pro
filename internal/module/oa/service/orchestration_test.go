@@ -124,7 +124,7 @@ func TestVisibilityScopeOfOrchestration(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := New(tc.gateway)
+			svc := New(tc.gateway, nil)
 			got, err := svc.VisibilityScopeOf(tc.ctx, tc.resource)
 			if tc.wantErr {
 				if err == nil {
@@ -152,7 +152,7 @@ func TestVisibilityScopeOfOrchestration(t *testing.T) {
 // 负责人路径才逐部门解析子树（取数次数可预算）。
 func TestVisibilityScopeOfManageSkipsDeptQueries(t *testing.T) {
 	gw := &fakeSystemGateway{hasManage: map[string]bool{"oa:leave:manage": true}}
-	svc := New(gw)
+	svc := New(gw, nil)
 	if _, err := svc.VisibilityScopeOf(userContext(), "leave"); err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestVisibilityScopeOfManageSkipsDeptQueries(t *testing.T) {
 	}
 
 	gw2 := &fakeSystemGateway{ledDepts: map[int64][]int64{7: {102, 103}}}
-	svc2 := New(gw2)
+	svc2 := New(gw2, nil)
 	if _, err := svc2.VisibilityScopeOf(userContext(), "leave"); err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}
