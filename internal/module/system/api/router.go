@@ -80,8 +80,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	dictData.PUT("", h.RequirePermission("system:dict:update"), h.UpdateDictData)
 	dictData.DELETE("/:id", h.RequirePermission("system:dict:delete"), h.DeleteDictData)
 
-	// 租户
+	// 租户：仅平台租户可用（PR #39 残余风险 B）。中间件必须在所有路由前注册。
 	tenantGroup := rg.Group("/system/tenant")
+	tenantGroup.Use(h.RequirePlatformTenant())
 	tenantGroup.GET("/page", h.RequirePermission("system:tenant:query"), h.PageTenants)
 	tenantGroup.GET("/:id", h.RequirePermission("system:tenant:query"), h.GetTenant)
 	tenantGroup.POST("", h.RequirePermission("system:tenant:create"), h.CreateTenant)
