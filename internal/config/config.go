@@ -101,9 +101,10 @@ type StorageConfig struct {
 	Local LocalStorageConfig `mapstructure:"local"`
 }
 
+// LocalStorageConfig 只保留存储根目录：上传文件不再有公开访问前缀，
+// 读取统一走鉴权下载端点（PR #39 残余风险 A）。
 type LocalStorageConfig struct {
-	BasePath     string `mapstructure:"base-path"`
-	PublicPrefix string `mapstructure:"public-prefix"`
+	BasePath string `mapstructure:"base-path"`
 }
 
 type TenantConfig struct {
@@ -220,9 +221,6 @@ func (c *Config) applyDefaults() {
 	if c.Storage.Local.BasePath == "" {
 		c.Storage.Local.BasePath = "./uploads"
 	}
-	if c.Storage.Local.PublicPrefix == "" {
-		c.Storage.Local.PublicPrefix = "/files"
-	}
 	if c.Tenant.DefaultID == 0 {
 		c.Tenant.DefaultID = 1
 	}
@@ -274,7 +272,6 @@ func (c *Config) applyEnv() {
 
 func (c *Config) normalize() {
 	c.App.APIPrefix = "/" + strings.Trim(c.App.APIPrefix, "/")
-	c.Storage.Local.PublicPrefix = "/" + strings.Trim(c.Storage.Local.PublicPrefix, "/")
 	if c.JWT.Secret == "" {
 		c.JWT.Secret = DefaultDevJWTSecret
 	}

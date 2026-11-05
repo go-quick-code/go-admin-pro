@@ -24,7 +24,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 用户
 	user := rg.Group("/system/user")
 	user.GET("/page", h.RequirePermission("system:user:query"), h.PageUsers)
-	user.GET("/simple-list", h.ListSimpleUsers)
+	user.GET("/simple-list", h.RequirePermission("system:user:simple-list"), h.ListSimpleUsers)
 	user.GET("/:id", h.RequirePermission("system:user:query"), h.GetUser)
 	user.POST("", h.RequirePermission("system:user:create"), h.CreateUser)
 	user.PUT("", h.RequirePermission("system:user:update"), h.UpdateUser)
@@ -35,7 +35,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 角色
 	role := rg.Group("/system/role")
 	role.GET("/page", h.RequirePermission("system:role:query"), h.PageRoles)
-	role.GET("/simple-list", h.ListSimpleRoles)
+	role.GET("/simple-list", h.RequirePermission("system:role:simple-list"), h.ListSimpleRoles)
 	role.GET("/:id", h.RequirePermission("system:role:query"), h.GetRole)
 	role.POST("", h.RequirePermission("system:role:create"), h.CreateRole)
 	role.PUT("", h.RequirePermission("system:role:update"), h.UpdateRole)
@@ -60,7 +60,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 岗位
 	post := rg.Group("/system/post")
 	post.GET("/page", h.RequirePermission("system:post:query"), h.PagePosts)
-	post.GET("/simple-list", h.ListSimplePosts)
+	post.GET("/simple-list", h.RequirePermission("system:post:simple-list"), h.ListSimplePosts)
 	post.POST("", h.RequirePermission("system:post:create"), h.CreatePost)
 	post.PUT("", h.RequirePermission("system:post:update"), h.UpdatePost)
 	post.DELETE("/:id", h.RequirePermission("system:post:delete"), h.DeletePost)
@@ -80,8 +80,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	dictData.PUT("", h.RequirePermission("system:dict:update"), h.UpdateDictData)
 	dictData.DELETE("/:id", h.RequirePermission("system:dict:delete"), h.DeleteDictData)
 
-	// 租户
+	// 租户：仅平台租户可用（PR #39 残余风险 B）。中间件必须在所有路由前注册。
 	tenantGroup := rg.Group("/system/tenant")
+	tenantGroup.Use(h.RequirePlatformTenant())
 	tenantGroup.GET("/page", h.RequirePermission("system:tenant:query"), h.PageTenants)
 	tenantGroup.GET("/:id", h.RequirePermission("system:tenant:query"), h.GetTenant)
 	tenantGroup.POST("", h.RequirePermission("system:tenant:create"), h.CreateTenant)

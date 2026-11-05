@@ -141,7 +141,8 @@ pnpm install
 pnpm dev
 ```
 
-访问 `http://localhost:5173`，Vite 会把 `/admin-api` 与 `/files` 代理到 `http://127.0.0.1:8080`。
+访问 `http://localhost:5173`，Vite 会把 `/admin-api` 代理到 `http://127.0.0.1:8080`。
+上传文件不再有公开静态目录，读取统一走鉴权下载端点 `GET /admin-api/infra/file/:id/download`。
 
 ### 4. 生产构建
 
@@ -388,8 +389,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
 | `security.login.max-fail` / `lock-duration` | 登录失败锁定策略 |
-| `storage.local.base-path` | 本地文件存储根目录 |
-| `storage.local.public-prefix` | 文件访问前缀，默认 `/files` |
+| `storage.local.base-path` | 本地文件存储根目录（文件不公开托管，读取走鉴权下载端点） |
 | `tenant.enabled` | 是否启用多租户插件 |
 | `logger.level` / `format` | 日志级别与格式（text / json） |
 

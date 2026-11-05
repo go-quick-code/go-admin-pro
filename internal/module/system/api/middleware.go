@@ -70,6 +70,24 @@ func (h *Handler) Auth() gin.HandlerFunc {
 	}
 }
 
+// PlatformTenantID 是平台租户（内置管理后台）的 ID。
+// 租户 CRUD 只允许平台租户调用：租户管理员在自己租户内是 super_admin（"*"），
+// 仅靠权限码无法区分平台与业务租户（PR #39 残余风险 B）。
+const PlatformTenantID int64 = tenant.DefaultID
+
+// RequirePlatformTenant 限制接口只能由平台租户调用，非平台租户返回 403。
+// super_admin 在本租户内的 system:* 管理权限保持不动，本中间件只收口
+// /system/tenant/*（跨租户的平台级管理面）。
+func (h *Handler) RequirePlatformTenant() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if tenant.ID(c.Request.Context()) != PlatformTenantID {
+			response.Abort(c, xerr.Forbidden("仅平台租户可管理租户"))
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequirePermission 校验接口权限码。
 func (h *Handler) RequirePermission(code string) gin.HandlerFunc {
 	return func(c *gin.Context) {

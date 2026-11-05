@@ -50,8 +50,8 @@ func newFileTestService(t *testing.T) (*service.Service, *config.Config) {
 	}
 
 	cfg := &config.Config{}
+	cfg.App.APIPrefix = "/admin-api"
 	cfg.Storage.Local.BasePath = t.TempDir()
-	cfg.Storage.Local.PublicPrefix = "/files"
 	return service.New(repository.New(db), cfg, nil), cfg
 }
 

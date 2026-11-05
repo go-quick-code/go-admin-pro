@@ -2,7 +2,11 @@ package api
 
 import (
 	"errors"
+	"fmt"
+	"mime"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/config"
@@ -73,6 +77,74 @@ func (h *Handler) UploadFile(c *gin.Context) {
 		return
 	}
 	response.OK(c, file)
+}
+
+// DownloadFile 鉴权下载文件（PR #39 残余风险 A）：公开 /files 静态目录关闭后，
+// 这是上传文件的唯一读取入口，权限码 infra:file:query。文件按租户过滤，
+// 跨租户/不存在/磁盘内容缺失统一 404；Content-Disposition 使用安全 ASCII
+// 回退名 + RFC 5987 中文名，避免头注入与文件名乱码。
+func (h *Handler) DownloadFile(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	f, fh, err := h.svc.OpenFile(c.Request.Context(), id)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	defer fh.Close()
+
+	// 以磁盘实际大小为准：记录里的 size 与文件内容不一致时不让 Content-Length 失真。
+	size := f.Size
+	if info, statErr := fh.Stat(); statErr == nil {
+		size = info.Size()
+	}
+	c.Header("Content-Disposition", attachmentDisposition(f.Name, f.ID))
+	c.DataFromReader(http.StatusOK, size, safeContentType(f.Name, f.Type), fh, nil)
+}
+
+// safeContentType 只接受可解析的存储 Content-Type（去掉参数，避免头注入），
+// 缺失或非法时按扩展名推断，最后回退 application/octet-stream。
+func safeContentType(name, stored string) string {
+	if mediaType, _, err := mime.ParseMediaType(stored); err == nil && mediaType != "" {
+		return mediaType
+	}
+	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(name))); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
+}
+
+// attachmentDisposition 拼装下载响应头：ASCII 回退名只保留 ID 与安全扩展名，
+// 原文件名走 RFC 5987 的 filename*。
+func attachmentDisposition(name string, id int64) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	var safeExt strings.Builder
+	for _, r := range ext {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' {
+			safeExt.WriteRune(r)
+		}
+	}
+	return fmt.Sprintf(`attachment; filename="file-%d%s"; filename*=UTF-8''%s`,
+		id, safeExt.String(), encodeRFC5987(name))
+}
+
+// encodeRFC5987 按 RFC 5987 attr-char 白名单做百分号编码：非 ASCII、控制字符、
+// 引号与分号全部转义，确保文件名无法截断或伪造响应头。
+func encodeRFC5987(s string) string {
+	const attrChars = "!#$&+-.^_`|~"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			strings.IndexByte(attrChars, c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
 }
 
 func (h *Handler) PageFiles(c *gin.Context) {
