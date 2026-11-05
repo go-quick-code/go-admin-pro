@@ -59,10 +59,11 @@ type lineItem struct {
 	Price     money.Money
 }
 
-// ValidateOpportunityLineItems 校验行项目列表：产品必填、数量正整数、单价非负、
-// 同一商机内产品不可重复（关联表复合主键去重的前提）。空列表放行。
+// ValidateLineItems 校验行项目列表：产品必填、数量正整数、单价非负、
+// 同一单据内产品不可重复（关联表复合主键去重的前提）。空列表放行。
 // 错误文案带 1 起始的行序号，便于前端定位。
-func ValidateOpportunityLineItems(items []lineItem) error {
+// 商机（#15）与合同（#16）行项目共用同一套规则，文案统一说「行项目」。
+func ValidateLineItems(items []lineItem) error {
 	seen := make(map[int64]bool, len(items))
 	for i, it := range items {
 		lineNo := i + 1
@@ -76,21 +77,21 @@ func ValidateOpportunityLineItems(items []lineItem) error {
 			return xerr.BadRequest(fmt.Sprintf("第 %d 行项目单价不能为负数", lineNo))
 		}
 		if seen[it.ProductID] {
-			return xerr.BadRequest(fmt.Sprintf("第 %d 行项目的产品与前面的行重复：一个商机会话内同一产品只保留一行", lineNo))
+			return xerr.BadRequest(fmt.Sprintf("第 %d 行项目的产品与前面的行重复：同一单据内同一产品只保留一行", lineNo))
 		}
 		seen[it.ProductID] = true
 	}
 	return nil
 }
 
-// ComputeOpportunityLineAmount 计算行项目金额 = 数量 × 单价；
+// ComputeLineAmount 计算行项目金额 = 数量 × 单价（money.Mul，128 位中间结果防溢出）；
 // 越界透传 money.ErrOutOfRange（调用方转成用户可读文案）。
-func ComputeOpportunityLineAmount(quantity int64, price money.Money) (money.Money, error) {
+func ComputeLineAmount(quantity int64, price money.Money) (money.Money, error) {
 	return price.Mul(quantity)
 }
 
-// SumOpportunityLineAmounts 求行项目合计；空列表合计 0.00。
-func SumOpportunityLineAmounts(amounts []money.Money) (money.Money, error) {
+// SumLineAmounts 求行项目合计；空列表合计 0.00。
+func SumLineAmounts(amounts []money.Money) (money.Money, error) {
 	total := money.Money{}
 	for _, a := range amounts {
 		var err error

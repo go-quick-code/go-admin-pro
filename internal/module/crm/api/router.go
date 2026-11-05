@@ -66,6 +66,17 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	opportunity.PUT("/stage", h.requirePermission("crm:opportunity:stage"), h.AdvanceOpportunityStage)
 	opportunity.DELETE("/:id", h.requirePermission("crm:opportunity:delete"), h.DeleteOpportunity)
 
+	// 合同（issue #16）：owner-scoped 正体，CRUD + 状态流转（唯一状态入口，
+	// 路由挂 crm:contract:update——审批通过与驳回在 ApprovalService 内追加
+	// 校验 crm:contract:approve，无码 403；作废走 VoidContractGuard 守卫）。
+	contract := rg.Group("/crm/contract")
+	contract.GET("/page", h.requirePermission("crm:contract:query"), h.PageContracts)
+	contract.GET("/:id", h.requirePermission("crm:contract:query"), h.GetContract)
+	contract.POST("", h.requirePermission("crm:contract:create"), h.CreateContract)
+	contract.PUT("", h.requirePermission("crm:contract:update"), h.UpdateContract)
+	contract.PUT("/status", h.requirePermission("crm:contract:update"), h.ChangeContractStatus)
+	contract.DELETE("/:id", h.requirePermission("crm:contract:delete"), h.DeleteContract)
+
 	// 公海租户配置（issue #14）：读复用公海可见性权限码（能看公海即可读），
 	// 写挂 crm:pool-config:update（菜单种子 4050）。
 	poolConfig := rg.Group("/crm/pool-config")
