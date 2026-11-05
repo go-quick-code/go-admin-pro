@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
@@ -10,14 +11,16 @@ import (
 )
 
 // FollowUpFilter 是跟进列表查询条件。
-// 可见性跟随父客户（docs/crm-mvp-spec.md §4.1：跟进 join 父记录后套用父谓词），
-// OwnerDeptIDs 与 SelfOwnerUserID 是 datascope.Filter 到父客户 owner_dept_id /
+// 可见性跟随父记录（docs/crm-mvp-spec.md §4.1：跟进 join 父记录后套用父谓词）：
+// 挂客户跟随客户 owner_*，挂商机跟随商机 owner_*（issue #15）。
+// OwnerDeptIDs 与 SelfOwnerUserID 是 datascope.Filter 到父记录 owner_dept_id /
 // owner_user_id 列的翻译，语义与 CustomerFilter 一致：
 //   - 两者皆零值：不加范围条件（数据范围「全部」）；
 //   - 空 OwnerDeptIDs + SelfOwnerUserID = 0：谓词恒假（fail-closed，无可见部门）。
 type FollowUpFilter struct {
-	CustomerID int64
-	Type       *int8
+	CustomerID    int64
+	OpportunityID int64
+	Type          *int8
 
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
@@ -33,28 +36,40 @@ func (r *Repository) FindFollowUpByID(ctx context.Context, id int64) (*model.Fol
 }
 
 // ListFollowUps 按筛选与数据范围谓词分页查询跟进。
-// join 父客户套父谓词：客户不可见（范围外或已软删除）的跟进一并不可见。
-// 租户条件说明：插件只给主表 crm_follow_up 追加 tenant_id，被关联的 crm_customer
-// 在这里显式带上同值条件（fail-closed：无租户上下文时插件先拦截，本条件取到 0 值也查不出数据）。
+// LEFT JOIN 两个父记录（客户/商机，二选一）套父谓词：父记录不可见（范围外或
+// 已软删除）的跟进一并不可见。每条跟进恰有一个父记录，COALESCE 取到存在一侧
+// 的 owner_*（另一侧 join 不中为 NULL）；两侧都不存在（父已删）则整行不可见。
+// 租户条件说明：插件只给主表 crm_follow_up 追加 tenant_id，被关联的
+// crm_customer / crm_opportunity 在这里显式带上同值条件（fail-closed）。
 func (r *Repository) ListFollowUps(ctx context.Context, f FollowUpFilter, offset, limit int) ([]model.FollowUp, int64, error) {
 	q := r.db.WithContext(ctx).Model(&model.FollowUp{}).
-		Joins("JOIN crm_customer ON crm_customer.id = crm_follow_up.customer_id"+
+		Joins("LEFT JOIN crm_customer ON crm_customer.id = crm_follow_up.customer_id"+
 			" AND crm_customer.deleted_at IS NULL"+
-			" AND crm_customer.tenant_id = ?", tenant.ID(ctx))
+			" AND crm_customer.tenant_id = ?", tenant.ID(ctx)).
+		Joins("LEFT JOIN crm_opportunity ON crm_opportunity.id = crm_follow_up.opportunity_id"+
+			" AND crm_opportunity.deleted_at IS NULL"+
+			" AND crm_opportunity.tenant_id = ?", tenant.ID(ctx)).
+		// 父记录必须存在：客户/商机删除后其跟进随之不可见（spec §4.5）。
+		Where("COALESCE(crm_customer.id, crm_opportunity.id) IS NOT NULL")
 	if f.CustomerID > 0 {
 		q = q.Where("crm_follow_up.customer_id = ?", f.CustomerID)
+	}
+	if f.OpportunityID > 0 {
+		q = q.Where("crm_follow_up.opportunity_id = ?", f.OpportunityID)
 	}
 	if f.Type != nil {
 		q = q.Where("crm_follow_up.type = ?", *f.Type)
 	}
 	if f.OwnerDeptIDs != nil || f.SelfOwnerUserID > 0 {
+		deptExpr := "COALESCE(crm_customer.owner_dept_id, crm_opportunity.owner_dept_id)"
+		userExpr := "COALESCE(crm_customer.owner_user_id, crm_opportunity.owner_user_id)"
 		switch {
 		case len(f.OwnerDeptIDs) > 0 && f.SelfOwnerUserID > 0:
-			q = q.Where("(crm_customer.owner_dept_id IN ? OR crm_customer.owner_user_id = ?)", f.OwnerDeptIDs, f.SelfOwnerUserID)
+			q = q.Where(fmt.Sprintf("(%s IN ? OR %s = ?)", deptExpr, userExpr), f.OwnerDeptIDs, f.SelfOwnerUserID)
 		case len(f.OwnerDeptIDs) > 0:
-			q = q.Where("crm_customer.owner_dept_id IN ?", f.OwnerDeptIDs)
+			q = q.Where(fmt.Sprintf("%s IN ?", deptExpr), f.OwnerDeptIDs)
 		case f.SelfOwnerUserID > 0:
-			q = q.Where("crm_customer.owner_user_id = ?", f.SelfOwnerUserID)
+			q = q.Where(fmt.Sprintf("%s = ?", userExpr), f.SelfOwnerUserID)
 		default:
 			q = q.Where("1 = 0")
 		}
@@ -74,15 +89,21 @@ func (r *Repository) ListFollowUps(ctx context.Context, f FollowUpFilter, offset
 // CreateFollowUp 创建跟进并在同一事务里刷新所属客户 last_follow_time
 // （docs/crm-mvp-spec.md §4.2：新增跟进刷新；编辑/删除不回退——
 // last_follow_time 语义是「最后一次跟进时刻」，改内容或删记录不改变「联系过」的事实）。
+// refreshCustomerID 是要刷新 last_follow_time 的客户：挂客户的跟进传 CustomerID；
+// 挂商机的跟进（issue #15）传商机所属客户——规格 §4.2「跟进任一子记录都刷新
+// 客户的 last_follow_time」，商机是客户的子记录。传 0 不刷新（预留）。
 // 事务保证：跟进写失败或客户刷新失败时整体回滚，不会出现有跟进但时间没刷新的中间态。
-func (r *Repository) CreateFollowUp(ctx context.Context, f *model.FollowUp) error {
+func (r *Repository) CreateFollowUp(ctx context.Context, f *model.FollowUp, refreshCustomerID int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(f).Error; err != nil {
 			return err
 		}
+		if refreshCustomerID <= 0 {
+			return nil
+		}
 		// 租户插件对 Update 也按主模型 crm_customer 自动追加 tenant_id 条件。
 		return tx.Model(&model.Customer{}).
-			Where("id = ?", f.CustomerID).
+			Where("id = ?", refreshCustomerID).
 			Update("last_follow_time", time.Now()).Error
 	})
 }

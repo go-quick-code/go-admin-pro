@@ -207,6 +207,14 @@ func seedMenus(db *gorm.DB) error {
 		btn(4068, 4062, "分类新增", "crm:product-category:create", 2),
 		btn(4069, 4062, "分类修改", "crm:product-category:update", 3),
 		btn(4070, 4062, "分类删除", "crm:product-category:delete", 4),
+		// 商机（issue #15）：菜单 ID 从 4080 起（4060–4070 产品已占用，grep 去重确认）。
+		// 阶段推进是独立动作，挂独立按钮码 crm:opportunity:stage（终态推进 service 拒绝）。
+		menu(4080, 400, "商机管理", "opportunity", "crm/opportunity/index", "crm:opportunity:query", "Coin", 4),
+		btn(4081, 4080, "商机查询", "crm:opportunity:query", 1),
+		btn(4082, 4080, "商机新增", "crm:opportunity:create", 2),
+		btn(4083, 4080, "商机修改", "crm:opportunity:update", 3),
+		btn(4084, 4080, "商机删除", "crm:opportunity:delete", 4),
+		btn(4085, 4080, "商机阶段推进", "crm:opportunity:stage", 5),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err

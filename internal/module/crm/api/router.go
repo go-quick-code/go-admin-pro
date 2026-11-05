@@ -56,6 +56,16 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterProductCategoryRoutes(rg)
 	h.RegisterProductRoutes(rg)
 
+	// 商机（issue #15）：owner-scoped 正体，CRUD + 阶段推进（唯一阶段入口，
+	// 挂独立按钮码 crm:opportunity:stage，终态推进在 service 层拒绝）。
+	opportunity := rg.Group("/crm/opportunity")
+	opportunity.GET("/page", h.requirePermission("crm:opportunity:query"), h.PageOpportunities)
+	opportunity.GET("/:id", h.requirePermission("crm:opportunity:query"), h.GetOpportunity)
+	opportunity.POST("", h.requirePermission("crm:opportunity:create"), h.CreateOpportunity)
+	opportunity.PUT("", h.requirePermission("crm:opportunity:update"), h.UpdateOpportunity)
+	opportunity.PUT("/stage", h.requirePermission("crm:opportunity:stage"), h.AdvanceOpportunityStage)
+	opportunity.DELETE("/:id", h.requirePermission("crm:opportunity:delete"), h.DeleteOpportunity)
+
 	// 公海租户配置（issue #14）：读复用公海可见性权限码（能看公海即可读），
 	// 写挂 crm:pool-config:update（菜单种子 4050）。
 	poolConfig := rg.Group("/crm/pool-config")
