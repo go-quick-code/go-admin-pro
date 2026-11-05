@@ -22,6 +22,9 @@ database:
   max-idle-conns: 10
   max-open-conns: 100
   seed: true
+  # CRM 演示数据（销售角色/账号、产品、客户、商机、合同、回款与仪表盘时间分布）。
+  # 仅在 crm_customer 为空时写入；集成测试基座会显式关闭。
+  seed-demo: true
 
 jwt:
   secret: change-me-in-production-9f8a7b6c5d4e3f2a

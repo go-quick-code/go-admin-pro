@@ -43,7 +43,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		t.Fatalf("安装租户插件: %v", err)
 	}
 
-	if err := seed.Run(db); err != nil {
+	if err := seed.Run(db, false); err != nil {
 		t.Fatalf("fail-closed 租户插件下 seed 失败: %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	}
 
 	// 重复执行必须幂等：守卫计数不因租户过滤而漏判。
-	if err := seed.Run(db); err != nil {
+	if err := seed.Run(db, false); err != nil {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")

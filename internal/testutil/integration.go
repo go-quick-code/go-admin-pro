@@ -79,6 +79,11 @@ func NewIntegrationEnv(tb testing.TB) *IntegrationEnv {
 	cfg := loadConfig(tb)
 	cfg.Database.DSN = config.ApplyDSNLoc(dsn, cfg.App.Timezone)
 	cfg.Database.Seed = true
+	// 集成测试只保留基础种子（租户/菜单/角色/admin）：CRM 演示数据会让
+	// 各用例的 total 断言依赖演示行，必须由用例自己创建数据。需要演示数据的
+	// 用例直接调用 seed.Run(db, true) 显式写入。
+	demo := false
+	cfg.Database.SeedDemo = &demo
 	// gin 在非 dev 环境走 ReleaseMode；上传目录指向临时目录，避免污染仓库工作区。
 	cfg.App.Env = "test"
 	cfg.Storage.Local.BasePath = tb.TempDir()
