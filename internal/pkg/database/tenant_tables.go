@@ -46,4 +46,8 @@ var TenantTables = []string{
 	// 回款（issue #18）：计划/记录均带 tenant_id；可见性 join 合同套用合同 owner 谓词。
 	"crm_receivable_plan",
 	"crm_receivable_record",
+
+	// 站内通知（issue #45）：通知按接收人物化，严格本人 + 租户隔离
+	//（docs/oa-mvp-spec.md §4.13）；写入/查询的租户条件由插件自动追加。
+	"notify_message",
 }
