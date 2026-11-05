@@ -61,8 +61,54 @@ func (r *Repository) FindCustomerByID(ctx context.Context, id int64) (*model.Cus
 	return &c, nil
 }
 
+// FindCustomersByNos 按客户编号批量查客户（联系人导入解析所属客户用；租户插件
+// 自动过滤租户与软删除行）。编号为空的入参被忽略，缺号的不返回。
+func (r *Repository) FindCustomersByNos(ctx context.Context, nos []string) ([]model.Customer, error) {
+	unique := make([]string, 0, len(nos))
+	seen := make(map[string]bool, len(nos))
+	for _, no := range nos {
+		if no == "" || seen[no] {
+			continue
+		}
+		seen[no] = true
+		unique = append(unique, no)
+	}
+	if len(unique) == 0 {
+		return nil, nil
+	}
+	var list []model.Customer
+	if err := r.db.WithContext(ctx).Where("customer_no IN ?", unique).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // ListCustomers 按筛选与数据范围谓词分页查询客户。
 func (r *Repository) ListCustomers(ctx context.Context, f CustomerFilter, offset, limit int) ([]model.Customer, int64, error) {
+	q := r.customerQuery(ctx, f)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.Customer
+	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	return list, total, nil
+}
+
+// ListAllCustomers 按筛选与数据范围谓词查询全部客户（Excel 导出用，不分页）。
+func (r *Repository) ListAllCustomers(ctx context.Context, f CustomerFilter) ([]model.Customer, error) {
+	var list []model.Customer
+	if err := r.customerQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// customerQuery 构造客户列表/导出的公共查询（筛选 + 数据范围谓词）。
+func (r *Repository) customerQuery(ctx context.Context, f CustomerFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.Customer{})
 	if f.Name != "" {
 		q = q.Where("name LIKE ?", "%"+f.Name+"%")
@@ -94,16 +140,7 @@ func (r *Repository) ListCustomers(ctx context.Context, f CustomerFilter, offset
 			q = q.Where("1 = 0")
 		}
 	}
-
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []model.Customer
-	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	return list, total, nil
+	return q
 }
 
 // CreateCustomer 创建客户。必须已在 customer_no 赋值后调用（见 service.CreateCustomer）。

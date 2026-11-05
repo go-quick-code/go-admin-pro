@@ -5,6 +5,7 @@ import (
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
 	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
+	"gorm.io/gorm"
 )
 
 // ContractFilter 是合同列表查询条件。
@@ -32,6 +33,30 @@ func (r *Repository) FindContractByID(ctx context.Context, id int64) (*model.Con
 
 // ListContracts 按筛选与数据范围谓词分页查询合同。
 func (r *Repository) ListContracts(ctx context.Context, f ContractFilter, offset, limit int) ([]model.Contract, int64, error) {
+	q := r.contractQuery(ctx, f)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.Contract
+	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	return list, total, nil
+}
+
+// ListAllContracts 按筛选与数据范围谓词查询全部合同（Excel 导出用，不分页）。
+func (r *Repository) ListAllContracts(ctx context.Context, f ContractFilter) ([]model.Contract, error) {
+	var list []model.Contract
+	if err := r.contractQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// contractQuery 构造合同列表/导出的公共查询（筛选 + 数据范围谓词）。
+func (r *Repository) contractQuery(ctx context.Context, f ContractFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.Contract{})
 	if f.Name != "" {
 		q = q.Where("name LIKE ?", "%"+f.Name+"%")
@@ -54,16 +79,7 @@ func (r *Repository) ListContracts(ctx context.Context, f ContractFilter, offset
 			q = q.Where("1 = 0")
 		}
 	}
-
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []model.Contract
-	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	return list, total, nil
+	return q
 }
 
 // FindContractsByIDs 批量查合同（跟进列表补合同名称用），缺行不报错。

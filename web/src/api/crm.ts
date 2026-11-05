@@ -213,3 +213,60 @@ export function deleteReceivableRecord(id: number) {
 export function getDashboardSummary() {
   return request.get('/crm/dashboard/summary') as Promise<any>
 }
+
+// ---------- Excel 导入导出（issue #20，docs/crm-mvp-spec.md §7） ----------
+// 导入为 multipart（字段名 file），模板/导出返回 xlsx 二进制（responseType: blob）。
+// 后端在进入解析前固定 10MB / 5000 行 / 100 条错误明细上限；导入先全量校验，
+// 有错整批拒绝（HTTP 200 + code 4201，data 为 { errors, total, truncated }），
+// 页面按行号 + 列名 + 原因展示（@/components/ExcelActions.vue）。
+function uploadExcel(path: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(path, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+
+function downloadExcel(path: string, params?: Record<string, any>) {
+  return request.get(path, { params, responseType: 'blob' }) as Promise<any>
+}
+
+// 客户：导入 + 模板 + 导出（导出复用列表筛选与数据权限）。
+export function downloadCustomerImportTemplate() {
+  return downloadExcel('/crm/customer/import-template')
+}
+export function importCustomers(file: File) {
+  return uploadExcel('/crm/customer/import', file)
+}
+export function exportCustomers(params?: Record<string, any>) {
+  return downloadExcel('/crm/customer/export-excel', params)
+}
+
+// 联系人：导入 + 模板（客户编号关联所属客户，须对当前用户可见）。
+export function downloadContactImportTemplate() {
+  return downloadExcel('/crm/contact/import-template')
+}
+export function importContacts(file: File) {
+  return uploadExcel('/crm/contact/import', file)
+}
+
+// 产品：导入 + 模板 + 导出（分类按名称关联，可空）。
+export function downloadProductImportTemplate() {
+  return downloadExcel('/crm/product/import-template')
+}
+export function importProducts(file: File) {
+  return uploadExcel('/crm/product/import', file)
+}
+export function exportProducts(params?: Record<string, any>) {
+  return downloadExcel('/crm/product/export-excel', params)
+}
+
+// 合同导出（复用列表筛选与数据权限；日期为原生日期，金额为十进制字符串）。
+export function exportContracts(params?: Record<string, any>) {
+  return downloadExcel('/crm/contract/export-excel', params)
+}
+
+// 回款计划导出（含已收金额与派生状态/逾期）。
+export function exportReceivablePlans(params?: Record<string, any>) {
+  return downloadExcel('/crm/receivable/plan/export-excel', params)
+}

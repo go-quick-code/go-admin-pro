@@ -11,6 +11,20 @@
       title="产品"
       :action-width="170"
     >
+      <template #toolbar>
+        <!-- Excel（issue #20）：导入/模板挂 crm:product:import，导出挂 crm:product:export。
+             导入用分类名称关联分类（可空）；导出带上当前列表筛选。 -->
+        <ExcelActions
+          title="产品"
+          import-perm="crm:product:import"
+          export-perm="crm:product:export"
+          :import-action="importProducts"
+          :template-action="downloadProductImportTemplate"
+          :export-action="exportProducts"
+          :export-params="productExportParams"
+          @success="reloadProducts"
+        />
+      </template>
       <template #form-categoryId="{ form }">
         <el-tree-select
           v-model="form.categoryId"
@@ -29,6 +43,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { dictLabel, formatTime } from '@/utils/format'
 import {
   pageProducts,
@@ -37,6 +52,9 @@ import {
   updateProduct,
   deleteProduct,
   treeProductCategories,
+  importProducts,
+  downloadProductImportTemplate,
+  exportProducts,
 } from '@/api/crm'
 
 // 产品列表/表单页（issue #11，codegen 产物为基底、分类字段改造为树选择器）：
@@ -51,6 +69,22 @@ const productUnitOptions: { label: string; value: any }[] = []
 
 const tableRef = ref()
 const categoryTree = ref<any[]>([])
+
+function reloadProducts() {
+  tableRef.value?.reload()
+}
+
+// 产品导出复用当前列表筛选（空值由 ExcelActions 剔除）。
+function productExportParams() {
+  const q = tableRef.value?.query || {}
+  return {
+    name: q.name,
+    code: q.code,
+    categoryId: q.categoryId,
+    unit: q.unit,
+    status: q.status,
+  }
+}
 
 // 展平分类树（带层级缩进），供列表筛选的下拉框使用；表单走树选择器插槽。
 const categorySelectOptions = computed(() => {

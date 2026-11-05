@@ -12,6 +12,20 @@
       :action-width="200"
       @row-click="openDetail"
     >
+      <template #toolbar>
+        <!-- Excel（issue #20）：导入/模板挂 crm:customer:import，导出挂 crm:customer:export；
+             导出带上当前列表筛选，后端再套数据范围谓词。 -->
+        <ExcelActions
+          title="客户"
+          import-perm="crm:customer:import"
+          export-perm="crm:customer:export"
+          :import-action="importCustomers"
+          :template-action="downloadCustomerImportTemplate"
+          :export-action="exportCustomers"
+          :export-params="customerExportParams"
+          @success="reloadCustomers"
+        />
+      </template>
       <template #cell-status="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
@@ -73,6 +87,7 @@
         </el-tab-pane>
         <el-tab-pane label="联系人" name="contacts">
           <ProTable
+            ref="contactTableRef"
             :columns="contactColumns"
             :form-items="contactFormItems"
             :search-items="contactSearchItems"
@@ -83,6 +98,16 @@
             perm-prefix="crm:contact"
             title="联系人"
           >
+            <template #toolbar>
+              <!-- 联系人导入（issue #20）：用客户编号关联所属客户（须对当前用户可见）。 -->
+              <ExcelActions
+                title="联系人"
+                import-perm="crm:contact:import"
+                :import-action="importContacts"
+                :template-action="downloadContactImportTemplate"
+                @success="reloadContacts"
+              />
+            </template>
             <template #cell-gender="{ row }">{{ genderLabel(row.gender) }}</template>
           </ProTable>
         </el-tab-pane>
@@ -200,6 +225,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { formatTime, dictLabel } from '@/utils/format'
 import {
   pageCustomers,
@@ -215,6 +241,11 @@ import {
   createContact,
   updateContact,
   deleteContact,
+  importContacts,
+  downloadContactImportTemplate,
+  importCustomers,
+  downloadCustomerImportTemplate,
+  exportCustomers,
   pageOpportunities,
   createOpportunity,
   pageContracts,
@@ -304,6 +335,26 @@ function historyText(h: any) {
 }
 
 const tableRef = ref()
+const contactTableRef = ref()
+
+function reloadCustomers() {
+  tableRef.value?.reload()
+}
+
+function reloadContacts() {
+  contactTableRef.value?.reload()
+}
+
+// 客户导出复用当前列表筛选（空值由 ExcelActions 剔除）。
+function customerExportParams() {
+  const q = tableRef.value?.query || {}
+  return {
+    name: q.name,
+    status: q.status,
+    ownerUserId: q.ownerUserId,
+    ownerDeptId: q.ownerDeptId,
+  }
+}
 const userStore = useUserStore()
 const users = ref<any[]>([])
 const deptOptions = ref<{ label: string; value: number }[]>([])

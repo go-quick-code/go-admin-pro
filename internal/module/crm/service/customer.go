@@ -11,6 +11,7 @@ import (
 	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
 	"github.com/lautung/go-admin-pro/internal/pkg/authn"
 	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
+	"github.com/lautung/go-admin-pro/internal/pkg/excel"
 	"github.com/lautung/go-admin-pro/internal/pkg/web"
 	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
 )
@@ -58,16 +59,25 @@ type Service struct {
 	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
 	// nil 表示未注入（退回 time.Local，见 businessLocation）。
 	location *time.Location
+	// Excel 导入 guard（issue #20）：应用级组件，固定 10MB/5000 行/100 条明细
+	// 与 80MB 解压上限，按实体限制并发解析数（excel.GuardDefaultConcurrent）。
+	// 见 excel.go 与 internal/pkg/excel/import_guard.go。
+	customerImports *excel.ImportGuard[dto.CustomerImportRow]
+	contactImports  *excel.ImportGuard[dto.ContactImportRow]
+	productImports  *excel.ImportGuard[dto.ProductImportRow]
 }
 
 // New 创建 crm Service。合同回收排除缺省空实现（真实实现由 app 装配处注入）；
-// 审批缺省 v1 直通实现；作废守卫缺省空实现。
+// 审批缺省 v1 直通实现；作废守卫缺省空实现；导入 guard 使用固定限额与默认并发。
 func New(repo *repository.Repository, sys SystemGateway) *Service {
 	return &Service{
-		repo:      repo,
-		sys:       sys,
-		contracts: NoopContractChecker{},
-		approvals: NewPassthroughApprovalService(repo, sys),
+		repo:            repo,
+		sys:             sys,
+		contracts:       NoopContractChecker{},
+		approvals:       NewPassthroughApprovalService(repo, sys),
+		customerImports: excel.NewImportGuard[dto.CustomerImportRow](excel.GuardDefaultConcurrent),
+		contactImports:  excel.NewImportGuard[dto.ContactImportRow](excel.GuardDefaultConcurrent),
+		productImports:  excel.NewImportGuard[dto.ProductImportRow](excel.GuardDefaultConcurrent),
 	}
 }
 
@@ -92,9 +102,25 @@ func currentTenantID(ctx context.Context) int64 {
 func (s *Service) ListCustomers(ctx context.Context, req *dto.CustomerPageReq) ([]model.Customer, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
+	filter, err := s.customerFilter(ctx, req)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	list, total, err := s.repo.ListCustomers(ctx, filter, page.Offset(), page.PageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.fillOwnerNames(ctx, list)
+	return list, total, nil
+}
+
+// customerFilter 构造客户列表/导出的筛选与数据范围谓词（导出复用同一口径，
+// 保证导出内容与当前用户可见范围一致）。
+func (s *Service) customerFilter(ctx context.Context, req *dto.CustomerPageReq) (repository.CustomerFilter, error) {
 	if req.Status != nil {
 		if err := ValidateCustomerStatus(*req.Status); err != nil {
-			return nil, 0, err
+			return repository.CustomerFilter{}, err
 		}
 	}
 
@@ -109,7 +135,7 @@ func (s *Service) ListCustomers(ctx context.Context, req *dto.CustomerPageReq) (
 	}
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
-		return nil, 0, err
+		return repository.CustomerFilter{}, err
 	}
 	if !scope.All {
 		if scope.IncludeSelf {
@@ -123,13 +149,7 @@ func (s *Service) ListCustomers(ctx context.Context, req *dto.CustomerPageReq) (
 			filter.OwnerDeptIDs = []int64{}
 		}
 	}
-
-	list, total, err := s.repo.ListCustomers(ctx, filter, page.Offset(), page.PageSize)
-	if err != nil {
-		return nil, 0, err
-	}
-	s.fillOwnerNames(ctx, list)
-	return list, total, nil
+	return filter, nil
 }
 
 // GetCustomer 查询客户详情。数据范围外的客户一律 404：

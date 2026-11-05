@@ -113,6 +113,18 @@ func (r *Repository) ListReceivablePlans(ctx context.Context, f ReceivablePlanFi
 	return list, total, nil
 }
 
+// ListAllReceivablePlans 按筛选与数据范围谓词查询全部回款计划（Excel 导出用，
+// 不分页；排序与列表一致：到期日升序）。
+func (r *Repository) ListAllReceivablePlans(ctx context.Context, f ReceivablePlanFilter) ([]model.ReceivablePlan, error) {
+	var list []model.ReceivablePlan
+	if err := r.receivablePlanBaseQuery(ctx, f).
+		Order("crm_receivable_plan.due_date ASC, crm_receivable_plan.id ASC").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // FindReceivablePlanByID 按 ID 查计划（租户插件自动过滤），不存在返回 nil。
 // 已收金额不在此投影：单条路径由 service 调 SumReceivableRecordsByPlanIDs 补齐。
 func (r *Repository) FindReceivablePlanByID(ctx context.Context, id int64) (*model.ReceivablePlan, error) {

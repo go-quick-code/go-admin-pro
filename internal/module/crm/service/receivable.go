@@ -26,12 +26,28 @@ import (
 func (s *Service) ListReceivablePlans(ctx context.Context, req *dto.ReceivablePlanPageReq) ([]model.ReceivablePlan, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
+	now := time.Now()
+	filter, err := s.receivablePlanFilter(ctx, req, now)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	list, total, err := s.repo.ListReceivablePlans(ctx, filter, page.Offset(), page.PageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.fillReceivablePlans(ctx, list, now)
+	return list, total, nil
+}
+
+// receivablePlanFilter 构造回款计划列表/导出的筛选与数据范围谓词
+// （导出复用同一口径；Today 由调用方传入，保证筛选与派生状态用同一个「今天」）。
+func (s *Service) receivablePlanFilter(ctx context.Context, req *dto.ReceivablePlanPageReq, now time.Time) (repository.ReceivablePlanFilter, error) {
 	if req.Status != nil {
 		if err := ValidateReceivableStatusFilter(*req.Status); err != nil {
-			return nil, 0, err
+			return repository.ReceivablePlanFilter{}, err
 		}
 	}
-	now := time.Now()
 	filter := repository.ReceivablePlanFilter{
 		ContractID: req.ContractID,
 		Status:     req.Status,
@@ -40,16 +56,10 @@ func (s *Service) ListReceivablePlans(ctx context.Context, req *dto.ReceivablePl
 	}
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
-		return nil, 0, err
+		return repository.ReceivablePlanFilter{}, err
 	}
 	applyCustomerScope(scope, &filter.OwnerDeptIDs, &filter.SelfOwnerUserID)
-
-	list, total, err := s.repo.ListReceivablePlans(ctx, filter, page.Offset(), page.PageSize)
-	if err != nil {
-		return nil, 0, err
-	}
-	s.fillReceivablePlans(ctx, list, now)
-	return list, total, nil
+	return filter, nil
 }
 
 // CreateReceivablePlan 新建回款计划：合同须可见，金额不变量按合同金额校验。

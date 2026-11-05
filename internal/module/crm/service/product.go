@@ -23,18 +23,9 @@ import (
 func (s *Service) ListProducts(ctx context.Context, req *dto.ProductPageReq) ([]model.Product, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
-	if req.Status != nil {
-		if err := ValidateProductStatus(*req.Status); err != nil {
-			return nil, 0, err
-		}
-	}
-
-	filter := repository.ProductFilter{
-		Name:       req.Name,
-		Code:       req.Code,
-		Unit:       req.Unit,
-		Status:     req.Status,
-		CategoryID: req.CategoryId,
+	filter, err := productFilter(req)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	list, total, err := s.repo.ListProducts(ctx, filter, page.Offset(), page.PageSize)
@@ -42,6 +33,22 @@ func (s *Service) ListProducts(ctx context.Context, req *dto.ProductPageReq) ([]
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// productFilter 构造产品列表/导出的筛选条件（导出复用同一口径）。
+func productFilter(req *dto.ProductPageReq) (repository.ProductFilter, error) {
+	if req.Status != nil {
+		if err := ValidateProductStatus(*req.Status); err != nil {
+			return repository.ProductFilter{}, err
+		}
+	}
+	return repository.ProductFilter{
+		Name:       req.Name,
+		Code:       req.Code,
+		Unit:       req.Unit,
+		Status:     req.Status,
+		CategoryID: req.CategoryId,
+	}, nil
 }
 
 // GetProduct 查询产品详情。
@@ -161,7 +168,5 @@ func (s *Service) findVisibleProduct(ctx context.Context, id int64) (*model.Prod
 	return row, nil
 }
 
-// TODO(#20): Excel 导入导出接线（internal/pkg/excel，docs/crm-mvp-spec.md §7）——
-// 本文件生成时仅预留配置位与注释，不产出可用实现：
-//   - 导入：模板下载 + 先全量校验（行号+原因可读），有错整批拒绝；上限 5000 行/10MB；
-//   - 导出：复用 ListProducts 的筛选与数据范围谓词，导出内容与权限一致。
+// Excel 导入导出见 product_excel.go（issue #20）：模板下载、全量校验后整批拒绝、
+// 事务内批量创建；导出复用 productFilter 的筛选条件。
