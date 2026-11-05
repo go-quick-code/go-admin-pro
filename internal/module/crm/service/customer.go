@@ -80,7 +80,7 @@ func New(repo *repository.Repository, sys SystemGateway) *Service {
 		sys:             sys,
 		clock:           time.Now,
 		contracts:       NoopContractChecker{},
-		approvals:       NewPassthroughApprovalService(repo, sys),
+		approvals:       NewPassthroughApprovalService(sys),
 		customerImports: excel.NewImportGuard[dto.CustomerImportRow](excel.GuardDefaultConcurrent),
 		contactImports:  excel.NewImportGuard[dto.ContactImportRow](excel.GuardDefaultConcurrent),
 		productImports:  excel.NewImportGuard[dto.ProductImportRow](excel.GuardDefaultConcurrent),

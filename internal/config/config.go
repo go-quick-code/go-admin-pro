@@ -26,6 +26,19 @@ type Config struct {
 // DefaultTimezone 是 app.timezone 为空时的默认业务时区。
 const DefaultTimezone = "Asia/Shanghai"
 
+// DefaultDevJWTSecret 是 dev/test 环境的 JWT 缺省密钥（仅为本地开发与集成测试
+// 提供便利）。app.env 非 dev/test 时，空密钥或该值（以及仓库/文档中出现过的
+// 其他可预测默认值）会直接拒绝启动，见 validateJWTSecret（PR #39 审查 P2）。
+const DefaultDevJWTSecret = "go-admin-pro-dev-secret"
+
+// insecureJWTSecrets 是已知可预测的 JWT 密钥：非 dev/test 环境一律拒绝，
+// 避免生产部署照抄示例配置后被伪造 token。
+var insecureJWTSecrets = map[string]struct{}{
+	DefaultDevJWTSecret:                        {},
+	"change-me-in-production-9f8a7b6c5d4e3f2a": {},
+	"please-change-me":                         {},
+}
+
 type AppConfig struct {
 	Name      string     `mapstructure:"name"`
 	Env       string     `mapstructure:"env"`
@@ -126,9 +139,10 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// validate 校验跨字段约束：app.timezone 必须是可加载的 IANA 时区名。
+// validate 校验跨字段约束：app.timezone 必须是可加载的 IANA 时区名，
+// 非 dev/test 环境必须覆盖可预测的 JWT 默认密钥。
 // 在 Load 里做而不是等到第一次使用，是为了让非法值在启动阶段就失败，
-// 而不是等到第一次导入 Excel 才暴露。
+// 而不是等到第一次导入 Excel 或签发 token 才暴露。
 func (c *Config) validate() error {
 	loc, err := time.LoadLocation(c.App.Timezone)
 	if err != nil {
@@ -136,12 +150,42 @@ func (c *Config) validate() error {
 	}
 	c.loc = loc
 	c.Database.DSN = ApplyDSNLoc(c.Database.DSN, c.App.Timezone)
+	return c.validateJWTSecret()
+}
+
+// validateJWTSecret 拒绝非 dev/test 环境使用空密钥或已知默认密钥：
+// 本地开发/测试保留默认值，生产必须显式配置唯一强密钥（配置或 GAP_JWT_SECRET）。
+func (c *Config) validateJWTSecret() error {
+	if isLocalEnv(c.App.Env) {
+		return nil
+	}
+	secret := strings.TrimSpace(c.JWT.Secret)
+	if secret == "" {
+		return fmt.Errorf("jwt.secret 不能为空：app.env=%q 时必须在配置文件或 GAP_JWT_SECRET 中设置唯一强密钥", c.App.Env)
+	}
+	if _, insecure := insecureJWTSecrets[secret]; insecure {
+		return fmt.Errorf("jwt.secret 使用了已知默认值：app.env=%q 时必须在配置文件或 GAP_JWT_SECRET 中覆盖为唯一强密钥", c.App.Env)
+	}
 	return nil
+}
+
+// isLocalEnv 判断是否为本地开发/测试环境（允许 JWT 默认密钥）。
+func isLocalEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "dev", "test":
+		return true
+	}
+	return false
 }
 
 func (c *Config) applyDefaults() {
 	if c.App.Name == "" {
 		c.App.Name = "go-admin-pro"
+	}
+	if c.App.Env == "" {
+		// 未配置视为 dev：与 configs/config.yaml 的默认值一致；
+		// 非 dev/test 才会触发 JWT 密钥强校验（见 validateJWTSecret）。
+		c.App.Env = "dev"
 	}
 	if c.App.Timezone == "" {
 		c.App.Timezone = DefaultTimezone
@@ -232,7 +276,7 @@ func (c *Config) normalize() {
 	c.App.APIPrefix = "/" + strings.Trim(c.App.APIPrefix, "/")
 	c.Storage.Local.PublicPrefix = "/" + strings.Trim(c.Storage.Local.PublicPrefix, "/")
 	if c.JWT.Secret == "" {
-		c.JWT.Secret = "go-admin-pro-dev-secret"
+		c.JWT.Secret = DefaultDevJWTSecret
 	}
 }
 

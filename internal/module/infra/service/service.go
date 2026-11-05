@@ -18,7 +18,14 @@ import (
 	"github.com/lautung/go-admin-pro/internal/pkg/xerr"
 )
 
-const maxUploadSize = 20 << 20 // 20MB
+// MaxUploadSize 是单个上传文件的字节上限（20MB）。
+// HTTP 层需要在 multipart 解析前用 MaxUploadBodyBytes 限制请求体，
+// 避免超大请求先落临时文件/占用内存（PR #39 审查加固）。
+const MaxUploadSize = 20 << 20 // 20MB
+
+// MaxUploadBodyBytes 是上传请求体上限：单文件上限 + 1MB multipart 开销余量。
+// 表单字段本身也可能被塞入大段填充，所以限制的是整个请求体而不只是文件大小。
+const MaxUploadBodyBytes = MaxUploadSize + (1 << 20)
 
 var allowedExt = map[string]struct{}{
 	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".webp": {}, ".svg": {},
@@ -130,7 +137,7 @@ func validateFileBiz(bizType string, bizID int64) error {
 
 // uploadFile 是上传的公共实现：校验 → 落磁盘 → 写记录（记录失败回滚磁盘文件）。
 func (s *Service) uploadFile(ctx context.Context, fh *multipart.FileHeader, bizType string, bizID int64) (*model.File, error) {
-	if fh.Size > maxUploadSize {
+	if fh.Size > MaxUploadSize {
 		return nil, xerr.BadRequest("文件大小不能超过 20MB")
 	}
 	ext := strings.ToLower(filepath.Ext(fh.Filename))

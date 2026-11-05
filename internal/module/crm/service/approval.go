@@ -24,47 +24,52 @@ import (
 const PermContractApprove = "crm:contract:approve"
 
 // ApprovalService 是合同审批依赖面（依赖接口而非实现）。
+//
+// tx 是调用方已开启的事务仓储：合同行已 SELECT ... FOR UPDATE 锁定，并已按
+// 锁定后的最新状态复核过流转合法性（PR #39 审查 P1）。实现必须在 tx 上写状态，
+// 让「锁定 → 复核 → 流转」在同一事务内完成；bpm 实现若需要额外持久化，也用
+// 同一 tx，保证与合同状态一起提交/回滚。
 type ApprovalService interface {
 	// Submit 提交合同进入审批（草稿 → 待审）。
-	Submit(ctx context.Context, contract *model.Contract) error
+	Submit(ctx context.Context, tx *repository.Repository, contract *model.Contract) error
 	// Approve 审批通过（待审 → 已签）。
-	Approve(ctx context.Context, contract *model.Contract) error
+	Approve(ctx context.Context, tx *repository.Repository, contract *model.Contract) error
 	// Reject 驳回回草稿（待审 → 草稿），reason 为驳回原因（可空）。
-	Reject(ctx context.Context, contract *model.Contract, reason string) error
+	Reject(ctx context.Context, tx *repository.Repository, contract *model.Contract, reason string) error
 }
 
 // PassthroughApprovalService 是 ApprovalService 的 v1 直通实现：
 // 审批人持 crm:contract:approve 即直接条件更新合同状态（防并发覆盖）。
+// 状态写入走调用方事务（tx），不再持有根仓储。
 type PassthroughApprovalService struct {
-	repo *repository.Repository
-	sys  SystemGateway
+	sys SystemGateway
 }
 
-// NewPassthroughApprovalService 创建直通审批实现（app 装配时注入 crm 仓储与 system 网关）。
-func NewPassthroughApprovalService(repo *repository.Repository, sys SystemGateway) *PassthroughApprovalService {
-	return &PassthroughApprovalService{repo: repo, sys: sys}
+// NewPassthroughApprovalService 创建直通审批实现（app 装配时注入 system 网关）。
+func NewPassthroughApprovalService(sys SystemGateway) *PassthroughApprovalService {
+	return &PassthroughApprovalService{sys: sys}
 }
 
 // Submit 提交审批（草稿 → 待审）：v1 无审批配置可查，直接条件更新。
-func (s *PassthroughApprovalService) Submit(ctx context.Context, contract *model.Contract) error {
-	return s.transition(ctx, contract, model.ContractStatusPending, "")
+func (s *PassthroughApprovalService) Submit(ctx context.Context, tx *repository.Repository, contract *model.Contract) error {
+	return s.transition(ctx, tx, contract, model.ContractStatusPending, "")
 }
 
 // Approve 审批通过（待审 → 已签）：须持 crm:contract:approve。
-func (s *PassthroughApprovalService) Approve(ctx context.Context, contract *model.Contract) error {
+func (s *PassthroughApprovalService) Approve(ctx context.Context, tx *repository.Repository, contract *model.Contract) error {
 	if err := s.requireApprovePermission(ctx); err != nil {
 		return err
 	}
-	return s.transition(ctx, contract, model.ContractStatusSigned, "")
+	return s.transition(ctx, tx, contract, model.ContractStatusSigned, "")
 }
 
 // Reject 驳回回草稿（待审 → 草稿）：须持 crm:contract:approve，reason 落库供
 // 草稿负责人查看（重新提交时由 TransitionContractStatus 清空）。
-func (s *PassthroughApprovalService) Reject(ctx context.Context, contract *model.Contract, reason string) error {
+func (s *PassthroughApprovalService) Reject(ctx context.Context, tx *repository.Repository, contract *model.Contract, reason string) error {
 	if err := s.requireApprovePermission(ctx); err != nil {
 		return err
 	}
-	return s.transition(ctx, contract, model.ContractStatusDraft, reason)
+	return s.transition(ctx, tx, contract, model.ContractStatusDraft, reason)
 }
 
 // requireApprovePermission 校验当前用户持有审批权限码（super_admin 以 "*" 通配）。
@@ -80,8 +85,10 @@ func (s *PassthroughApprovalService) requireApprovePermission(ctx context.Contex
 }
 
 // transition 条件更新状态并把新状态回填到内存模型（0 行 = 状态已被并发请求变更）。
-func (s *PassthroughApprovalService) transition(ctx context.Context, contract *model.Contract, to int8, reason string) error {
-	rows, err := s.repo.TransitionContractStatus(ctx, contract.ID, contract.Status, to, reason)
+// 必须在调用方已锁合同行的事务仓储上执行：条件更新是第二道保险，锁内复核是
+// 第一道（PR #39 审查 P1）。
+func (s *PassthroughApprovalService) transition(ctx context.Context, tx *repository.Repository, contract *model.Contract, to int8, reason string) error {
+	rows, err := tx.TransitionContractStatus(ctx, contract.ID, contract.Status, to, reason)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/lautung/go-admin-pro/internal/config"
 	"github.com/lautung/go-admin-pro/internal/module/infra/dto"
@@ -49,9 +52,18 @@ func pathID(c *gin.Context) (int64, bool) {
 
 // ---------- 文件 ----------
 
+// UploadFile 上传文件。multipart 解析前先用 MaxBytesReader 限制整个请求体
+// （20MB 文件 + 1MB 表单开销）：超限请求在解析阶段就被拒绝，不落临时文件、
+// 不写 infra_file 行（PR #39 审查加固）。
 func (h *Handler) UploadFile(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxUploadBodyBytes)
 	fh, err := c.FormFile("file")
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			response.BadRequest(c, "文件大小不能超过 20MB")
+			return
+		}
 		response.BadRequest(c, "请选择要上传的文件")
 		return
 	}
@@ -180,8 +192,10 @@ func (h *Handler) GetJob(c *gin.Context) {
 	response.OK(c, job)
 }
 
+// ListJobHandlers 返回当前租户可用的处理器：系统级处理器只对平台租户展示
+// （PR #39 审查 P0，客户端不能据此发现跨租户动作）。
 func (h *Handler) ListJobHandlers(c *gin.Context) {
-	response.OK(c, h.svc.Scheduler().Handlers())
+	response.OK(c, h.svc.ListJobHandlers(c.Request.Context()))
 }
 
 func (h *Handler) CreateJob(c *gin.Context) {

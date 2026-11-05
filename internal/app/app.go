@@ -78,7 +78,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraSvc := infraservice.New(infraRepo, cfg, scheduler)
 
 	// 注册日志清理任务，可在“定时任务”中把 handlerName 配置为 cleanLogs。
-	scheduler.Register("cleanLogs", func(ctx context.Context, param string) error {
+	// 清理跨租户执行（tenant.Skip，见 system repository），属系统级处理器：
+	// 只有平台租户管理员可创建/修改/启用/运行（PR #39 审查 P0）。
+	scheduler.RegisterSystem("cleanLogs", func(ctx context.Context, param string) error {
 		days, err := strconv.Atoi(strings.TrimSpace(param))
 		if err != nil || days <= 0 {
 			days = 30
@@ -119,7 +121,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed
 	// 的 seedJobs 注释）。回收是系统级动作：handler 忽略 job 所属租户上下文，
 	// 由 crm service 以 tenant.Skip 列出启用租户后逐租户执行。
-	scheduler.Register(crmservice.RecycleJobHandlerName, func(ctx context.Context, param string) error {
+	//
+	// 系统级注册（PR #39 审查 P0）：普通租户管理员即使持 super_admin（"*"）
+	// 也不能创建/运行该 handler，否则可经 infra_job 触发跨租户公海回收。
+	scheduler.RegisterSystem(crmservice.RecycleJobHandlerName, func(ctx context.Context, param string) error {
 		result, err := crmSvc.RunPoolRecycle(ctx)
 		if err != nil {
 			return err

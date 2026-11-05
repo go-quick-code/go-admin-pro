@@ -161,63 +161,77 @@ func (s *Service) CreateContract(ctx context.Context, req *dto.ContractCreateReq
 // UpdateContract 修改合同：数据范围外一律 404；编号/客户/来源商机/状态不可改
 // （状态走专门端点）。编辑口径见文件头注释：草稿/待审全量编辑，已签仅元数据，
 // 已作废不可编辑。products 传 nil 保持行项目不变，传空数组清空（金额回退手填）。
+//
+// 并发保护（PR #39 审查 P1）：事务内先 SELECT ... FOR UPDATE 锁定合同行，
+// 再按锁定后的最新状态决定编辑口径。审批通过（待审 → 已签）同样先锁合同行，
+// 因此「编辑读待审 → 审批落已签 → 编辑写金额」的旧竞态被消除：后拿到锁的
+// 请求看到的是已签状态，金额/行项目不会按旧快照写回。
 func (s *Service) UpdateContract(ctx context.Context, req *dto.ContractUpdateReq) error {
-	c, err := s.findVisibleContract(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if c.Status == model.ContractStatusVoid {
-		return xerr.BadRequest("已作废合同不可编辑")
-	}
-	signed := c.Status == model.ContractStatusSigned
-	var products []model.ContractProduct
-	var lineAmounts []money.Money
-	if req.Products != nil {
-		if signed {
-			return xerr.BadRequest("已签合同不可修改行项目：如需调整请先作废后重新签订")
-		}
-		if err := ValidateContractLineItems(contractLineItemsFromDTO(req.Products)); err != nil {
-			return err
-		}
-		if products, err = s.buildContractProducts(ctx, c.ID, req.Products); err != nil {
-			return err
-		}
-		lineAmounts = contractLineAmounts(products)
-	} else if !signed {
-		// 行项目保持不变：金额不变量仍须成立，手填金额只在该合同无行项目时生效
-		//（有行项目时提交的金额一律忽略，见 ResolveContractAmount）。
-		existing, err := s.repo.ListContractProducts(ctx, c.ID)
+	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		c, err := tx.LockContractByID(ctx, req.ID)
 		if err != nil {
 			return err
 		}
-		lineAmounts = contractLineAmounts(existing)
-	}
-	signDate, startDate, endDate, err := parseContractDates(req.SignDate, req.StartDate, req.EndDate, s.businessLocation())
-	if err != nil {
-		return err
-	}
-	// 已签合同金额锁定（req.Amount 忽略）；其余状态按不变量裁决。
-	amount := c.Amount
-	if !signed {
-		if amount, err = ResolveContractAmount(req.Amount, lineAmounts); err != nil {
+		if c == nil {
+			return xerr.NotFound("合同不存在")
+		}
+		ok, err := s.contractPermitted(ctx, c)
+		if err != nil {
 			return err
 		}
-	}
-
-	// 只写请求列（PR #39 审查 P1）：编号/客户/来源商机/状态/驳回原因/owner_*
-	// 不在编辑路径写入，并发状态流转或归属变更不会被旧快照回写覆盖。
-	fields := map[string]any{
-		"name":       req.Name,
-		"sign_date":  signDate,
-		"start_date": startDate,
-		"end_date":   endDate,
-		"remark":     req.Remark,
-	}
-	if !signed {
+		if !ok {
+			return xerr.NotFound("合同不存在")
+		}
+		if c.Status == model.ContractStatusVoid {
+			return xerr.BadRequest("已作废合同不可编辑")
+		}
+		signed := c.Status == model.ContractStatusSigned
+		var products []model.ContractProduct
+		var lineAmounts []money.Money
+		if req.Products != nil {
+			if signed {
+				return xerr.BadRequest("已签合同不可修改行项目：如需调整请先作废后重新签订")
+			}
+			if err := ValidateContractLineItems(contractLineItemsFromDTO(req.Products)); err != nil {
+				return err
+			}
+			if products, err = s.buildContractProducts(ctx, c.ID, req.Products); err != nil {
+				return err
+			}
+			lineAmounts = contractLineAmounts(products)
+		} else if !signed {
+			// 行项目保持不变：金额不变量仍须成立，手填金额只在该合同无行项目时生效
+			//（有行项目时提交的金额一律忽略，见 ResolveContractAmount）。
+			existing, err := s.repo.ListContractProducts(ctx, c.ID)
+			if err != nil {
+				return err
+			}
+			lineAmounts = contractLineAmounts(existing)
+		}
+		signDate, startDate, endDate, err := parseContractDates(req.SignDate, req.StartDate, req.EndDate, s.businessLocation())
+		if err != nil {
+			return err
+		}
 		// 已签合同金额锁定（req.Amount 忽略）；其余状态按不变量裁决。
-		fields["amount"] = amount
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		amount := c.Amount
+		if !signed {
+			if amount, err = ResolveContractAmount(req.Amount, lineAmounts); err != nil {
+				return err
+			}
+		}
+
+		// 只写请求列（PR #39 审查 P1）：编号/客户/来源商机/状态/驳回原因/owner_*
+		// 不在编辑路径写入，并发状态流转或归属变更不会被旧快照回写覆盖。
+		fields := map[string]any{
+			"name":       req.Name,
+			"sign_date":  signDate,
+			"start_date": startDate,
+			"end_date":   endDate,
+			"remark":     req.Remark,
+		}
+		if !signed {
+			fields["amount"] = amount
+		}
 		if _, err := tx.UpdateContractFields(ctx, c.ID, fields); err != nil {
 			return err
 		}
@@ -231,61 +245,99 @@ func (s *Service) UpdateContract(ctx context.Context, req *dto.ContractUpdateReq
 // ChangeContractStatus 状态流转（唯一状态入口）：先做纯函数校验（非法流转 400），
 // 再按目标动作分派——提交/审批/驳回走 ApprovalService（v1 直通，含审批权限校验），
 // 作废先过 VoidContractGuard 守卫（#18 接回款约束）再条件更新。
-// 条件更新防并发覆盖：状态已被并发请求变更时 409。
+//
+// 并发保护（PR #39 审查 P1）：整个「锁定 → 复核最新状态 → 流转/守卫计数 →
+// 更新」在同一事务内完成，合同行是最先也唯一被锁的行（锁序：合同 → 计划）。
+// 条件更新仍是第二道保险：状态被非本路径并发变更时 0 行报 409。
 func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractStatusReq) (*model.Contract, error) {
-	c, err := s.findVisibleContract(ctx, req.ID)
-	if err != nil {
-		return nil, err
-	}
 	if err := ValidateContractStatus(req.Status); err != nil {
 		return nil, err
 	}
-	if err := CanTransitionContractStatus(c.Status, req.Status); err != nil {
-		return nil, err
-	}
-
-	switch req.Status {
-	case model.ContractStatusPending:
-		err = s.approvals.Submit(ctx, c)
-	case model.ContractStatusSigned:
-		err = s.approvals.Approve(ctx, c)
-	case model.ContractStatusDraft:
-		err = s.approvals.Reject(ctx, c, req.Reason)
-	case model.ContractStatusVoid:
-		if err = s.canVoidContract(ctx, c.ID); err != nil {
-			return nil, err
+	var id int64
+	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		c, err := tx.LockContractByID(ctx, req.ID)
+		if err != nil {
+			return err
 		}
-		var rows int64
-		rows, err = s.repo.TransitionContractStatus(ctx, c.ID, c.Status, model.ContractStatusVoid, "")
-		if err == nil && rows == 0 {
-			err = xerr.Conflict("合同状态已被其他操作变更，请刷新后重试")
+		if c == nil {
+			return xerr.NotFound("合同不存在")
 		}
-	}
+		ok, err := s.contractPermitted(ctx, c)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return xerr.NotFound("合同不存在")
+		}
+		// 以锁定后的最新状态复核流转：编辑/审批并发时，后拿到锁的请求
+		// 按最新状态裁决，而不是按进入函数时的旧快照。
+		if err := CanTransitionContractStatus(c.Status, req.Status); err != nil {
+			return err
+		}
+		switch req.Status {
+		case model.ContractStatusPending:
+			err = s.approvals.Submit(ctx, tx, c)
+		case model.ContractStatusSigned:
+			err = s.approvals.Approve(ctx, tx, c)
+		case model.ContractStatusDraft:
+			err = s.approvals.Reject(ctx, tx, c, req.Reason)
+		case model.ContractStatusVoid:
+			// 守卫在同一事务、合同行锁内计数回款记录：并发登记回款会在
+			// LockContractByID 上排队，作废提交后读到作废态被拒绝，反之
+			// 守卫看到已提交的记录而拒绝作废。
+			if err = s.canVoidContractTx(ctx, tx, c.ID); err != nil {
+				return err
+			}
+			var rows int64
+			rows, err = tx.TransitionContractStatus(ctx, c.ID, c.Status, model.ContractStatusVoid, "")
+			if err == nil && rows == 0 {
+				err = xerr.Conflict("合同状态已被其他操作变更，请刷新后重试")
+			}
+		}
+		id = c.ID
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
 	// 状态/驳回原因已在库上变更，重读返回最新态（含名称补齐）。
-	return s.GetContract(ctx, c.ID)
+	return s.GetContract(ctx, id)
 }
 
 // DeleteContract 软删除合同（数据范围外 404）。删除口径见文件头注释：
 // 待审/已签不可删（400）；作废/删除前过 VoidContractGuard 守卫（#18 接
 // 「有回款记录禁止删除」，spec §4.5）。行项目随之不可见，其引用的产品恢复可删。
+//
+// 并发保护（PR #39 审查 P1）：事务内先锁合同行并复核状态，再在锁内计数回款
+// 记录，最后软删；与登记回款（先合同、后计划）同一锁序，不会删出「已删合同
+// + 新增回款」。
 func (s *Service) DeleteContract(ctx context.Context, id int64) error {
-	c, err := s.findVisibleContract(ctx, id)
-	if err != nil {
-		return err
-	}
-	switch c.Status {
-	case model.ContractStatusPending:
-		return xerr.BadRequest("待审合同不可删除：请先驳回或作废")
-	case model.ContractStatusSigned:
-		return xerr.BadRequest("已签合同不可删除：生效合同请先作废")
-	}
-	if err := s.canVoidContract(ctx, c.ID); err != nil {
-		return err
-	}
-	return s.repo.DeleteContract(ctx, c.ID)
+	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		c, err := tx.LockContractByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if c == nil {
+			return xerr.NotFound("合同不存在")
+		}
+		ok, err := s.contractPermitted(ctx, c)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return xerr.NotFound("合同不存在")
+		}
+		switch c.Status {
+		case model.ContractStatusPending:
+			return xerr.BadRequest("待审合同不可删除：请先驳回或作废")
+		case model.ContractStatusSigned:
+			return xerr.BadRequest("已签合同不可删除：生效合同请先作废")
+		}
+		if err := s.canVoidContractTx(ctx, tx, c.ID); err != nil {
+			return err
+		}
+		return tx.DeleteContract(ctx, c.ID)
+	})
 }
 
 // findVisibleContract 取合同并做数据范围校验：不存在或范围外都返回 404。
