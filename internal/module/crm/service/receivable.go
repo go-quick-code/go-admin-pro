@@ -270,7 +270,7 @@ func (s *Service) findVisibleReceivablePlan(ctx context.Context, id int64) (*mod
 
 // requireReceivableDate 解析必填的回款日期字段（到期日/到账日期）。
 func (s *Service) requireReceivableDate(field, value string) (*time.Time, error) {
-	parsed, err := ParseReceivableDate(field, value)
+	parsed, err := ParseReceivableDate(field, value, s.businessLocation())
 	if err != nil {
 		return nil, err
 	}

@@ -72,8 +72,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterProductCategoryRoutes(rg)
 	h.RegisterProductRoutes(rg)
 
-	// 商机（issue #15）：owner-scoped 正体，CRUD + 阶段推进（唯一阶段入口，
-	// 挂独立按钮码 crm:opportunity:stage，终态推进在 service 层拒绝）。
+	// 商机（issue #15）：owner-scoped 正体，CRUD + 阶段推进。创建时可指定
+	// 1–4；此后阶段变更只走 PUT /stage（挂独立按钮码 crm:opportunity:stage），
+	// 进入 5/6 终态后 service 层拒绝变更。
 	opportunity := rg.Group("/crm/opportunity")
 	opportunity.GET("/page", h.requirePermission("crm:opportunity:query"), h.PageOpportunities)
 	opportunity.GET("/:id", h.requirePermission("crm:opportunity:query"), h.GetOpportunity)

@@ -109,7 +109,7 @@ func (s *Service) CreateContract(ctx context.Context, req *dto.ContractCreateReq
 	if err != nil {
 		return nil, err
 	}
-	signDate, startDate, endDate, err := parseContractDates(req.SignDate, req.StartDate, req.EndDate)
+	signDate, startDate, endDate, err := parseContractDates(req.SignDate, req.StartDate, req.EndDate, s.businessLocation())
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (s *Service) UpdateContract(ctx context.Context, req *dto.ContractUpdateReq
 		}
 		lineAmounts = contractLineAmounts(existing)
 	}
-	signDate, startDate, endDate, err := parseContractDates(req.SignDate, req.StartDate, req.EndDate)
+	signDate, startDate, endDate, err := parseContractDates(req.SignDate, req.StartDate, req.EndDate, s.businessLocation())
 	if err != nil {
 		return err
 	}
@@ -414,16 +414,16 @@ func sumContractProducts(products []model.ContractProduct) money.Money {
 
 // parseContractDates 解析并校验签订/起止日期：起 ≤ 止校验对起止生效，
 // 签订日期不参与先后约束（补签的合同签订日期可以晚于生效期起点）。
-func parseContractDates(signDate, startDate, endDate string) (*time.Time, *time.Time, *time.Time, error) {
-	sign, err := ParseContractDate(signDate)
+func parseContractDates(signDate, startDate, endDate string, loc *time.Location) (*time.Time, *time.Time, *time.Time, error) {
+	sign, err := ParseContractDate(signDate, loc)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	start, err := ParseContractDate(startDate)
+	start, err := ParseContractDate(startDate, loc)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	end, err := ParseContractDate(endDate)
+	end, err := ParseContractDate(endDate, loc)
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -122,20 +122,16 @@ func ValidateReceivableRecordAmount(amount, planAmount, otherRecordTotal money.M
 	return nil
 }
 
-// receivableDateLayouts 是回款日期字段接受的格式（前端 value-format 与纯日期）。
-var receivableDateLayouts = []string{"2006-01-02", time.RFC3339, "2006-01-02 15:04:05"}
-
 // ParseReceivableDate 解析回款日期（到期日/到账日期）：空值放行（返回 nil），
 // 非法格式返回 400 并带回原始输入与字段名（与合同/商机日期同一约定）。
-func ParseReceivableDate(field, value string) (*time.Time, error) {
+// 日期文本按 loc（业务时区，ADR 0006）解释，调用方传 Service.businessLocation()。
+func ParseReceivableDate(field, value string, loc *time.Location) (*time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, nil
 	}
-	for _, layout := range receivableDateLayouts {
-		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
-			return &t, nil
-		}
+	if t, ok := parseDateIn(crmDateLayouts, value, loc); ok {
+		return &t, nil
 	}
 	return nil, xerr.BadRequest(fmt.Sprintf("%s %q 格式不正确：应为 2026-01-02 形式", field, value))
 }

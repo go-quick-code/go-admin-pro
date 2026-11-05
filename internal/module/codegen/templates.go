@@ -99,11 +99,30 @@ import (
 // [[.ClassName]]Service [[.TableComment]]业务逻辑。
 type [[.ClassName]]Service struct {
 	db *gorm.DB
-}
+[[if .HasTime]]	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
+	// nil 表示未注入（退回 time.Local，见 businessLocation）。
+	location *time.Location
+[[end]]}
 
 func New[[.ClassName]]Service(db *gorm.DB) *[[.ClassName]]Service {
 	return &[[.ClassName]]Service{db: db}
 }
+[[if .HasTime]]
+// SetLocation 注入业务时区（ADR 0006：唯一来源是 config.Location()）。nil 忽略。
+func (s *[[.ClassName]]Service) SetLocation(loc *time.Location) {
+	if loc != nil {
+		s.location = loc
+	}
+}
+
+// businessLocation 返回业务时区；未注入时退回 time.Local（测试/工具场景）。
+func (s *[[.ClassName]]Service) businessLocation() *time.Location {
+	if s.location != nil {
+		return s.location
+	}
+	return time.Local
+}
+[[end]]
 
 // List 分页查询。
 func (s *[[.ClassName]]Service) List(ctx context.Context, req *dto.[[.ClassName]]PageReq) ([]model.[[.ClassName]], int64, error) {
@@ -137,7 +156,7 @@ func (s *[[.ClassName]]Service) Get(ctx context.Context, id int64) (*model.[[.Cl
 // Create 新增。
 func (s *[[.ClassName]]Service) Create(ctx context.Context, req *dto.[[.ClassName]]CreateReq) error {
 	row := &model.[[.ClassName]]{
-[[range .Fields]]		[[.GoName]]: [[if .IsTime]]parseOptionalTime(req.[[.GoName]])[[else]]req.[[.GoName]][[end]],
+[[range .Fields]]		[[.GoName]]: [[if .IsTime]]s.parseOptionalTime(req.[[.GoName]])[[else]]req.[[.GoName]][[end]],
 [[end]]	}
 	return s.db.WithContext(ctx).Create(row).Error
 }
@@ -148,7 +167,7 @@ func (s *[[.ClassName]]Service) Update(ctx context.Context, req *dto.[[.ClassNam
 	if err != nil {
 		return err
 	}
-[[range .Fields]]	row.[[.GoName]] = [[if .IsTime]]parseOptionalTime(req.[[.GoName]])[[else]]req.[[.GoName]][[end]]
+[[range .Fields]]	row.[[.GoName]] = [[if .IsTime]]s.parseOptionalTime(req.[[.GoName]])[[else]]req.[[.GoName]][[end]]
 [[end]]	return s.db.WithContext(ctx).Save(row).Error
 }
 
@@ -157,13 +176,15 @@ func (s *[[.ClassName]]Service) Delete(ctx context.Context, id int64) error {
 	return s.db.WithContext(ctx).Delete(&model.[[.ClassName]]{}, id).Error
 }
 [[if .HasTime]]
-func parseOptionalTime(value string) *time.Time {
+// parseOptionalTime 把前端提交的时间字符串解析为可空时间：空串返回 nil，
+// 格式非法返回 nil（选填时间字段按无值处理）；按业务时区解释（ADR 0006）。
+func (s *[[.ClassName]]Service) parseOptionalTime(value string) *time.Time {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
 	}
-	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+	for _, layout := range []string{"2006-01-02", "2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.ParseInLocation(layout, value, s.businessLocation()); err == nil {
 			return &t
 		}
 	}

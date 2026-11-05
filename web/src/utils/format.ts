@@ -3,6 +3,21 @@ export function formatTime(value?: string | null) {
   return value.replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 19)
 }
 
+// 日期只保留 yyyy-MM-dd（CRM 合同/回款/公海/客户页共用）。
+export function formatDate(value?: string | null) {
+  return value ? String(value).slice(0, 10) : '-'
+}
+
+export type StatusTagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+// 按业务状态映射 el-tag 颜色；未命中的状态回退 info（各页只传自己的映射表）。
+export function statusTagType(
+  status: number | undefined,
+  mapping: Record<number, StatusTagType>,
+): StatusTagType {
+  return mapping[status ?? -1] ?? 'info'
+}
+
 export function formatSize(size?: number) {
   if (!size && size !== 0) return '-'
   if (size < 1024) return `${size} B`

@@ -119,6 +119,14 @@ func (r *Repository) SaveProduct(ctx context.Context, row *model.Product) error 
 	return wrapDuplicateEntry(r.db.WithContext(ctx).Save(row).Error)
 }
 
+// UpdateProductStatus 只更新产品状态列（PUT /crm/product/status，spec §5），
+// 不触碰名称/编码/价格等其他字段；租户插件自动带租户条件。
+func (r *Repository) UpdateProductStatus(ctx context.Context, id int64, status int8) error {
+	return r.db.WithContext(ctx).Model(&model.Product{}).
+		Where("id = ?", id).
+		Update("status", status).Error
+}
+
 // DeleteProduct 按 ID 软删除产品（GORM deleted_at，租户插件自动带租户条件）。
 func (r *Repository) DeleteProduct(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Product{}, id).Error

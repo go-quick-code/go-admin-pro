@@ -178,6 +178,17 @@ func (r *Repository) CountContractProductsByProduct(ctx context.Context, product
 	return count, err
 }
 
+// CountActiveContractsByCustomer 统计客户名下未作废（status <> 4）且未软删的
+// 合同数（客户删除约束，spec §4.5）：草稿/待审/已签都算未作废，作废合同不计。
+// 租户条件与软删过滤由租户插件按主表 crm_contract 自动追加。
+func (r *Repository) CountActiveContractsByCustomer(ctx context.Context, customerID int64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.Contract{}).
+		Where("customer_id = ? AND status <> ?", customerID, model.ContractStatusVoid).
+		Count(&count).Error
+	return count, err
+}
+
 // ActiveContractCustomerIDs 返回给定客户中存在「未作废合同」的客户 ID 集合
 // （ContractChecker 实现，issue #14/#16，spec §4.2 自动回收排除）：
 // 作废合同与无合同都不进集合；行级软删合同不算（deleted_at IS NULL）。

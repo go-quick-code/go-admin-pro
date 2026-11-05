@@ -377,3 +377,92 @@ func mustJSON(v any) string {
 	}
 	return string(raw)
 }
+
+// TestIntegrationProductStatusEndpoint PUT /crm/product/status（spec §5）：
+// 只改 status（0 下架 / 1 上架），其他字段不受影响；非法枚举与缺参 400，
+// 不存在 404，无 crm:product:update 的用户 403。
+func TestIntegrationProductStatusEndpoint(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	cat := createProductCategory(t, env, admin, "状态端点分类")
+	catID := int64(cat["id"].(float64))
+	product := createProduct(t, env, admin, "状态端点产品", map[string]any{
+		"categoryId": catID, "code": "SKU-STATUS", "price": "88.00", "status": 1,
+	})
+	id := int64(product["id"].(float64))
+
+	updateStatus := func(status any) (int, testutil.APIResponse) {
+		body := map[string]any{"id": id}
+		if status != nil {
+			body["status"] = status
+		}
+		return env.Request(t, http.MethodPut, "/crm/product/status", admin, body)
+	}
+	getStatus := func() float64 {
+		status, api := env.Request(t, http.MethodGet, fmt.Sprintf("/crm/product/%d", id), admin, nil)
+		if status != http.StatusOK || api.Code != 0 {
+			t.Fatalf("查询产品详情：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+		}
+		var detail map[string]any
+		if err := json.Unmarshal(api.Data, &detail); err != nil {
+			t.Fatalf("解析产品详情: %v", err)
+		}
+		return detail["status"].(float64)
+	}
+
+	// 下架（0 是合法值，不能被 required 当成缺参拒绝）。
+	if status, api := updateStatus(0); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("下架产品：HTTP %d code %d msg %q，期望 200", status, api.Code, api.Msg)
+	}
+	if got := getStatus(); got != float64(0) {
+		t.Fatalf("下架后 status=%v，期望 0", got)
+	}
+	// 其他字段不受影响。
+	status, api := env.Request(t, http.MethodGet, fmt.Sprintf("/crm/product/%d", id), admin, nil)
+	if status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("下架后查询产品：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(api.Data, &detail); err != nil {
+		t.Fatalf("解析产品详情: %v", err)
+	}
+	if detail["name"] != "状态端点产品" || detail["price"] != "88.00" || detail["code"] != "SKU-STATUS" {
+		t.Fatalf("状态端点不应改动其他字段：%s", mustJSON(detail))
+	}
+
+	// 上架。
+	if status, api := updateStatus(1); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("上架产品：HTTP %d code %d msg %q，期望 200", status, api.Code, api.Msg)
+	}
+	if got := getStatus(); got != float64(1) {
+		t.Fatalf("上架后 status=%v，期望 1", got)
+	}
+
+	// 非法枚举 400（2 / -1），缺 status 400，不存在 404。
+	for _, v := range []int{2, -1} {
+		if status, api := updateStatus(v); status != http.StatusBadRequest {
+			t.Fatalf("状态 %d：HTTP %d code %d msg %q，期望 400", v, status, api.Code, api.Msg)
+		}
+	}
+	if status, api := updateStatus(nil); status != http.StatusBadRequest {
+		t.Fatalf("缺 status：HTTP %d code %d msg %q，期望 400", status, api.Code, api.Msg)
+	}
+	if status, api := env.Request(t, http.MethodPut, "/crm/product/status", admin, map[string]any{
+		"id": 999999, "status": 0,
+	}); status != http.StatusNotFound {
+		t.Fatalf("不存在产品：HTTP %d code %d msg %q，期望 404", status, api.Code, api.Msg)
+	}
+
+	// 无 crm:product:update（只绑查询按钮 4063）：403。
+	roleID := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "仅产品查询角色", "code": "prod_status_query_only", "dataScope": 1,
+		"menuIds": []int64{crmProductMenuID, 4063},
+	})
+	createUserByAPI(t, env, admin, "prod_status_query_user", 102, []int64{roleID})
+	queryOnly := env.Login(t, "prod_status_query_user", "123456")
+	if status, api := env.Request(t, http.MethodPut, "/crm/product/status", queryOnly, map[string]any{
+		"id": id, "status": 0,
+	}); status != http.StatusForbidden {
+		t.Fatalf("无 crm:product:update 修改状态：HTTP %d code %d msg %q，期望 403", status, api.Code, api.Msg)
+	}
+}

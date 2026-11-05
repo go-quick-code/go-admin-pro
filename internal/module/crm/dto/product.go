@@ -29,6 +29,14 @@ type ProductUpdateReq struct {
 	Description string      `json:"description" binding:"max=500"`
 }
 
+// ProductStatusReq 修改产品状态（PUT /crm/product/status，spec §5）：
+// 只改 status（0 下架 / 1 上架），不触及其他字段。status 用指针接收，
+// 0 是合法值，不能被 binding 的 required 当成缺参。
+type ProductStatusReq struct {
+	ID     int64 `json:"id" binding:"required"`
+	Status *int8 `json:"status" binding:"required"`
+}
+
 // ProductPageReq 产品分页筛选：枚举传非法值直接 400，绝不静默当成「无此筛选」。
 // categoryId 由 #11 手工补：codegen 不生成 int64 筛选字段（分类树选择器联动）。
 type ProductPageReq struct {

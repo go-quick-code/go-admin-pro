@@ -26,7 +26,7 @@
 
 ## 3. 表结构
 
-所有实体表含 `id`、`tenant_id`、`created_at`、`updated_at`、`deleted_at`、`creator`、`updater`。关联表用复合主键 + `tenant_id`，不设软删除，变更由操作日志记录。`crm_customer_owner_history` 是追加型审计表，仅 `created_at/creator`；`crm_sequence` 是计数支撑表，只有业务字段——这两类不套用实体底座。
+所有实体表含 `id`、`tenant_id`、`created_at`、`updated_at`、`deleted_at`、`creator`、`updater`。关联表用复合主键 + `tenant_id`，不设软删除，变更由操作日志记录。`crm_customer_owner_history` 是追加型审计表，仅 `created_at`（操作时间）与显式业务列，不设 `creator/updater`；`crm_sequence` 是计数支撑表，只有业务字段——这两类不套用实体底座。
 
 ### 产品
 
@@ -41,8 +41,9 @@
 |---|---|
 | `crm_customer` | `customer_no`（租户内唯一）、`name`、`industry`、`level`、`source`、`phone`、`website`、`address`、`status`(1 潜在/2 活跃/3 流失)、`owner_user_id`(可空)、`owner_dept_id`(可空)、`pool_enter_time`、`last_follow_time`、`release_reason`、`remark` |
 | `crm_contact` | `customer_id`、`name`、`position`、`mobile`、`email`、`gender`、`decision_role`、`remark` |
-| `crm_follow_up` | `biz_type`(1 客户/2 商机/3 合同)、`biz_id`、`type`、`content`、`next_follow_time` |
-| `crm_customer_owner_history` | `customer_id`、`from_user_id`、`to_user_id`、`action`(1 领取/2 释放/3 转移/4 自动回收/5 创建)、`operator_user_id`、`reason`；仅 `created_at/creator` |
+| `crm_follow_up` | `customer_id`(非空，0 表示未挂客户)、`opportunity_id`(可空)、`contract_id`(可空)、`type`、`content`、`next_follow_time`。三列三选一，不用 `biz_type`/`biz_id` 多态：强关联让外键语义、索引与 join 父记录套数据权限更直接，三选一约束由服务层校验 |
+| `crm_customer_owner_history` | `customer_id`、`action`(字符串：`create`/`claim`/`release`/`transfer`/`recycle`)、`from_owner_user_id`/`to_owner_user_id`、`from_owner_dept_id`/`to_owner_dept_id`、`operator_user_id`；无 `reason`（释放原因在客户表 `release_reason`），仅 `created_at`（追加型审计表，不设 `creator/updater`） |
+| `crm_pool_config` | `tenant_id`（唯一）、`recycle_days`(默认 30)、`claim_limit`(默认 50)；租户级公海配置，行缺失按默认值执行 |
 
 ### 销售
 
@@ -83,7 +84,7 @@
 - 自动回收：`infra_job` 按租户配置执行；条件为「owner 非空、`COALESCE(last_follow_time, created_at)` 超过 N 天（默认 30）、无未作废合同」。从未跟进的新客户按创建时间计算，不会被排除在回收规则外。
 - 认领：校验 `crm:customer:claim`、认领上限、客户仍在公海；写入新 owner 与部门，清空池字段，写历史。
 - 认领上限：指 `owner_user_id = 当前用户` 的未删除客户总数，不区分是否成交；默认 50。
-- 配置落点：回收天数与认领上限存 `infra_config` 的租户级 key `crm.pool.recycle_days`、`crm.pool.claim_limit`，缺省 30 / 50。
+- 配置落点：回收天数与认领上限存 `crm_pool_config` 表（迁移 00008，每租户一行，租户内唯一），不在 `infra_config` 的 key 里；行缺失按缺省 30 / 50 执行，首次编辑落行。读取复用 `crm:customer:pool:view`，编辑挂 `crm:pool-config:update`。
 - 跟进任一子记录都刷新客户的 `last_follow_time`。
 
 ### 4.3 金额不变量
@@ -117,6 +118,7 @@
 | 产品 | `GET /product/page`、`GET /product/:id`、`POST/PUT/DELETE /product`、`PUT /product/status`、`GET /product/export-excel`、`POST /product/import` | `crm:product:*` |
 | 客户 | `GET /customer/page`、`GET /customer/:id`、`POST/PUT/DELETE /customer`、`PUT /customer/transfer`、`PUT /customer/release`、`PUT /customer/claim`、`GET /customer/pool/page`、`GET /customer/export-excel`、`POST /customer/import` | `crm:customer:*`、`crm:customer:pool:view`、`crm:customer:claim`、`crm:customer:transfer` |
 | 联系人 | `GET /contact/page`、`GET /contact/:id`、`POST/PUT/DELETE /contact`、`POST /contact/import` | `crm:contact:*` |
+| 公海配置 | `GET /pool-config`、`PUT /pool-config` | 读 `crm:customer:pool:view`、写 `crm:pool-config:update` |
 | 跟进 | `GET /follow-up/page`、`POST/PUT/DELETE /follow-up` | `crm:follow-up:*` |
 | 商机 | `GET /opportunity/page`、`GET /opportunity/:id`、`POST/PUT/DELETE /opportunity`、`PUT /opportunity/stage` | `crm:opportunity:*` |
 | 合同 | `GET /contract/page`、`GET /contract/:id`、`POST/PUT/DELETE /contract`、`PUT /contract/status`、`GET /contract/export-excel` | `crm:contract:*`、`crm:contract:approve` |
@@ -129,7 +131,7 @@
 1. CRM 仪表盘：4 卡片 + 商机阶段漏斗 + 月度合同/回款趋势。
 2. 产品管理：分类树 + 产品列表/表单。
 3. 客户管理：列表、详情（联系人/跟进/商机/合同 tab）、新建/编辑、转移/释放/领取、导入导出。
-4. 公海：列表、认领。
+4. 公海：列表、认领、公海配置（回收天数与认领上限，入口在公海页工具栏）。
 5. 商机管理：列表、详情、阶段推进、产品行项目。
 6. 合同管理：列表、详情、行项目、状态流转、附件、导出。
 7. 回款管理：计划列表、记录录入、逾期标识、导出。

@@ -3,6 +3,7 @@ package service_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
 	"github.com/lautung/go-admin-pro/internal/module/crm/service"
@@ -53,7 +54,7 @@ func TestValidateFollowUpType(t *testing.T) {
 func TestValidateFollowUpNextTime(t *testing.T) {
 	// 留空放行（选填字段）；空白串按留空处理。
 	for _, s := range []string{"", "   "} {
-		next, err := service.ValidateFollowUpNextTime(s)
+		next, err := service.ValidateFollowUpNextTime(s, time.Local)
 		if err != nil || next != nil {
 			t.Fatalf("%q 应放行且返回 nil，实际 %v %v", s, next, err)
 		}
@@ -61,7 +62,7 @@ func TestValidateFollowUpNextTime(t *testing.T) {
 
 	// 合法格式：前端 value-format（YYYY-MM-DD HH:mm:ss）、纯日期与 RFC3339。
 	for _, s := range []string{"2026-01-02 15:04:05", "2026-01-02", "2026-01-02T15:04:05+08:00"} {
-		next, err := service.ValidateFollowUpNextTime(s)
+		next, err := service.ValidateFollowUpNextTime(s, time.Local)
 		if err != nil {
 			t.Fatalf("下次跟进时间 %q 应合法，实际报错 %v", s, err)
 		}
@@ -71,7 +72,7 @@ func TestValidateFollowUpNextTime(t *testing.T) {
 	}
 
 	// 日期部分回读一致（本地时区）。
-	next, err := service.ValidateFollowUpNextTime("2026-01-02 15:04:05")
+	next, err := service.ValidateFollowUpNextTime("2026-01-02 15:04:05", time.Local)
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
@@ -81,14 +82,14 @@ func TestValidateFollowUpNextTime(t *testing.T) {
 
 	// 非法格式：400，中文错误信息。
 	for _, s := range []string{"明天", "2026/01/02", "2026-13-01 00:00:00", "20260102"} {
-		_, err := service.ValidateFollowUpNextTime(s)
+		_, err := service.ValidateFollowUpNextTime(s, time.Local)
 		if err == nil {
 			t.Fatalf("下次跟进时间 %q 应返回 400 错误", s)
 		}
 	}
 
 	// 错误信息里应带回原始输入，帮助用户定位。
-	_, err = service.ValidateFollowUpNextTime("明天")
+	_, err = service.ValidateFollowUpNextTime("明天", time.Local)
 	if err != nil && !strings.Contains(err.Error(), "明天") {
 		t.Fatalf("错误信息应包含原始输入 %q，实际 %q", "明天", err.Error())
 	}

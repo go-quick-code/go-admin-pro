@@ -64,6 +64,19 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 	response.OK(c, true)
 }
 
+// UpdateProductStatus 修改产品状态（spec §5，只改 status：0 下架 / 1 上架）。
+func (h *Handler) UpdateProductStatus(c *gin.Context) {
+	var req dto.ProductStatusReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := h.svc.UpdateProductStatus(c.Request.Context(), &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
+}
+
 // DeleteProduct 删除产品（软删除）。
 func (h *Handler) DeleteProduct(c *gin.Context) {
 	id, ok := pathID(c)
@@ -89,6 +102,8 @@ func (h *Handler) RegisterProductRoutes(rg *gin.RouterGroup) {
 	product.GET("/export-excel", h.requirePermission("crm:product:export"), h.ExportProducts)
 	product.GET("/:id", h.requirePermission("crm:product:query"), h.GetProduct)
 	product.POST("", h.requirePermission("crm:product:create"), h.CreateProduct)
+	// 状态切换（spec §5）：只改 status，挂 crm:product:update。
+	product.PUT("/status", h.requirePermission("crm:product:update"), h.UpdateProductStatus)
 	product.PUT("", h.requirePermission("crm:product:update"), h.UpdateProduct)
 	product.DELETE("/:id", h.requirePermission("crm:product:delete"), h.DeleteProduct)
 }

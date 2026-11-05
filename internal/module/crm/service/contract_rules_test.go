@@ -171,14 +171,14 @@ func TestValidateContractLineItems(t *testing.T) {
 
 func TestParseContractDate(t *testing.T) {
 	t.Run("空串放行返回 nil", func(t *testing.T) {
-		got, err := ParseContractDate("")
+		got, err := ParseContractDate("", time.Local)
 		if err != nil || got != nil {
 			t.Fatalf("空串应放行且返回 nil，实际 %v %v", got, err)
 		}
 	})
 	t.Run("纯日期与时间格式均可解析", func(t *testing.T) {
 		for _, in := range []string{"2026-01-02", "2026-01-02 03:04:05"} {
-			got, err := ParseContractDate(in)
+			got, err := ParseContractDate(in, time.Local)
 			if err != nil || got == nil {
 				t.Fatalf("%q 应可解析，实际 %v %v", in, got, err)
 			}
@@ -188,7 +188,7 @@ func TestParseContractDate(t *testing.T) {
 		}
 	})
 	t.Run("非法格式 400", func(t *testing.T) {
-		if _, err := ParseContractDate("明年"); !isBadRequest(err) {
+		if _, err := ParseContractDate("明年", time.Local); !isBadRequest(err) {
 			t.Fatalf("非法日期应 400，实际 %v", err)
 		}
 	})

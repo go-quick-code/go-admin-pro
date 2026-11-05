@@ -102,20 +102,16 @@ func SumLineAmounts(amounts []money.Money) (money.Money, error) {
 	return total, nil
 }
 
-// expectedCloseDateLayouts 是预计成交日期接受的格式（前端 value-format 与纯日期）。
-var expectedCloseDateLayouts = []string{"2006-01-02", time.RFC3339, "2006-01-02 15:04:05"}
-
 // ParseExpectedCloseDate 解析预计成交日期：空值放行（返回 nil），
 // 非法格式返回 400 并带回原始输入（与跟进 nextFollowTime 同一约定）。
-func ParseExpectedCloseDate(value string) (*time.Time, error) {
+// 日期文本按 loc（业务时区，ADR 0006）解释，调用方传 Service.businessLocation()。
+func ParseExpectedCloseDate(value string, loc *time.Location) (*time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, nil
 	}
-	for _, layout := range expectedCloseDateLayouts {
-		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
-			return &t, nil
-		}
+	if t, ok := parseDateIn(crmDateLayouts, value, loc); ok {
+		return &t, nil
 	}
 	return nil, xerr.BadRequest(fmt.Sprintf("预计成交日期 %q 格式不正确：应为 2026-01-02 形式", value))
 }

@@ -20,6 +20,9 @@ import (
 const (
 	PermCustomerRelease  = "crm:customer:release"
 	PermCustomerTransfer = "crm:customer:transfer"
+	// PermCustomerPoolView 控制公海可见性（spec §4.1）：公海列表与仪表盘
+	// 客户总数的公海口径都以该权限码为准。
+	PermCustomerPoolView = "crm:customer:pool:view"
 )
 
 // canOperateOwner 校验当前用户可否对客户做负责人变更（释放/转移）：

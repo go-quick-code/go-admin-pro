@@ -25,7 +25,7 @@
         />
       </template>
       <template #cell-status="{ row }">
-        <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+        <el-tag :type="statusTagType(row.status, contractStatusTagTypes)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
       <template #cell-amount="{ row }">{{ row.amount ?? '0.00' }}</template>
       <template #cell-signDate="{ row }">{{ formatDate(row.signDate) }}</template>
@@ -193,7 +193,7 @@
             <el-descriptions-item label="合同编号">{{ detail.contractNo }}</el-descriptions-item>
             <el-descriptions-item label="合同名称">{{ detail.name }}</el-descriptions-item>
             <el-descriptions-item label="状态">
-              <el-tag :type="statusTagType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag>
+              <el-tag :type="statusTagType(detail.status, contractStatusTagTypes)" size="small">{{ statusLabel(detail.status) }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="所属客户">{{ detail.customerName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="来源商机">{{ detail.opportunityName || '-' }}</el-descriptions-item>
@@ -300,7 +300,7 @@
           <span>{{ statusRow?.name }}</span>
         </el-form-item>
         <el-form-item label="当前状态">
-          <el-tag :type="statusTagType(statusRow?.status)" size="small">
+          <el-tag :type="statusTagType(statusRow?.status, contractStatusTagTypes)" size="small">
             {{ statusLabel(statusRow?.status) }}
           </el-tag>
         </el-form-item>
@@ -342,7 +342,14 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
-import { formatTime, formatSize, dictLabel } from '@/utils/format'
+import {
+  formatTime,
+  formatSize,
+  formatDate,
+  dictLabel,
+  statusTagType,
+  type StatusTagType,
+} from '@/utils/format'
 import {
   pageContracts,
   getContract,
@@ -374,6 +381,12 @@ const statusOptions = [
   { label: '作废', value: 4 },
 ]
 
+const contractStatusTagTypes: Record<number, StatusTagType> = {
+  2: 'warning',
+  3: 'success',
+  4: 'danger',
+}
+
 // 跟进类型对齐芋道字典语义（issue #12 同款）
 const followUpTypeOptions = [
   { label: '电话', value: 1 },
@@ -385,17 +398,6 @@ const followUpTypeOptions = [
 
 function statusLabel(status?: number) {
   return dictLabel(statusOptions, status)
-}
-
-function statusTagType(status?: number) {
-  if (status === 2) return 'warning'
-  if (status === 3) return 'success'
-  if (status === 4) return 'danger'
-  return 'info'
-}
-
-function formatDate(value?: string) {
-  return value ? String(value).slice(0, 10) : '-'
 }
 
 function isSigned(form: any) {

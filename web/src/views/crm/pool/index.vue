@@ -22,7 +22,7 @@
         </el-button>
       </template>
       <template #cell-status="{ row }">
-        <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+        <el-tag :type="statusTagType(row.status, customerStatusTagTypes)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
       <template #cell-poolEnterTime="{ row }">
         {{ formatTime(row.poolEnterTime) }}
@@ -78,7 +78,7 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
-import { formatTime, dictLabel } from '@/utils/format'
+import { formatTime, dictLabel, statusTagType, type StatusTagType } from '@/utils/format'
 import {
   pagePoolCustomers,
   claimCustomer,
@@ -97,14 +97,13 @@ const customerStatusOptions = [
   { label: '流失', value: 3 },
 ]
 
-function statusLabel(status: number) {
-  return dictLabel(customerStatusOptions, status)
+const customerStatusTagTypes: Record<number, StatusTagType> = {
+  2: 'success',
+  3: 'danger',
 }
 
-function statusTagType(status: number) {
-  if (status === 2) return 'success'
-  if (status === 3) return 'danger'
-  return 'info'
+function statusLabel(status: number) {
+  return dictLabel(customerStatusOptions, status)
 }
 
 const tableRef = ref()

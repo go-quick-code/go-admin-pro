@@ -9,7 +9,6 @@ import (
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
 	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
-	"github.com/lautung/go-admin-pro/internal/pkg/authn"
 	"github.com/lautung/go-admin-pro/internal/pkg/datascope"
 	"github.com/lautung/go-admin-pro/internal/pkg/excel"
 	"github.com/lautung/go-admin-pro/internal/pkg/web"
@@ -79,22 +78,6 @@ func New(repo *repository.Repository, sys SystemGateway) *Service {
 		contactImports:  excel.NewImportGuard[dto.ContactImportRow](excel.GuardDefaultConcurrent),
 		productImports:  excel.NewImportGuard[dto.ProductImportRow](excel.GuardDefaultConcurrent),
 	}
-}
-
-// CurrentUserID 返回 context 中的当前用户 ID。
-func CurrentUserID(ctx context.Context) int64 {
-	if p, ok := authn.From(ctx); ok {
-		return p.UserID
-	}
-	return 0
-}
-
-// currentTenantID 返回 context 中的当前租户 ID；租户中间件保证登录链路必有值。
-func currentTenantID(ctx context.Context) int64 {
-	if p, ok := authn.From(ctx); ok {
-		return p.TenantID
-	}
-	return 0
 }
 
 // ListCustomers 分页查询客户，按数据范围谓词过滤（行级权限引擎，见 internal/pkg/datascope）：
@@ -285,11 +268,19 @@ func (s *Service) UpdateCustomer(ctx context.Context, req *dto.CustomerUpdateReq
 	return s.repo.SaveCustomer(ctx, c)
 }
 
-// DeleteCustomer 软删除客户。删除约束（未作废合同禁止删除）在合同工单落地后补充。
+// DeleteCustomer 软删除客户。删除约束（spec §4.5）：存在未作废合同
+// （status <> 4 且未软删）时禁止删除，提示先作废/删除合同；作废或软删合同后放行。
 func (s *Service) DeleteCustomer(ctx context.Context, id int64) error {
 	c, err := s.findVisibleCustomer(ctx, id)
 	if err != nil {
 		return err
+	}
+	count, err := s.repo.CountActiveContractsByCustomer(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return xerr.BadRequest("客户存在未作废合同，禁止删除：请先作废或删除相关合同")
 	}
 	return s.repo.DeleteCustomer(ctx, c.ID)
 }

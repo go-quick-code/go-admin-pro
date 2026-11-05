@@ -75,7 +75,7 @@ func (s *Service) CreateFollowUp(ctx context.Context, req *dto.FollowUpCreateReq
 	if err := ValidateFollowUpType(req.Type); err != nil {
 		return nil, err
 	}
-	nextTime, err := ValidateFollowUpNextTime(req.NextFollowTime)
+	nextTime, err := ValidateFollowUpNextTime(req.NextFollowTime, s.businessLocation())
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (s *Service) UpdateFollowUp(ctx context.Context, req *dto.FollowUpUpdateReq
 	if err := ValidateFollowUpType(req.Type); err != nil {
 		return err
 	}
-	nextTime, err := ValidateFollowUpNextTime(req.NextFollowTime)
+	nextTime, err := ValidateFollowUpNextTime(req.NextFollowTime, s.businessLocation())
 	if err != nil {
 		return err
 	}

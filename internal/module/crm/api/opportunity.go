@@ -61,7 +61,8 @@ func (h *Handler) UpdateOpportunity(c *gin.Context) {
 	response.OK(c, true)
 }
 
-// AdvanceOpportunityStage 阶段推进（唯一阶段入口；终态 400）。
+// AdvanceOpportunityStage 阶段推进（创建时可指定 1–4；此后阶段变更只走本端点，
+// 进入 5 赢单 / 6 输单终态后不可再变，终态 400）。
 func (h *Handler) AdvanceOpportunityStage(c *gin.Context) {
 	var req dto.OpportunityStageReq
 	if !bindJSON(c, &req) {

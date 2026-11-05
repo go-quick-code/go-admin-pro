@@ -128,6 +128,22 @@ func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) 
 	return nil
 }
 
+// UpdateProductStatus 修改产品状态（spec §5 PUT /product/status）：只改 status，
+// 产品必须存在（404），枚举非法 400（0 下架 / 1 上架）。
+func (s *Service) UpdateProductStatus(ctx context.Context, req *dto.ProductStatusReq) error {
+	if req.Status == nil {
+		return xerr.BadRequest("产品状态不能为空：期望 0 下架 / 1 上架")
+	}
+	if err := ValidateProductStatus(*req.Status); err != nil {
+		return err
+	}
+	row, err := s.findVisibleProduct(ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdateProductStatus(ctx, row.ID, *req.Status)
+}
+
 // DeleteProduct 软删除产品；删除前跑引用校验扩展点（product_refs.go）。
 func (s *Service) DeleteProduct(ctx context.Context, id int64) error {
 	row, err := s.findVisibleProduct(ctx, id)

@@ -76,6 +76,12 @@ func (s *Service) DeleteFileByBiz(ctx context.Context, bizType string, bizID, fi
 	if f == nil {
 		return xerr.NotFound("文件不存在")
 	}
+	return s.deleteFile(ctx, f)
+}
+
+// deleteFile 删除磁盘文件与数据库记录（两个删除入口的公共实现）：
+// 磁盘文件已不存在时视为删除成功，记录照常清理。
+func (s *Service) deleteFile(ctx context.Context, f *model.File) error {
 	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
 	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
 		return xerr.Internal(err)
@@ -166,11 +172,7 @@ func (s *Service) DeleteFile(ctx context.Context, id int64) error {
 	if f == nil {
 		return xerr.NotFound("文件不存在")
 	}
-	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
-	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
-		return xerr.Internal(err)
-	}
-	return s.repo.DeleteFile(ctx, id)
+	return s.deleteFile(ctx, f)
 }
 
 // FilePublicURL 返回文件的公开访问地址。

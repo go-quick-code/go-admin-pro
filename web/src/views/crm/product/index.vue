@@ -9,8 +9,14 @@
       :default-form="defaultForm"
       perm-prefix="crm:product"
       title="产品"
-      :action-width="170"
+      :action-width="220"
     >
+      <!-- 状态切换（spec §5 PUT /product/status）：只改 status，挂 crm:product:update。 -->
+      <template #actions="{ row }">
+        <el-button v-if="canUpdateProduct" link type="warning" @click.stop="toggleProductStatus(row)">
+          {{ row.status === 1 ? '下架' : '上架' }}
+        </el-button>
+      </template>
       <template #toolbar>
         <!-- Excel（issue #20）：导入/模板挂 crm:product:import，导出挂 crm:product:export。
              导入用分类名称关联分类（可空）；导出带上当前列表筛选。 -->
@@ -42,14 +48,17 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
+import { useUserStore } from '@/stores/user'
 import { dictLabel, formatTime } from '@/utils/format'
 import {
   pageProducts,
   getProduct,
   createProduct,
   updateProduct,
+  updateProductStatus,
   deleteProduct,
   treeProductCategories,
   importProducts,
@@ -69,9 +78,18 @@ const productUnitOptions: { label: string; value: any }[] = []
 
 const tableRef = ref()
 const categoryTree = ref<any[]>([])
+const userStore = useUserStore()
+const canUpdateProduct = computed(() => userStore.hasPerm('crm:product:update'))
 
 function reloadProducts() {
   tableRef.value?.reload()
+}
+
+async function toggleProductStatus(row: any) {
+  const next = row.status === 1 ? 0 : 1
+  await updateProductStatus(row.id, next)
+  ElMessage.success(next === 1 ? '上架成功' : '下架成功')
+  reloadProducts()
 }
 
 // 产品导出复用当前列表筛选（空值由 ExcelActions 剔除）。
