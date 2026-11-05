@@ -46,6 +46,11 @@ var TenantTables = []string{
 	// 回款（issue #18）：计划/记录均带 tenant_id；可见性 join 合同套用合同 owner 谓词。
 	"crm_receivable_plan",
 	"crm_receivable_record",
+
+	// OA（issue #43 起预留登记位，spec §4.6：所有 OA 表纳入租户插件）：
+	// oa_* 业务表（请假/报销/考勤/日程/会议室/文档等，docs/oa-mvp-spec.md
+	// §3.3/§7.1）由各建表工单落地迁移时把表名追加到这里；#43 不新增表，
+	// 暂无 OA 条目。登记后须补对应租户隔离集成用例（跨租户业务 ID 一律 404）。
 	// bpm 内核（issue #44）：定义/实例/任务/审批记录全量租户隔离（spec §4.6：
 	// 跨租户业务 ID 一律 404，不泄露存在性）。
 	"bpm_process_definition",

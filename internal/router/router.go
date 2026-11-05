@@ -12,6 +12,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 	crmapi "github.com/go-quick-code/go-admin-pro/internal/module/crm/api"
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
+	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/middleware"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
@@ -19,7 +20,7 @@ import (
 )
 
 // New 构建 HTTP 引擎，完成公开接口、鉴权接口与静态资源的装配。
-func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler, bpmAPI *bpmapi.Handler) *gin.Engine {
+func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler, oaAPI *oaapi.Handler, bpmAPI *bpmapi.Handler) *gin.Engine {
 	if cfg.App.Env == "dev" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -42,6 +43,7 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	infraAPI.RegisterProtected(protected)
 	codegenAPI.RegisterProtected(protected)
 	crmAPI.RegisterProtected(protected)
+	oaAPI.RegisterProtected(protected)
 	// bpm（issue #44）：流程定义管理（实例/任务接口由 #46 追加注册）。
 	bpmAPI.RegisterProtected(protected)
 
