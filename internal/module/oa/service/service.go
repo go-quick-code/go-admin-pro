@@ -1,11 +1,12 @@
-// Package service 承载 oa 模块的业务能力。
-// 本工单（issue #43）只交付共享可见范围判定；公告/请假/报销/考勤/日程/
-// 会议室/文档等域由后续工单按 docs/oa-mvp-spec.md §2 的模块边界逐个落地。
+// Package service 承载 oa 模块的业务能力：共享可见范围判定（issue #43）、
+// 工作日历（issue #50）；公告/请假/报销/考勤/日程/会议室/文档等域由后续
+// 工单按 docs/oa-mvp-spec.md §2 的模块边界逐个落地。
 package service
 
 import (
 	"context"
 
+	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -26,12 +27,15 @@ type SystemGateway interface {
 
 // Service 汇聚 oa 模块的业务能力。
 type Service struct {
-	sys SystemGateway
+	sys  SystemGateway
+	repo *repository.Repository
 }
 
-// New 创建 oa Service。
-func New(sys SystemGateway) *Service {
-	return &Service{sys: sys}
+// New 创建 oa Service。repo 是 OA 实体表仓储（issue #50 起引入，工作日历
+// 首用）；可见范围判定只依赖 SystemGateway，repo 仅在无实体表读写时可为
+// nil（既有单测），生产装配必传。
+func New(sys SystemGateway, repo *repository.Repository) *Service {
+	return &Service{sys: sys, repo: repo}
 }
 
 // VisibilityScopeOf 计算当前用户在指定资源上的可见范围（spec §4.6 取数编排）：

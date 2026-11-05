@@ -31,6 +31,14 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 任何登录用户都可探知自己的可见范围（与 system 仪表盘/部门树同级的
 	// 登录即可用接口）；resource 未登记返回 400。
 	oa.GET("/visibility-scope", h.GetVisibilityScope)
+
+	// 工作日历（issue #50，菜单种子 520 段）：管理端按月查看与维护；
+	// 权限码 oa:workday:*（520 查询、5201 单日、5202 批量、5203 恢复默认）。
+	workday := oa.Group("/workday")
+	workday.GET("/month", h.requirePermission("oa:workday:query"), h.GetWorkdayMonth)
+	workday.PUT("", h.requirePermission("oa:workday:set"), h.SetWorkday)
+	workday.POST("/batch", h.requirePermission("oa:workday:batch"), h.BatchWorkday)
+	workday.DELETE("/:date", h.requirePermission("oa:workday:delete"), h.ClearWorkday)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。
