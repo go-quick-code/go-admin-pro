@@ -105,6 +105,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// #18 接入点：回款落地后在此调用 crmSvc.SetVoidContractGuard(实现)，
 	// 替换作废/删除合同的空守卫（v1 恒放行，存在回款记录的合同禁止作废/删除，
 	// spec §4.5；接缝见 crmservice.VoidContractGuard 接口注释）。
+	// 合同附件（issue #17）：crm 只依赖 ContractFileStore 接口，这里装配 infra 的
+	// 通用业务文件能力（infra_file 按 biz_type/biz_id 归属，见 contract_file_store.go）。
+	crmSvc.SetContractFileStore(contractFileStore{infra: infraSvc})
 
 	// 注册公海自动回收任务（issue #14）：handlerName 为 recyclePoolCustomers，
 	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed

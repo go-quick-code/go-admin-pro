@@ -15,7 +15,8 @@
 #                       00009 新增 crm_product_category、crm_product，
 #                       00010 新增 crm_opportunity、crm_opportunity_product，
 #                       00011 新增 crm_contract、crm_contract_product
-#                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列，不改表数）
+#                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列，不改表数；
+#                       00012 为 infra_file 加 biz_type/biz_id 列与索引，不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
 set -euo pipefail
 

@@ -1,6 +1,8 @@
 package dto
 
 import (
+	"time"
+
 	"github.com/lautung/go-admin-pro/internal/pkg/money"
 )
 
@@ -73,4 +75,15 @@ type ContractStatusReq struct {
 	ID     int64  `json:"id" binding:"required"`
 	Status int8   `json:"status" binding:"required"`
 	Reason string `json:"reason" binding:"max=500"`
+}
+
+// ContractFileResp 是合同附件的展示视图（issue #17：复用 infra_file，
+// 只暴露前端附件区需要的字段，不透出 infra 存储实现细节）。
+type ContractFileResp struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	URL        string    `json:"url"`
+	Size       int64     `json:"size"`
+	Type       string    `json:"type"`
+	CreateTime time.Time `json:"createTime"`
 }

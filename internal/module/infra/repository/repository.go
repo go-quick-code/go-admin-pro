@@ -60,6 +60,31 @@ func (r *Repository) FindFileByID(ctx context.Context, id int64) (*model.File, e
 	return &f, nil
 }
 
+// ListFilesByBiz 按业务归属（biz_type + biz_id）列出文件，新上传的在前。
+// 租户条件由租户插件追加；调用方须已校验归属键合法。
+func (r *Repository) ListFilesByBiz(ctx context.Context, bizType string, bizID int64) ([]model.File, error) {
+	var list []model.File
+	if err := r.db.WithContext(ctx).
+		Where("biz_type = ? AND biz_id = ?", bizType, bizID).
+		Order("id DESC").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// FindFileByBiz 按 ID + 业务归属查文件：不属于该业务（或跨租户）时返回 nil。
+// 这是「文件归属校验」的唯一入口（删除前必须经过它），调用方据此返回 404。
+func (r *Repository) FindFileByBiz(ctx context.Context, id int64, bizType string, bizID int64) (*model.File, error) {
+	var f model.File
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND biz_type = ? AND biz_id = ?", id, bizType, bizID).
+		First(&f).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &f, nil
+}
+
 func (r *Repository) DeleteFile(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.File{}, id).Error
 }
