@@ -12,7 +12,7 @@ const tmplEntityIntegration = `# [[ .Comment ]]（[[ .ClassName ]]）脚手架�
 能力开关（生成时配置，改配置后重新生成即可）：
 - owner-scoped 数据范围：[[ if .OwnerScoped ]]开（owner_dept_id / owner_user_id 谓词 + scope.Permits 404）[[ else ]]关[[end]]
 - 业务编号（crm_sequence）：[[ if .HasSequence ]]开（前缀 [[ .SeqPrefix ]]，biz_type [[ .BizType ]]）[[ else ]]关（owner-scoped 实体默认不带编号）[[end]]
-- Excel 导入导出：[[ if .ImportExport ]]预留接线位（实现随 #20，见文末 TODO）[[ else ]]关[[end]]
+- Excel 导入导出：[[ if .ImportExport ]]预留接线位（生成器不产出实现，见文末）[[ else ]]关[[end]]
 
 ## 产物清单
 
@@ -85,20 +85,22 @@ const tmplEntityIntegration = `# [[ .Comment ]]（[[ .ClassName ]]）脚手架�
    cd web && pnpm type-check
    ~~~
 
-## Excel 导入导出（#20 接线位，本包不产出实现）
+## Excel 导入导出（预留接线位，本包不产出实现）
 
 [[ if .ImportExport ]]生成物已留位：
-- service/[[ .Entity ]].go 末尾的 TODO(#20) 注释（校验策略、行数/体积上限、导出套数据范围）；
+- service/[[ .Entity ]].go 末尾的「导入导出接线位」注释（校验策略、行数/体积上限、导出套数据范围）；
 - api/[[ .Entity ]].go Register[[ .ClassName ]]Routes 内注释掉的三条路由
   （/import、/export、/import-template，权限码 :import / :export）。
 
-实现时按 internal/pkg/excel 的 schema/template/errors 能力接线，导出必须复用
-List[[ .ClassName ]] 的筛选与数据范围谓词（导出内容与权限一致）。[[ else ]]本实体生成时未开启导入导出；如需，补配置后重新生成。[[end]]
+实现时参考 internal/module/crm 的手写实现，按 internal/pkg/excel 的
+schema/template/errors 能力接线，导出必须复用 List[[ .ClassName ]] 的筛选与数据范围谓词
+（导出内容与权限一致）。[[ else ]]本实体生成时未开启导入导出；如需，补配置后重新生成。[[end]]
 
 ## 限制与调整建议
 
 - 生成物是起点：唯一约束、业务联动（如归属校验、状态机）按需补在 service 层；
 - 枚举 Valid 按连续区间判断，非连续枚举改成查表；
-- 字典字段前端选项为空占位，接系统字典后替换；
+- 字典字段前端选项走 useDictOptions（web/src/composables/useDict.ts）：字典类型与数据
+  需在系统字典中维护，缺失时下拉为空、列表回退显示原值；
 - 重新生成会覆盖同名产物文件，本地手工修改请先迁移到 git 管理或自行合并。
 `

@@ -447,8 +447,8 @@ func (s *Service) parse[[ .ClassName ]]Time(value string) *time.Time {
 	return nil
 }
 [[end]][[if .ImportExport]]
-// TODO(#20): Excel 导入导出接线（internal/pkg/excel，docs/crm-mvp-spec.md §7）——
-// 本文件生成时仅预留配置位与注释，不产出可用实现：
+// 导入导出接线位（生成器只留位，不产出实现）：
+// 接入时参考 internal/module/crm 的手写实现与 internal/pkg/excel（docs/crm-mvp-spec.md §7）——
 //   - 导入：模板下载 + 先全量校验（行号+原因可读），有错整批拒绝；上限 5000 行/10MB；
 //   - 导出：复用 List[[ .ClassName ]]s 的筛选与数据范围谓词，导出内容与权限一致。
 [[end]]`
@@ -617,7 +617,8 @@ func (h *Handler) Register[[ .ClassName ]]Routes(rg *gin.RouterGroup) {
 	[[ .VarName ]].PUT("", h.requirePermission("[[ .PermPrefix ]]:update"), h.Update[[ .ClassName ]])
 	[[ .VarName ]].DELETE("/:id", h.requirePermission("[[ .PermPrefix ]]:delete"), h.Delete[[ .ClassName ]])
 [[if .ImportExport]]
-	// TODO(#20): Excel 导入导出接线（internal/pkg/excel）——路由先行留位，实现随 #20：
+	// 导入导出接线位（生成器只留位，不产出实现）：接线参考 internal/module/crm 的
+	// 手写实现与 internal/pkg/excel，并补上对应的 Import/Export handler。
 	//	[[ .VarName ]].POST("/import", h.requirePermission("[[ .PermPrefix ]]:import"), h.Import[[ .ClassName ]])
 	//	[[ .VarName ]].GET("/export", h.requirePermission("[[ .PermPrefix ]]:export"), h.Export[[ .ClassName ]])
 	//	[[ .VarName ]].GET("/import-template", h.requirePermission("[[ .PermPrefix ]]:import"), h.Import[[ .ClassName ]]Template)
@@ -1295,7 +1296,8 @@ const tmplEntityVue = `<template>
 [[if .OwnerScoped]]import { computed, onMounted, ref } from 'vue'
 [[else]]import { ref } from 'vue'
 [[end]]import ProTable from '@/components/ProTable.vue'
-[[if or .HasEnum .HasDict]]import { dictLabel, formatTime } from '@/utils/format'
+[[if .HasDict]]import { useDictOptions } from '@/composables/useDict'
+[[end]][[if or .HasEnum .HasDict]]import { dictLabel, formatTime } from '@/utils/format'
 [[else]]import { formatTime } from '@/utils/format'
 [[end]]import {
   page[[ .ClassName ]]s,
@@ -1310,8 +1312,8 @@ const tmplEntityVue = `<template>
 const [[ .OptionsVar ]] = [
 [[range .Enum.Values]]  { label: '[[ .Label ]]', value: [[ .Value ]] },
 [[end]]]
-[[end]][[range .DictFields]]// TODO：[[ .Comment ]]选项接入系统字典 [[ .Dict ]]（web 尚无字典读取封装，先留空选项）。
-const [[ .OptionsVar ]]: { label: string; value: any }[] = []
+[[end]][[range .DictFields]]// [[ .Comment ]]选项来自系统字典 [[ .Dict ]]（异步加载，失败时回退显示原值）。
+const [[ .OptionsVar ]] = useDictOptions('[[ .Dict ]]')
 [[end]]
 const tableRef = ref()
 [[if .OwnerScoped]]const users = ref<any[]>([])

@@ -218,7 +218,7 @@ func (s *Service) fetchProductOwnerNames(ctx context.Context, userIDs, deptIDs [
 	return names, deptNames
 }
 
-// TODO(#20): Excel 导入导出接线（internal/pkg/excel，docs/crm-mvp-spec.md §7）——
-// 本文件生成时仅预留配置位与注释，不产出可用实现：
+// 导入导出接线位（生成器只留位，不产出实现）：
+// 接入时参考 internal/module/crm 的手写实现与 internal/pkg/excel（docs/crm-mvp-spec.md §7）——
 //   - 导入：模板下载 + 先全量校验（行号+原因可读），有错整批拒绝；上限 5000 行/10MB；
 //   - 导出：复用 ListProducts 的筛选与数据范围谓词，导出内容与权限一致。
