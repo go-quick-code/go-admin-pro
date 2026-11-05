@@ -91,18 +91,20 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
 	crmRepo := crmrepo.New(db)
 	crmSvc := crmservice.New(crmRepo, sysSvc)
-	// 产品删除引用校验（issue #15 接 #11 扩展点）：商机行项目引用的产品禁删。
-	// #16 合同行项目落地后在此组合两份实现，例如：
-	//   crmSvc.SetProductRefCountChecker(refCheckerChain{
-	//       crmservice.NewOpportunityProductRefChecker(crmRepo),
-	//       crmservice.NewContractProductRefChecker(crmRepo), // #16 提供并命名
-	//   })
-	// chain 的 CheckProductRefs 依次调用、首个非 nil 错误即返回（组合建议见
-	// #15 提交说明）；届时替换下面这一行注册即可。
-	crmSvc.SetProductRefCountChecker(crmservice.NewOpportunityProductRefChecker(crmRepo))
-	// #16 接入点：合同模块落地后在此调用 crmSvc.SetContractChecker(实现)，
-	// 替换公海自动回收的空合同检查（v1 恒「无合同」，见
-	// crmservice.ContractChecker 接口注释）。
+	// 产品删除引用校验（issue #11 扩展点，#15/#16 各自提供行项目侧实现）：
+	// 商机与合同任一行项目引用的产品都禁删。RefCheckerChain 依次调用、
+	// 首个非 nil 错误即返回（组合说明见 #15/#16 提交注释）。
+	crmSvc.SetProductRefCountChecker(crmservice.RefCheckerChain{
+		crmservice.NewOpportunityProductRefChecker(crmRepo),
+		crmservice.NewContractProductRefChecker(crmRepo),
+	})
+	// 公海自动回收的合同排除（issue #14 接 #16）：有未作废合同的客户不被回收，
+	// 作废合同不拦截。替换 v1 空实现（恒「无合同」，见
+	// crmservice.ContractChecker 接口注释与 pool_recycle.go）。
+	crmSvc.SetContractChecker(crmservice.NewContractChecker(crmRepo))
+	// #18 接入点：回款落地后在此调用 crmSvc.SetVoidContractGuard(实现)，
+	// 替换作废/删除合同的空守卫（v1 恒放行，存在回款记录的合同禁止作废/删除，
+	// spec §4.5；接缝见 crmservice.VoidContractGuard 接口注释）。
 
 	// 注册公海自动回收任务（issue #14）：handlerName 为 recyclePoolCustomers，
 	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed

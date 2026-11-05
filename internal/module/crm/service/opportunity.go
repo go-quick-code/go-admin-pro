@@ -93,7 +93,7 @@ func (s *Service) CreateOpportunity(ctx context.Context, req *dto.OpportunityCre
 		}
 		stage = *req.Stage
 	}
-	if err := ValidateOpportunityLineItems(lineItemsFromDTO(req.Products)); err != nil {
+	if err := ValidateLineItems(lineItemsFromDTO(req.Products)); err != nil {
 		return nil, err
 	}
 	products, err := s.buildOpportunityProducts(ctx, 0, req.Products)
@@ -160,7 +160,7 @@ func (s *Service) UpdateOpportunity(ctx context.Context, req *dto.OpportunityUpd
 	}
 	var products []model.OpportunityProduct
 	if req.Products != nil {
-		if err := ValidateOpportunityLineItems(lineItemsFromDTO(req.Products)); err != nil {
+		if err := ValidateLineItems(lineItemsFromDTO(req.Products)); err != nil {
 			return err
 		}
 		if products, err = s.buildOpportunityProducts(ctx, o.ID, req.Products); err != nil {
@@ -260,7 +260,7 @@ func (s *Service) fillOpportunityProducts(ctx context.Context, o *model.Opportun
 		amounts = append(amounts, p.Amount)
 		productIDs = append(productIDs, p.ProductID)
 	}
-	total, err := SumOpportunityLineAmounts(amounts)
+	total, err := SumLineAmounts(amounts)
 	if err == nil {
 		o.TotalAmount = &total
 	}
@@ -302,7 +302,7 @@ func (s *Service) buildOpportunityProducts(ctx context.Context, opportunityID in
 		if !exists[it.ProductID] {
 			return nil, xerr.BadRequest(fmt.Sprintf("行项目产品不存在：产品 %d", it.ProductID))
 		}
-		amount, err := ComputeOpportunityLineAmount(it.Quantity, it.Price)
+		amount, err := ComputeLineAmount(it.Quantity, it.Price)
 		if err != nil {
 			return nil, xerr.BadRequest(fmt.Sprintf("行项目金额计算失败（数量 %d × 单价 %s）：%s", it.Quantity, it.Price.String(), err.Error()))
 		}
@@ -336,7 +336,7 @@ func sumOfProducts(products []model.OpportunityProduct) money.Money {
 	for _, p := range products {
 		amounts = append(amounts, p.Amount)
 	}
-	total, err := SumOpportunityLineAmounts(amounts)
+	total, err := SumLineAmounts(amounts)
 	if err != nil {
 		return money.Money{}
 	}

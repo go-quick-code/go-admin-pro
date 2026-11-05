@@ -1,7 +1,7 @@
 package dto
 
-// ---------- 跟进记录（issue #12 客户维度，issue #15 扩展商机维度，docs/crm-mvp-spec.md §3）----------
-// 创建时挂客户或挂商机二选一（customerId XOR opportunityId，service 层校验 400）；
+// ---------- 跟进记录（issue #12 客户维度，#15 扩展商机维度，#16 扩展合同维度，docs/crm-mvp-spec.md §3）----------
+// 创建时挂客户/商机/合同三选一（service 层校验 400）；
 // 修改不漂移所属对象；可见性跟随所属对象的负责人（spec §4.1 父谓词）。
 
 // FollowUpCreateReq 新建跟进。内容必填（≤1000 字）；类型可省
@@ -11,6 +11,7 @@ package dto
 type FollowUpCreateReq struct {
 	CustomerID     int64  `json:"customerId"`
 	OpportunityID  int64  `json:"opportunityId"`
+	ContractID     int64  `json:"contractId"`
 	Content        string `json:"content" binding:"required,max=1000"`
 	Type           *int8  `json:"type"`
 	NextFollowTime string `json:"nextFollowTime"`
@@ -25,13 +26,14 @@ type FollowUpUpdateReq struct {
 	NextFollowTime string `json:"nextFollowTime"`
 }
 
-// FollowUpPageReq 跟进分页筛选：按所属客户或商机精确（各自详情 tab）、类型枚举，
-// 两者二选一（同时传 400）。可见性经所属对象传导（join 父记录后套用父谓词），
+// FollowUpPageReq 跟进分页筛选：按所属客户/商机/合同精确（各自详情 tab）、类型枚举，
+// 所属对象多传 400。可见性经所属对象传导（join 父记录后套用父谓词），
 // 本请求不接收负责人参数。
 type FollowUpPageReq struct {
 	PageNo        int   `form:"pageNo"`
 	PageSize      int   `form:"pageSize"`
 	CustomerID    int64 `form:"customerId"`
 	OpportunityID int64 `form:"opportunityId"`
+	ContractID    int64 `form:"contractId"`
 	Type          *int8 `form:"type"`
 }

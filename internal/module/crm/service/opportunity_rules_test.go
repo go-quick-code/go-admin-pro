@@ -95,7 +95,7 @@ func TestValidateOpportunityStage(t *testing.T) {
 	}
 }
 
-func TestValidateOpportunityLineItems(t *testing.T) {
+func TestValidateLineItems(t *testing.T) {
 	mk := func(productID, quantity int64, price string) lineItem {
 		p, err := money.ParseMoney(price)
 		if err != nil {
@@ -105,21 +105,21 @@ func TestValidateOpportunityLineItems(t *testing.T) {
 	}
 
 	t.Run("空行项目放行（商机允许无行项目，预计金额手填）", func(t *testing.T) {
-		if err := ValidateOpportunityLineItems(nil); err != nil {
+		if err := ValidateLineItems(nil); err != nil {
 			t.Fatalf("空行项目应放行：%v", err)
 		}
 	})
 
 	t.Run("合法行项目放行", func(t *testing.T) {
 		items := []lineItem{mk(1, 2, "100.00"), mk(2, 1, "0.00")}
-		if err := ValidateOpportunityLineItems(items); err != nil {
+		if err := ValidateLineItems(items); err != nil {
 			t.Fatalf("合法行项目应放行：%v", err)
 		}
 	})
 
 	t.Run("数量必须正整数", func(t *testing.T) {
 		for _, qty := range []int64{0, -1} {
-			err := ValidateOpportunityLineItems([]lineItem{mk(1, qty, "1.00")})
+			err := ValidateLineItems([]lineItem{mk(1, qty, "1.00")})
 			if err == nil {
 				t.Fatalf("数量 %d 应拒绝", qty)
 			}
@@ -130,7 +130,7 @@ func TestValidateOpportunityLineItems(t *testing.T) {
 	})
 
 	t.Run("单价不能为负", func(t *testing.T) {
-		err := ValidateOpportunityLineItems([]lineItem{mk(1, 1, "-0.01")})
+		err := ValidateLineItems([]lineItem{mk(1, 1, "-0.01")})
 		if err == nil {
 			t.Fatal("负单价应拒绝")
 		}
@@ -138,13 +138,13 @@ func TestValidateOpportunityLineItems(t *testing.T) {
 			t.Fatalf("文案应点名单价，实际 %q", err.Error())
 		}
 		// 零单价放行（赠品行）。
-		if err := ValidateOpportunityLineItems([]lineItem{mk(1, 1, "0.00")}); err != nil {
+		if err := ValidateLineItems([]lineItem{mk(1, 1, "0.00")}); err != nil {
 			t.Fatalf("零单价应放行：%v", err)
 		}
 	})
 
 	t.Run("产品必填", func(t *testing.T) {
-		err := ValidateOpportunityLineItems([]lineItem{mk(0, 1, "1.00")})
+		err := ValidateLineItems([]lineItem{mk(0, 1, "1.00")})
 		if err == nil {
 			t.Fatal("产品 ID 为 0 应拒绝")
 		}
@@ -155,7 +155,7 @@ func TestValidateOpportunityLineItems(t *testing.T) {
 
 	t.Run("同一商机内产品不可重复", func(t *testing.T) {
 		items := []lineItem{mk(1, 2, "1.00"), mk(2, 1, "1.00"), mk(1, 3, "1.00")}
-		err := ValidateOpportunityLineItems(items)
+		err := ValidateLineItems(items)
 		if err == nil {
 			t.Fatal("重复产品应拒绝")
 		}
@@ -166,14 +166,14 @@ func TestValidateOpportunityLineItems(t *testing.T) {
 
 	t.Run("错误带行序号便于定位", func(t *testing.T) {
 		items := []lineItem{mk(1, 1, "1.00"), mk(2, 0, "1.00")}
-		err := ValidateOpportunityLineItems(items)
+		err := ValidateLineItems(items)
 		if err == nil || !strings.Contains(err.Error(), "2") {
 			t.Fatalf("文案应带行序号 2，实际 %v", err)
 		}
 	})
 }
 
-func TestComputeOpportunityLineAmount(t *testing.T) {
+func TestComputeLineAmount(t *testing.T) {
 	parse := func(t *testing.T, s string) money.Money {
 		t.Helper()
 		m, err := money.ParseMoney(s)
@@ -184,9 +184,9 @@ func TestComputeOpportunityLineAmount(t *testing.T) {
 	}
 
 	t.Run("金额 = 数量 × 单价", func(t *testing.T) {
-		got, err := ComputeOpportunityLineAmount(3, parse(t, "1234.56"))
+		got, err := ComputeLineAmount(3, parse(t, "1234.56"))
 		if err != nil {
-			t.Fatalf("ComputeOpportunityLineAmount: %v", err)
+			t.Fatalf("ComputeLineAmount: %v", err)
 		}
 		if got.String() != "3703.68" {
 			t.Fatalf("金额 = %q, 期望 3703.68", got.String())
@@ -194,14 +194,14 @@ func TestComputeOpportunityLineAmount(t *testing.T) {
 	})
 
 	t.Run("越界返回错误", func(t *testing.T) {
-		_, err := ComputeOpportunityLineAmount(100000, parse(t, "9999999999.99"))
+		_, err := ComputeLineAmount(100000, parse(t, "9999999999.99"))
 		if !errors.Is(err, money.ErrOutOfRange) {
 			t.Fatalf("越界应透传 money.ErrOutOfRange，实际 %v", err)
 		}
 	})
 }
 
-func TestSumOpportunityLineAmounts(t *testing.T) {
+func TestSumLineAmounts(t *testing.T) {
 	parse := func(t *testing.T, s string) money.Money {
 		t.Helper()
 		m, err := money.ParseMoney(s)
@@ -212,7 +212,7 @@ func TestSumOpportunityLineAmounts(t *testing.T) {
 	}
 
 	t.Run("空列表合计 0.00", func(t *testing.T) {
-		got, err := SumOpportunityLineAmounts(nil)
+		got, err := SumLineAmounts(nil)
 		if err != nil {
 			t.Fatalf("空合计不应报错：%v", err)
 		}
@@ -222,7 +222,7 @@ func TestSumOpportunityLineAmounts(t *testing.T) {
 	})
 
 	t.Run("多行合计", func(t *testing.T) {
-		total, err := SumOpportunityLineAmounts([]money.Money{
+		total, err := SumLineAmounts([]money.Money{
 			parse(t, "3703.68"), parse(t, "0.01"), parse(t, "299.31"),
 		})
 		if err != nil {

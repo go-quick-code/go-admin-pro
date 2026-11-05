@@ -40,17 +40,29 @@ type SystemGateway interface {
 type Service struct {
 	repo *repository.Repository
 	sys  SystemGateway
-	// productRefs 是产品删除引用校验扩展点（issue #11，v1 空实现，#15/#16 注册实现），
-	// 见 product_refs.go；零值即空实现语义，装配侧无需显式初始化。
+	// productRefs 是产品删除引用校验扩展点（issue #11，#15/#16 落地行项目后，
+	// app 装配处以 RefCheckerChain 注册商机 + 合同两侧实现），见 product_refs.go。
 	productRefs ProductRefCountChecker
-	// contracts 是合同依赖面（#16 接入点）：v1 为空实现 NoopContractChecker
-	// （恒「无合同」），#16 落地后在 app.go 装配处 SetContractChecker 替换。
+	// contracts 是公海回收的合同排除依赖面（#14 接点，#16 落地后由 app 装配处
+	// SetContractChecker 注入真实实现，缺省 NoopContractChecker 恒「无合同」）。
 	contracts ContractChecker
+	// approvals 是合同审批依赖面（#16，v1 直通实现，bpm 上线后 SetApprovalService
+	// 替换，见 approval.go 文件头注释）。
+	approvals ApprovalService
+	// voidGuard 是作废/删除合同的守卫扩展点（#16 预留，#18 接
+	// 「有回款记录禁止作废/删除」，见 contract_guard.go）。
+	voidGuard VoidContractGuard
 }
 
-// New 创建 crm Service。合同依赖面缺省空实现（v1 无合同可查，回收不做排除）。
+// New 创建 crm Service。合同回收排除缺省空实现（真实实现由 app 装配处注入）；
+// 审批缺省 v1 直通实现；作废守卫缺省空实现。
 func New(repo *repository.Repository, sys SystemGateway) *Service {
-	return &Service{repo: repo, sys: sys, contracts: NoopContractChecker{}}
+	return &Service{
+		repo:      repo,
+		sys:       sys,
+		contracts: NoopContractChecker{},
+		approvals: NewPassthroughApprovalService(repo, sys),
+	}
 }
 
 // CurrentUserID 返回 context 中的当前用户 ID。

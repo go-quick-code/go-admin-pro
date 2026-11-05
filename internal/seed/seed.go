@@ -215,6 +215,15 @@ func seedMenus(db *gorm.DB) error {
 		btn(4083, 4080, "商机修改", "crm:opportunity:update", 3),
 		btn(4084, 4080, "商机删除", "crm:opportunity:delete", 4),
 		btn(4085, 4080, "商机阶段推进", "crm:opportunity:stage", 5),
+		// 合同（issue #16）：菜单 ID 从 4100 起（4060–4070 产品、4080–4085 商机已占用，
+		// grep 去重确认）。审批通过与驳回挂独立按钮码 crm:contract:approve
+		//（ApprovalService v1 直通实现据此放行，bpm 上线后同码走流程）。
+		menu(4100, 400, "合同管理", "contract", "crm/contract/index", "crm:contract:query", "Tickets", 5),
+		btn(4101, 4100, "合同查询", "crm:contract:query", 1),
+		btn(4102, 4100, "合同新增", "crm:contract:create", 2),
+		btn(4103, 4100, "合同修改", "crm:contract:update", 3),
+		btn(4104, 4100, "合同删除", "crm:contract:delete", 4),
+		btn(4105, 4100, "合同审批", "crm:contract:approve", 5),
 	}
 	if err := db.Create(&menus).Error; err != nil {
 		return err
@@ -388,9 +397,8 @@ func seedJobs(db *gorm.DB) error {
 		},
 		// 公海自动回收（issue #14）：默认暂停。
 		// 理由：回收是批量清空负责人归属的破坏性动作，触发前管理员应先
-		// 按租户确认公海配置（回收天数，默认 30）；且 #16 的合同排除尚未
-		// 接入（v1 空实现恒「无合同」），有成交合同的客户也会被回收，
-		// 开箱即跑风险不可控。确认配置并接入合同排除后再启用。
+		// 按租户确认公海配置（回收天数，默认 30）。合同排除已由 #16 接入
+		//（有未作废合同的客户不被回收），但回收仍属破坏性动作，确认配置后再启用。
 		{
 			TenantID:       1,
 			Name:           "公海自动回收",
