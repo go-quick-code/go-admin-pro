@@ -117,6 +117,19 @@ func (r *Repository) ListUsers(ctx context.Context, f UserFilter, offset, limit 
 	return list, total, nil
 }
 
+// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合。
+// oa 可见范围 helper 把部门子树翻译成用户集合用（issue #43）；含停用用户
+// （停用用户的历史单据仍需对负责人可见），租户插件自动限定当前租户。
+func (r *Repository) ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
+	if len(deptIDs) == 0 {
+		return nil, nil
+	}
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("dept_id IN ?", deptIDs).Pluck("id", &ids).Error
+	return ids, err
+}
+
 func (r *Repository) CreateUser(ctx context.Context, u *model.User) error {
 	return r.db.WithContext(ctx).Create(u).Error
 }

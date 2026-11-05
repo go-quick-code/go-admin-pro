@@ -17,6 +17,8 @@ import (
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
+	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
+	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
 	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
@@ -136,10 +138,16 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
 
+	// OA 模块（issue #43）：可见范围判定复用 system 的权限/部门解析
+	//（oa/service.SystemGateway 直接受 *systemservice.Service 满足）；
+	// 业务表与领域路由由后续 OA 工单按 docs/oa-mvp-spec.md §2 落地。
+	oaSvc := oaservice.New(sysSvc)
+	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
+
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI)
 
 	scheduler.Start(context.Background())
 

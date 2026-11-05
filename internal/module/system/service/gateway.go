@@ -7,8 +7,9 @@ import (
 )
 
 // ---------- 跨模块网关方法 ----------
-// 供 crm 等业务模块消费的最小能力面：数据范围之外的归属快照与展示名称。
-// 只读、租户插件自动过滤；crm 侧通过接口依赖这些方法（见 crm/service.SystemGateway）。
+// 供 crm/oa 等业务模块消费的最小能力面：数据范围之外的归属快照与展示名称、
+// 部门子树与部门内用户解析。只读、租户插件自动过滤；消费侧通过接口依赖
+// 这些方法（见 crm/service.SystemGateway 与 oa/service.SystemGateway）。
 
 // UserDeptID 返回用户所属部门 ID；用户不存在时 ok=false。
 // crm 负责人快照用：负责人必须真实存在，部门缺失时快照为 0。
@@ -61,4 +62,25 @@ func (s *Service) ListSimpleUsers(ctx context.Context) ([]model.SimpleUser, erro
 // crm 公海自动回收 job 遍历租户用（issue #14，见 crm/service.SystemGateway）。
 func (s *Service) ListEnabledTenantIDs(ctx context.Context) ([]int64, error) {
 	return s.repo.ListEnabledTenantIDs(ctx)
+}
+
+// DeptWithChildren 返回部门及其子树的部门 ID 集合（含自身；与 datascope 引擎
+// 的 deptResolverAdapter 同源实现）。oa 可见范围 helper 按负责部门解析子树用
+// （issue #43，见 oa/service.SystemGateway）。
+func (s *Service) DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error) {
+	return s.deptWithChildren(ctx, deptID)
+}
+
+// ListDeptIDsByLeader 返回用户在当前租户内担任负责人的部门 ID 集合。
+// oa 可见范围 helper 判定「部门负责人」身份用（issue #43）；dept_id 无过滤
+// 状态列条件，停用部门的负责人身份仍生效（历史单据可见性不随部门停用消失）。
+func (s *Service) ListDeptIDsByLeader(ctx context.Context, leaderUserID int64) ([]int64, error) {
+	return s.repo.ListDeptIDsByLeader(ctx, leaderUserID)
+}
+
+// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合。
+// oa 可见范围 helper 把部门子树翻译成用户集合用（issue #43）；含停用用户
+// （停用用户的历史单据仍需对负责人可见），租户插件自动限定当前租户。
+func (s *Service) ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
+	return s.repo.ListUserIDsByDeptIDs(ctx, deptIDs)
 }
