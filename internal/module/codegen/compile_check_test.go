@@ -50,10 +50,11 @@ func TestGeneratedProductCompiles(t *testing.T) {
 
 // pruneOverlaidEntityFiles 从副本里删除 issue #11 落地的产品实体文件：
 // 样板骨架与手写实现同属一个包，产品集成测试重复定义 crmProductMenuID 等常量，
-// issue #20 的手写 Excel 文件又依赖产品实体独有的 CategoryId/Code/Description，
-// 都会与「重新生成覆盖同名产物」的样板冲突。清理后样板骨架在
-// 「生成物 + 模块底座」的干净组合上做编译验证——即 INTEGRATION.md
-// 「重新生成会覆盖同名产物、手工修改需自行合并」语义在测试层的等价物。
+// issue #20 的手写 Excel 文件与 issue #21 的演示数据种子又依赖产品实体独有的
+// CategoryId/Code/Description，都会与「重新生成覆盖同名产物」的样板冲突。
+// 清理后样板骨架在「生成物 + 模块底座」的干净组合上做编译验证——即
+// INTEGRATION.md「重新生成会覆盖同名产物、手工修改需自行合并」语义在测试层的
+// 等价物（seed 包通过 seedCRMDemoFunc 变量在缺失 crm_demo.go 时可正常编译）。
 func pruneOverlaidEntityFiles(t *testing.T, tmp string) {
 	t.Helper()
 	for _, rel := range []string{
@@ -62,6 +63,7 @@ func pruneOverlaidEntityFiles(t *testing.T, tmp string) {
 		"internal/module/crm/product_excel_http_integration_test.go",
 		"internal/module/crm/service/product_excel.go",
 		"internal/module/crm/api/product_excel.go",
+		"internal/seed/crm_demo.go",
 	} {
 		if err := os.Remove(filepath.Join(tmp, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("清理存量实体文件 %s: %v", rel, err)

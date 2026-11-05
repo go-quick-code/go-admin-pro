@@ -63,7 +63,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	}
 
 	if cfg.Database.Seed {
-		if err := seed.Run(db); err != nil {
+		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}
 	}

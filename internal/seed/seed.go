@@ -13,11 +13,13 @@ import (
 )
 
 // Run 写入初始化数据。表结构由 goose 迁移预先建好，这里只负责数据。
+// withDemo 为 true 时在基础种子之后写入 CRM 演示数据（crm_demo.go）；
+// 集成测试基座传 false，保证用例数据只来自用例自身。
 //
 // seed 是系统级写入路径：不携带租户上下文，所有语句显式 tenant.Skip
 // （租户插件 fail-closed 后，无上下文访问租户表会被直接拦截）；
 // 写入的业务行归属默认租户 1，显式赋值，不依赖插件回填。
-func Run(db *gorm.DB) error {
+func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedTenant(db); err != nil {
 		return err
 	}
@@ -48,8 +50,19 @@ func Run(db *gorm.DB) error {
 	if err := seedJobs(db); err != nil {
 		return err
 	}
+	if withDemo && seedCRMDemoFunc != nil {
+		if err := seedCRMDemoFunc(db); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
+// seedCRMDemoFunc 是 CRM 演示数据的写入入口，由 crm_demo.go 的 init 注册。
+// 用函数变量而不是直接调用，是为了让代码生成器的编译校验（会剔换真实
+// 产品实体及其消费者）可以在不携带 crm_demo.go 的副本上继续编译 seed 包；
+// 正常构建里 crm_demo.go 始终存在，行为等价于直接调用。
+var seedCRMDemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64

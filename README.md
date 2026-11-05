@@ -22,7 +22,7 @@
 - **模块化单体**：`framework` 基础能力 + `system` / `infra` / `codegen` 业务模块，依赖单向、边界清晰。
 - **认证与 RBAC**：JWT 登录、bcrypt 密码、角色绑定菜单、接口级权限码校验、超级管理员自动放行。
 - **多租户**：GORM 插件自动追加 `tenant_id` 条件、插入自动回填；新建租户自动初始化部门 / 超级管理员角色 / `admin` 账号。
-- **数据权限**：角色维度支持「全部 / 本部门及以下 / 本部门 / 仅本人」，用户列表已接入。
+- **数据权限**：角色维度支持「全部 / 自定义部门 / 本部门 / 本部门及以下 / 仅本人」，用户、CRM 客户/商机/合同/回款与仪表盘已接入。
 - **系统管理**：用户、角色、菜单（目录/菜单/按钮三级）、部门树、岗位、字典、租户、登录日志、操作日志。
 - **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）。
 - **代码生成器**：两种入口——元信息驱动的「owner-scoped 实体全栈脚手架」（model/dto/repository/service/api + 路由注册点 + 菜单/权限码种子 + 测试骨架 + ProTable 页面，配套装配说明），以及读取 `information_schema` 按表结构生成通用 CRUD 模板 ZIP；两者生成物都是起点，接入工程需按产物内说明手工放置并注册。
@@ -161,9 +161,81 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 | --- | --- | --- | --- |
 | 1 | `admin` | `123456` | 超级管理员，全部权限 |
 | 1 | `demo` | `123456` | 普通角色，仅本人数据权限 |
+| 1 | `sales1` / `sales2` | `123456` | CRM 演示销售，「仅本人」数据范围 |
+| 1 | `manager` | `123456` | CRM 演示销售主管，「本部门及以下」数据范围 |
 | 新建租户 | `admin` | `123456` | 创建租户时自动初始化 |
 
 > 生产环境请务必修改默认密码与 `jwt.secret`。
+
+### CRM 快速开始
+
+一条命令即可得到完整的 CRM 演示环境：
+
+```bash
+make migrate-up            # 建表（幂等，可重复执行）
+go run ./cmd/server -c configs/config.yaml
+```
+
+`database.seed` 与 `database.seed-demo` 默认都为 `true`（环境变量 `GAP_SEED`、
+`GAP_SEED_DEMO` 可覆盖）。首次启动在基础种子之后写入 CRM 演示组织与业务数据；
+只有 `crm_customer` 为空时才写入，重复启动不会重复插入。只想保留基础种子时设置
+`GAP_SEED_DEMO=false`。
+
+演示账号（租户 1，密码均为 `123456`）：
+
+| 账号 | 角色 | 数据范围 | 演示视角 |
+| --- | --- | --- | --- |
+| `admin` | 超级管理员 | 全部 | 全部客户、合同与仪表盘 |
+| `demo` | 普通角色 | 仅本人 | 系统功能演示；无 CRM 菜单 |
+| `sales1` / `sales2` | 销售 | 仅本人 | 只能看到自己负责的客户/商机/合同/回款 |
+| `manager` | 销售主管 | 本部门及以下 | 看到市场部（102）及下级销售的 CRM 数据 |
+
+演示数据覆盖：
+
+- 产品：2 个分类、4 个产品（含价格与单位），供商机/合同行项目引用。
+- 客户：8 个，覆盖潜在/活跃/流失三态，其中 2 个在公海（无负责人，带释放原因）；
+  跟进时间有近有远，用于演示公海回收。
+- 联系人：每客户 1–2 个；跟进：覆盖客户、商机、合同三个维度。
+- 商机：6 个，阶段 1–6 各一个；合同：6 个，覆盖草稿/待审/已签（含行项目）/作废。
+- 回款：6 期计划覆盖待回款/部分回款/已回款/逾期，5 条回款记录；已签合同与
+  回款记录分布在近 12 个月，撑起仪表盘趋势与逾期卡片。
+- 编号：客户 `KH`、商机 `SJ`、合同 `HT`、回款记录 `HK` 均同步写入
+  `crm_sequence`，启动后通过页面新建不会与演示编号冲突。
+
+手工验收路径（用 `sales1` 或 `manager` 登录前端）：
+
+1. 客户管理 → 新建客户 → 详情内添加联系人、写跟进。
+2. 产品管理 → 新建分类/产品。
+3. 商机管理 → 新建商机、挂行项目 → 阶段推进到赢单/输单。
+4. 合同管理 → 新建合同（行项目）→ 提交审批 → 审批通过（或驳回/作废）。
+5. 回款管理 → 按合同拆回款计划 → 在计划行登记回款记录；逾期行标红。
+6. CRM 仪表盘 → 4 张卡片、阶段漏斗、近 12 个月合同/回款趋势。
+7. 客户管理释放客户 → 公海页面认领；在「定时任务」手动执行「公海自动回收」，
+   验证有未作废合同的客户不回收、无合同且超期未跟进的客户回收。
+
+常用命令与关键端点：
+
+```bash
+make migrate-up                 # 建表
+make run                        # 启动后端
+GAP_SEED_DEMO=false make run    # 只写基础种子，不写 CRM 演示数据
+make test-integration           # 全量集成测试（真实 MySQL）
+GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True' \
+  go test -tags=integration -p 1 ./internal/module/crm/ ./internal/seed/
+```
+
+| 能力 | 端点 |
+| --- | --- |
+| 登录 | `POST /admin-api/system/auth/login` |
+| 客户列表 / 公海 | `GET /admin-api/crm/customer/page`、`GET /admin-api/crm/customer/pool/page` |
+| 释放 / 认领 | `PUT /admin-api/crm/customer/release`、`PUT /admin-api/crm/customer/claim` |
+| 商机阶段 | `PUT /admin-api/crm/opportunity/stage` |
+| 合同状态 | `PUT /admin-api/crm/contract/status` |
+| 回款计划 / 记录 | `POST /admin-api/crm/receivable/plan`、`POST /admin-api/crm/receivable/record` |
+| 仪表盘 | `GET /admin-api/crm/dashboard/summary` |
+
+端到端验收用例见 `internal/module/crm/e2e_http_integration_test.go`（`//go:build integration`），
+演示数据完整性/幂等用例见 `internal/seed/crm_demo_integration_test.go`。
 
 ## 核心设计
 
@@ -212,9 +284,10 @@ ctx = tenant.WithTenantID(ctx, claims.TenantID)
 | 值 | 含义 |
 | --- | --- |
 | 1 | 全部数据 |
-| 2 | 本部门及以下 |
+| 2 | 自定义部门 |
 | 3 | 本部门 |
-| 4 | 仅本人 |
+| 4 | 本部门及以下 |
+| 5 | 仅本人 |
 
 `service.UserCenter` 会汇总用户所有角色，取最大范围并计算可见部门集合；用户列表查询据此追加条件。其他业务模块可复用同一方法扩展数据权限。
 
@@ -296,6 +369,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | 认证 | `/admin-api/system/auth/*` |
 | 用户 / 角色 / 菜单 / 部门 / 岗位 / 字典 / 租户 / 日志 | `/admin-api/system/*` |
 | 文件 / 参数 / 定时任务 | `/admin-api/infra/*` |
+| CRM（客户/联系人/跟进/商机/合同/回款/仪表盘） | `/admin-api/crm/*` |
 | 代码生成 | `/admin-api/infra/codegen/*` |
 
 ## 配置说明
@@ -308,6 +382,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.cors.allowed-origins` | 跨域白名单：精确匹配 Origin，非白名单来源不返回 CORS 头；为空表示不放行任何跨域（可用 `GAP_CORS_ALLOWED_ORIGINS` 逗号分隔覆盖） |
 | `database.dsn` | MySQL DSN |
 | `database.seed` | 启动时写入种子数据 |
+| `database.seed-demo` | 是否写入 CRM 演示数据，默认 `true`（`GAP_SEED_DEMO=false` 关闭） |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
 | `security.login.max-fail` / `lock-duration` | 登录失败锁定策略 |
