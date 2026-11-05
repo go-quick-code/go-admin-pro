@@ -4,6 +4,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,6 +16,11 @@ import (
 	"github.com/lautung/go-admin-pro/internal/pkg/response"
 	"github.com/lautung/go-admin-pro/internal/pkg/web"
 )
+
+// contractFileBodyMaxBytes 是合同附件上传的请求体上限：20MB 文件 + 1MB
+// multipart 开销，与 infra 上传口径一致（infra/service.MaxUploadBodyBytes）。
+// 在 multipart 解析前限制，避免超大请求先落临时文件/占用内存。
+const contractFileBodyMaxBytes = 20<<20 + (1 << 20)
 
 // ListContractFiles 合同附件列表（新上传的在前；合同不可见 404）。
 func (h *Handler) ListContractFiles(c *gin.Context) {
@@ -31,13 +37,21 @@ func (h *Handler) ListContractFiles(c *gin.Context) {
 }
 
 // UploadContractFile 上传合同附件（multipart 字段名 file；作废合同 400）。
+// multipart 解析前先用 MaxBytesReader 限制请求体（20MB 文件 + 1MB 表单开销）：
+// 超限在解析阶段拒绝，不落盘、不写 infra_file 行（PR #39 审查加固）。
 func (h *Handler) UploadContractFile(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, contractFileBodyMaxBytes)
 	fh, err := c.FormFile("file")
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			response.BadRequest(c, "文件大小不能超过 20MB")
+			return
+		}
 		response.BadRequest(c, "请选择要上传的文件")
 		return
 	}

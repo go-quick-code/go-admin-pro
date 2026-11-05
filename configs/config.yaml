@@ -29,6 +29,9 @@ database:
   seed-demo: false
 
 jwt:
+  # 生产环境（app.env 不是 dev/test）必须改成唯一强密钥，或用 GAP_JWT_SECRET 覆盖：
+  # 空值、go-admin-pro-dev-secret 与下面这个示例值都在已知默认密钥清单里，
+  # 启动校验会直接报错拒绝启动（PR #39 审查 P2）。dev/test 保留默认值便于本地开发。
   secret: change-me-in-production-9f8a7b6c5d4e3f2a
   expire: 24h
   issuer: go-admin-pro

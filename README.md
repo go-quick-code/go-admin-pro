@@ -128,7 +128,7 @@ go run ./cmd/server -c configs/config.yaml
 
 ```bash
 export GAP_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro?charset=utf8mb4&parseTime=True&loc=Local'
-export GAP_JWT_SECRET='please-change-me'
+export GAP_JWT_SECRET='please-change-me'   # 仅本地开发；生产（app.env 非 dev/test）必须换成唯一强密钥
 export GAP_APP_PORT=8080
 export GAP_SEED=false   # 生产环境可关闭种子写入
 ```
@@ -411,10 +411,10 @@ GAP_DATABASE_DSN='...' ./bin/migrate -c configs/config.yaml up
 GAP_DATABASE_DSN='...' GAP_JWT_SECRET='...' ./bin/server -c configs/config.yaml
 ```
 
-使用 Docker：
+使用 Docker（compose 不提供默认 JWT 密钥，必须显式传入）：
 
 ```bash
-docker compose up -d --build
+GAP_JWT_SECRET="$(openssl rand -hex 32)" docker compose up -d --build
 ```
 
 compose 会先运行一次性的 `migrate` 服务，迁移成功后 `app` 才启动。镜像内已包含前端产物，访问 `http://127.0.0.1:8080`。

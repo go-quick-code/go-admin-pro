@@ -41,7 +41,9 @@ services:
       - "8080:8080"
     environment:
       GAP_DATABASE_DSN: "root:123456@tcp(mysql:3306)/go_admin_pro?charset=utf8mb4&parseTime=True&loc=Local"
-      GAP_JWT_SECRET: "change-me-in-production-9f8a7b6c5d4e3f2a"
+      # 不提供可预测默认值：必须显式传入唯一强密钥，否则 compose 直接报错。
+      # 用法：GAP_JWT_SECRET="$(openssl rand -hex 32)" docker compose up -d
+      GAP_JWT_SECRET: "${GAP_JWT_SECRET:?set GAP_JWT_SECRET}"
       TZ: Asia/Shanghai
     depends_on:
       mysql:
