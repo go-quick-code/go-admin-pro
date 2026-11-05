@@ -23,4 +23,5 @@ func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc) *
 // 统一前缀 /bpm（spec #42 §5：/admin-api/bpm）。
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterDefinitionRoutes(rg)
+	h.RegisterRuntimeRoutes(rg)
 }

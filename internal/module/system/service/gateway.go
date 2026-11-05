@@ -84,3 +84,43 @@ func (s *Service) ListDeptIDsByLeader(ctx context.Context, leaderUserID int64) (
 func (s *Service) ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
 	return s.repo.ListUserIDsByDeptIDs(ctx, deptIDs)
 }
+
+// ListActiveUserIDsByRole 返回持有指定角色且自身启用的用户 ID 集合。
+// bpm 审批人候选池解析用（issue #46，spec #42 §4.2）：角色与用户都启用，
+// 停用用户不进候选池。
+func (s *Service) ListActiveUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error) {
+	return s.repo.ListActiveUserIDsByRole(ctx, roleID)
+}
+
+// ListActiveUserIDsByPermission 返回持有指定权限码且自身启用的用户 ID 集合：
+// 经启用角色绑定持有该权限码的启用菜单，或角色为内置超管（持全部权限码）。
+// bpm 权限码规则候选池解析用（issue #46）。
+func (s *Service) ListActiveUserIDsByPermission(ctx context.Context, permission string) ([]int64, error) {
+	return s.repo.ListActiveUserIDsByPermission(ctx, permission)
+}
+
+// DeptLeaderUserID 返回部门负责人（leader_user_id > 0）；部门不存在或未设
+// 负责人 ok=false（bpm 部门负责人规则沿部门树向上查找时空缺跳过，issue #46）。
+func (s *Service) DeptLeaderUserID(ctx context.Context, deptID int64) (int64, bool, error) {
+	dept, err := s.repo.FindDeptByID(ctx, deptID)
+	if err != nil {
+		return 0, false, err
+	}
+	if dept == nil {
+		return 0, false, nil
+	}
+	return dept.LeaderUserID, dept.LeaderUserID > 0, nil
+}
+
+// DeptParentID 返回部门父部门 ID；根部门（parent_id=0）或部门不存在
+// ok=false（bpm 部门负责人规则向上查找的终止条件，issue #46）。
+func (s *Service) DeptParentID(ctx context.Context, deptID int64) (int64, bool, error) {
+	dept, err := s.repo.FindDeptByID(ctx, deptID)
+	if err != nil {
+		return 0, false, err
+	}
+	if dept == nil {
+		return 0, false, nil
+	}
+	return dept.ParentID, dept.ParentID > 0, nil
+}

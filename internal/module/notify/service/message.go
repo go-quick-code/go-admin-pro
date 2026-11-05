@@ -134,3 +134,19 @@ func (s *Service) MarkAllRead(ctx context.Context) error {
 	_, err = s.repo.MarkAllRead(ctx, userID, time.Now())
 	return err
 }
+
+// MarkBizReadInTx 在调用方事务 tx 内，把用户名下按业务定位（biz_type +
+// biz_id 集合）的未读通知置为已读——生产者的联动已读 seam（issue #45 遗留
+// 接点，#46 落地）：bpm 任务办理后把该办理人对应 bpm_todo 通知置已读，
+// 与任务状态变更同事务提交/回滚（spec §4.13）。
+// 空 bizIDs 是合法 no-op；tx 必须非 nil（语义同 CreateInTx）。
+func (s *Service) MarkBizReadInTx(ctx context.Context, tx *gorm.DB, userID int64, bizType string, bizIDs []int64) error {
+	if tx == nil {
+		return xerr.Internal(errors.New("notify: MarkBizReadInTx 需要调用方事务句柄"))
+	}
+	if len(bizIDs) == 0 {
+		return nil
+	}
+	_, err := s.repo.MarkBizRead(ctx, tx, userID, bizType, bizIDs, time.Now())
+	return err
+}
