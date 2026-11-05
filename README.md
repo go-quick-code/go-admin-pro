@@ -1,6 +1,6 @@
 # go-admin-pro
 
-[![CI](https://github.com/lautung/go-admin-pro/actions/workflows/ci.yml/badge.svg)](https://github.com/lautung/go-admin-pro/actions/workflows/ci.yml)
+[![CI](https://github.com/go-quick-code/go-admin-pro/actions/workflows/ci.yml/badge.svg)](https://github.com/go-quick-code/go-admin-pro/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 [![Vue](https://img.shields.io/badge/Vue-3.5-42b883?logo=vue.js)](https://vuejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
