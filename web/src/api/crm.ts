@@ -114,3 +114,27 @@ export function updateProduct(data: any) {
 export function deleteProduct(id: number) {
   return request.delete(`/crm/product/${id}`) as Promise<any>
 }
+
+// ---------- 商机（issue #15：owner-scoped，阶段推进走独立端点） ----------
+// 金额一律十进制字符串（如 "5000.00"）；行项目金额由后端按 数量×单价 计算，
+// 前端只提交 { productId, quantity, price }。
+export function pageOpportunities(params: any) {
+  return request.get('/crm/opportunity/page', { params }) as Promise<any>
+}
+export function getOpportunity(id: number) {
+  return request.get(`/crm/opportunity/${id}`) as Promise<any>
+}
+export function createOpportunity(data: any) {
+  return request.post('/crm/opportunity', data) as Promise<any>
+}
+export function updateOpportunity(data: any) {
+  return request.put('/crm/opportunity', data) as Promise<any>
+}
+export function deleteOpportunity(id: number) {
+  return request.delete(`/crm/opportunity/${id}`) as Promise<any>
+}
+// 阶段推进（唯一阶段入口，crm:opportunity:stage）：5 赢单 / 6 输单为终态，
+// 终态后再推进后端返回 400。
+export function advanceOpportunityStage(id: number, stage: number) {
+  return request.put('/crm/opportunity/stage', { id, stage }) as Promise<any>
+}

@@ -86,6 +86,28 @@
             <template #cell-gender="{ row }">{{ genderLabel(row.gender) }}</template>
           </ProTable>
         </el-tab-pane>
+        <el-tab-pane label="商机" name="opportunities">
+          <!-- 商机 tab（issue #15）：列表范围锁定当前客户，可见性跟随商机的
+              数据范围（owner-scoped，与客户列表可能不同，范围外商机不出现）。 -->
+          <ProTable
+            :columns="opportunityColumns"
+            :form-items="opportunityFormItems"
+            :search-items="opportunitySearchItems"
+            :api="opportunityApi"
+            :extra-query="opportunityExtraQuery"
+            :default-form="opportunityDefaultForm"
+            :before-submit="submitOpportunity"
+            perm-prefix="crm:opportunity"
+            title="商机"
+          >
+            <template #cell-stage="{ row }">
+              <el-tag :type="stageTagType(row.stage)" size="small">{{ stageLabel(row.stage) }}</el-tag>
+            </template>
+            <template #form-expectedAmount="{ form }">
+              <el-input v-model="form.expectedAmount" clearable placeholder="0.00（元，可留空）" />
+            </template>
+          </ProTable>
+        </el-tab-pane>
         <el-tab-pane label="负责人历史" name="owner-history">
           <el-timeline v-if="history.length" class="history-list">
             <el-timeline-item
@@ -169,6 +191,8 @@ import {
   createContact,
   updateContact,
   deleteContact,
+  pageOpportunities,
+  createOpportunity,
   pageFollowUps,
   getFollowUp,
   createFollowUp,
@@ -407,6 +431,73 @@ const contactApi = {
   create: createContact,
   update: updateContact,
   remove: deleteContact,
+}
+
+// ---------- 商机 tab（issue #15）：列表范围锁定当前客户；商机的可见性跟随其
+// 负责人（owner-scoped 正体），因此本 tab 只显示当前用户可见的商机 ----------
+// 商机阶段对齐规格：1 初步 / 2 需求 / 3 报价 / 4 谈判 进行中；5 赢单 / 6 输单终态。
+const stageOptions = [
+  { label: '初步', value: 1 },
+  { label: '需求', value: 2 },
+  { label: '报价', value: 3 },
+  { label: '谈判', value: 4 },
+  { label: '赢单', value: 5 },
+  { label: '输单', value: 6 },
+]
+
+function stageLabel(stage: number) {
+  return dictLabel(stageOptions, stage)
+}
+
+function stageTagType(stage: number) {
+  if (stage === 5) return 'success'
+  if (stage === 6) return 'danger'
+  return 'info'
+}
+
+const opportunityColumns = [
+  { prop: 'opportunityNo', label: '商机编号', width: 150 },
+  { prop: 'name', label: '商机名称', minWidth: 150 },
+  { prop: 'stage', label: '阶段', width: 90, slot: true },
+  { prop: 'expectedAmount', label: '预计金额（元）', width: 130 },
+  { prop: 'ownerUserName', label: '负责人', minWidth: 130 },
+  {
+    prop: 'createTime',
+    label: '创建时间',
+    minWidth: 170,
+    formatter: (row: any) => formatTime(row.createTime),
+  },
+]
+
+const opportunitySearchItems = [
+  { prop: 'name', label: '商机名称' },
+  { prop: 'stage', label: '阶段', type: 'select', options: stageOptions },
+]
+
+// tab 内只做轻量新建（名称/预计金额/备注）；行项目与阶段推进在商机管理页操作。
+const opportunityFormItems = [
+  { prop: 'name', label: '商机名称', required: true },
+  { prop: 'expectedAmount', label: '预计金额', slot: true },
+  { prop: 'remark', label: '备注', type: 'textarea' },
+]
+
+const opportunityDefaultForm = {}
+
+const opportunityExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
+
+const opportunityApi = {
+  page: pageOpportunities,
+  create: createOpportunity,
+}
+
+// tab 内新建商机：注入所属客户 + 金额空串省略（后端 money 只收十进制字符串）。
+function submitOpportunity(payload: any, mode: 'create' | 'update') {
+  if (mode === 'create' && detail.value) {
+    payload = { ...payload, customerId: detail.value.id }
+  }
+  const out = { ...payload }
+  if (out.expectedAmount === '' || out.expectedAmount == null) delete out.expectedAmount
+  return out
 }
 
 // ---------- 跟进记录 tab（issue #12）：列表范围锁定当前客户，可见性跟随客户；
