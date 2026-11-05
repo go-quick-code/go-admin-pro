@@ -20,6 +20,9 @@ import (
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
+	notifyapi "github.com/go-quick-code/go-admin-pro/internal/module/notify/api"
+	notifyrepo "github.com/go-quick-code/go-admin-pro/internal/module/notify/repository"
+	notifyservice "github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
@@ -162,7 +165,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI)
+	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
+	// 无业务依赖、不反向依赖业务模块；bpm/公告/会议室等生产者经 notifySvc 的
+	// CreateInTx seam 把通知写进各自的事务（同生共死），读取侧走 /notify/message/*。
+	notifySvc := notifyservice.New(notifyrepo.New(db))
+	notifyAPI := notifyapi.New(notifySvc, sysAPI.RequirePermission)
+
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI)
 
 	scheduler.Start(context.Background())
 
