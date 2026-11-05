@@ -156,20 +156,21 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	oaSvc := oaservice.New(sysSvc, repository.New(db))
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
-	// bpm 模块（issue #44）：流程定义管理。BusinessHandler 注册表在装配期
-	// 建立但暂无实现——spec §4.4：未注册 business_type 的定义不允许发布，
-	// 真实回调由 #46（运行引擎）/#47（CRM 合同）接线（app.BPM 暴露注册入口）。
-	bpmSvc := bpmservice.New(bpmrepo.New(db), bpmSystemGateway{sys: sysSvc})
-	bpmAPI := bpmapi.New(bpmSvc, sysAPI.RequirePermission)
-
-	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
-	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
-
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
 	// 无业务依赖、不反向依赖业务模块；bpm/公告/会议室等生产者经 notifySvc 的
 	// CreateInTx seam 把通知写进各自的事务（同生共死），读取侧走 /notify/message/*。
 	notifySvc := notifyservice.New(notifyrepo.New(db))
 	notifyAPI := notifyapi.New(notifySvc, sysAPI.RequirePermission)
+
+	// bpm 模块（issue #44 定义管理，#46 运行引擎）：BusinessHandler 注册表在
+	// 装配期建立，暂无真实实现——spec §4.4：未注册 business_type 的定义不允许
+	// 发布/发起，真实回调由 #47（CRM 合同）/#52（请假）/#55（报销）接线
+	//（app.BPM 暴露注册入口）。通知与审批同事务：notifySvc 作为 NotifyGateway 注入。
+	bpmSvc := bpmservice.New(bpmrepo.New(db), bpmSystemGateway{sys: sysSvc}, notifySvc)
+	bpmAPI := bpmapi.New(bpmSvc, sysAPI.RequirePermission)
+
+	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
+	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
 	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI)
 

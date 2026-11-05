@@ -298,6 +298,18 @@ func seedMenus(db *gorm.DB) error {
 		btn(5112, 511, "流程修改", "bpm:definition:update", 2),
 		btn(5113, 511, "流程删除", "bpm:definition:delete", 3),
 		btn(5114, 511, "流程发布", "bpm:definition:publish", 4),
+
+		// 通用待办（issue #46，spec §7.2：512 待办任务，按钮段 5121+，grep 去重
+		// 确认 512/5121–5123 未被占用）：页面三 tab（待办/已办/我发起），页面与
+		// 查询共用 bpm:task:query；办理按钮 bpm:task:handle 供前端显隐（动作接口
+		// 以「当前办理人/发起人」身份收口，不设权限码门槛，spec §5）；实例查询
+		// bpm:instance:query 挂管理视图与实例详情的第三类访问者；通知查询
+		// notify:message:query 补挂在 512 段——普通用户经角色授权即可用顶栏
+		// 铃铛与通知列表（notify 无独立菜单，#45 遗留接点）。
+		menu(512, 510, "待办任务", "task", "bpm/task/index", "bpm:task:query", "Ticket", 2),
+		btn(5121, 512, "任务办理", "bpm:task:handle", 1),
+		btn(5122, 512, "实例查询", "bpm:instance:query", 2),
+		btn(5123, 512, "通知查询", "notify:message:query", 3),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。

@@ -30,3 +30,86 @@ export function publishDefinition(id: number) {
 export function disableDefinition(id: number) {
   return request.post(`/bpm/definition/${id}/disable`) as Promise<any>
 }
+
+// ---------- bpm 运行：实例/任务（issue #46，spec #42 §5 bpm 节） ----------
+// 通用待办页三 tab（待办/已办/我发起）共用 /bpm/task/page?tab=...；
+// 审批动作以「当前办理人/发起人」身份收口（后端判定，无权限码门槛）。
+
+export interface BpmTaskItem {
+  id: number
+  instanceId: number
+  nodeIndex: number
+  nodeName: string
+  status: number
+  handledAt: string | null
+  createTime: string
+  instanceTitle: string
+  instanceSummary: string
+  businessType: string
+  businessId: number
+  instanceStatus: number
+  initiatorId: number
+  definitionKey: string
+  definitionVersion: number
+}
+
+export function pageTasks(params: { pageNo: number; pageSize: number; tab: string }) {
+  return request.get('/bpm/task/page', { params }) as Promise<{
+    list: BpmTaskItem[]
+    total: number
+  }>
+}
+
+export function pageInstances(params: {
+  pageNo: number
+  pageSize: number
+  businessType?: string
+  status?: number
+}) {
+  return request.get('/bpm/instance/page', { params }) as Promise<any>
+}
+
+export interface BpmRecordItem {
+  id: number
+  instanceId: number
+  taskId: number
+  nodeIndex: number
+  nodeName: string
+  operatorId: number
+  operatorName: string
+  action: number
+  comment: string
+  transferToUserId: number
+  transferToUserName?: string
+  createTime: string
+}
+
+export interface BpmInstanceDetail {
+  instance: any
+  records: BpmRecordItem[]
+  tasks: any[]
+}
+
+export function getInstanceDetail(id: number) {
+  return request.get(`/bpm/instance/${id}`) as Promise<BpmInstanceDetail>
+}
+
+export function approveTask(id: number, comment: string) {
+  return request.post(`/bpm/task/${id}/approve`, { comment }) as Promise<any>
+}
+
+export function rejectTask(id: number, comment: string) {
+  return request.post(`/bpm/task/${id}/reject`, { comment }) as Promise<any>
+}
+
+export function transferTask(id: number, toUserId: number, comment: string) {
+  return request.post(`/bpm/task/${id}/transfer`, { toUserId, comment }) as Promise<any>
+}
+
+export function withdrawInstance(id: number, comment: string) {
+  return request.post(`/bpm/instance/${id}/withdraw`, { comment }) as Promise<any>
+}
+
+export function listSimpleUsers() {
+  return request.get('/system/user/simple-list') as Promise<any[]>
+}

@@ -71,6 +71,23 @@ func (r *Repository) MarkAllRead(ctx context.Context, userID int64, now time.Tim
 	return res.RowsAffected, res.Error
 }
 
+// MarkBizRead 把用户名下按业务定位（biz_type + biz_id 集合）的未读通知置为
+// 已读，返回受影响行数。db 必须显式传入（调用方事务句柄）：生产者（如 bpm
+// 任务办理，issue #46）在处理业务的同一事务内联动置已读，spec §4.13。
+// 谓词 (tenant_id, biz_type, biz_id) 命中 idx_notify_message_tenant_biz；
+// 空 bizIDs 是合法 no-op。
+func (r *Repository) MarkBizRead(ctx context.Context, db *gorm.DB, userID int64, bizType string, bizIDs []int64, now time.Time) (int64, error) {
+	if len(bizIDs) == 0 {
+		return 0, nil
+	}
+	res := db.WithContext(ctx).Model(&model.Message{}).
+		Where("user_id = ? AND biz_type = ?", userID, bizType).
+		Where("biz_id IN ?", bizIDs).
+		Where("read_at IS NULL").
+		Update("read_at", now)
+	return res.RowsAffected, res.Error
+}
+
 // PageByUser 按用户分页查询通知（id 倒序，走 idx_notify_message_tenant_user_id
 // 索引；Type/Read 可选过滤）。租户插件追加 tenant_id 条件。
 func (r *Repository) PageByUser(ctx context.Context, userID int64, req *dto.MessagePageReq) ([]model.Message, int64, error) {
