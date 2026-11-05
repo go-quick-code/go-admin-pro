@@ -37,4 +37,7 @@ var TenantTables = []string{
 	"crm_product_category",
 	"crm_product",
 	"crm_pool_config",
+	// 商机（issue #15）：商机 owner-scoped；行项目为关联表，tenant_id 入键隔离。
+	"crm_opportunity",
+	"crm_opportunity_product",
 }
