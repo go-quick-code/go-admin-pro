@@ -41,11 +41,21 @@ func TestIntegrationSimpleListPermission(t *testing.T) {
 	assertSimpleListStatus(t, env, sales1, "/system/role/simple-list", http.StatusForbidden)
 	assertSimpleListStatus(t, env, sales1, "/system/post/simple-list", http.StatusForbidden)
 
-	// 普通角色演示账号（role 2，只有用户管理页面，没有新增的按钮码）→ 403。
+	// 普通角色演示账号（role 2）：seed 已绑定三条简表按钮码（用户管理页渲染所需）。
 	demo := env.Login(t, "demo", "123456")
-	assertSimpleListStatus(t, env, demo, "/system/user/simple-list", http.StatusForbidden)
-	assertSimpleListStatus(t, env, demo, "/system/role/simple-list", http.StatusForbidden)
-	assertSimpleListStatus(t, env, demo, "/system/post/simple-list", http.StatusForbidden)
+	assertSimpleListStatus(t, env, demo, "/system/user/simple-list", http.StatusOK)
+	assertSimpleListStatus(t, env, demo, "/system/role/simple-list", http.StatusOK)
+	assertSimpleListStatus(t, env, demo, "/system/post/simple-list", http.StatusOK)
+
+	// 自定义角色只绑用户管理页面（101）、没有简表按钮码：三条简表仍 403。
+	noPermRole := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "简表无权限角色", "code": "simple_list_noperm", "dataScope": 5, "menuIds": []int64{101},
+	})
+	createUserByAPI(t, env, admin, "simple_list_noperm", 102, []int64{noPermRole})
+	noPerm := env.Login(t, "simple_list_noperm", "123456")
+	assertSimpleListStatus(t, env, noPerm, "/system/user/simple-list", http.StatusForbidden)
+	assertSimpleListStatus(t, env, noPerm, "/system/role/simple-list", http.StatusForbidden)
+	assertSimpleListStatus(t, env, noPerm, "/system/post/simple-list", http.StatusForbidden)
 
 	// 平台管理员持有 "*"：三条简表都可读。
 	assertSimpleListStatus(t, env, admin, "/system/user/simple-list", http.StatusOK)

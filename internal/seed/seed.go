@@ -322,11 +322,16 @@ func seedRoles(db *gorm.DB) error {
 		return err
 	}
 	// 普通角色：仪表盘 + 系统管理目录 + 用户管理页面（无增删改按钮）。
+	// 用户管理页渲染需要三条简表（角色/岗位下拉与用户选项），因此补绑
+	// simple-list 按钮码（1014/1024/1054）；自定义角色未授权时前端会降级为空数组。
 	roleMenus := []sysmodel.RoleMenu{
 		{RoleID: 2, MenuID: 1},
 		{RoleID: 2, MenuID: 100},
 		{RoleID: 2, MenuID: 101},
 		{RoleID: 2, MenuID: 104},
+		{RoleID: 2, MenuID: 1014},
+		{RoleID: 2, MenuID: 1024},
+		{RoleID: 2, MenuID: 1054},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }
