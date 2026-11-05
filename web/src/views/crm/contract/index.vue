@@ -235,6 +235,40 @@
             </template>
           </ProTable>
         </el-tab-pane>
+        <!-- 附件（issue #17）：复用 infra_file，权限跟随合同。
+             无 crm:contract:update 时隐藏上传与删除；作废合同不再接受新材料。 -->
+        <el-tab-pane label="附件" name="files">
+          <div class="file-toolbar">
+            <el-upload
+              v-if="canUploadFile"
+              :show-file-list="false"
+              :http-request="handleFileUpload"
+              :accept="fileAccept"
+            >
+              <el-button type="primary">上传附件</el-button>
+            </el-upload>
+            <span class="file-tip">支持图片、文档、压缩包等，单文件不超过 20MB</span>
+          </div>
+          <el-table v-if="contractFiles.length" :data="contractFiles" border size="small">
+            <el-table-column label="文件名" min-width="220">
+              <template #default="{ row }">
+                <a :href="row.url" target="_blank" class="file-link">{{ row.name }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="大小" width="110">
+              <template #default="{ row }">{{ formatSize(row.size) }}</template>
+            </el-table-column>
+            <el-table-column label="上传时间" min-width="170">
+              <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+            </el-table-column>
+            <el-table-column v-if="canUpdateContract" label="操作" width="90">
+              <template #default="{ row }">
+                <el-button link type="danger" @click="removeContractFile(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="暂无附件" :image-size="60" />
+        </el-tab-pane>
       </el-tabs>
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
@@ -295,9 +329,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
-import { formatTime, dictLabel } from '@/utils/format'
+import { formatTime, formatSize, dictLabel } from '@/utils/format'
 import {
   pageContracts,
   getContract,
@@ -305,6 +339,9 @@ import {
   updateContract,
   deleteContract,
   changeContractStatus,
+  listContractFiles,
+  uploadContractFile,
+  deleteContractFile,
   pageCustomers,
   pageOpportunities,
   pageProducts,
@@ -489,11 +526,42 @@ async function loadOpportunities(customerId?: number) {
 const detail = ref<any>(null)
 const detailVisible = ref(false)
 const detailTab = ref('info')
+const contractFiles = ref<any[]>([])
+const fileAccept =
+  '.jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.zip,.rar,.7z,.mp4,.mp3'
+const canUpdateContract = computed(() => userStore.hasPerm('crm:contract:update'))
+const canUploadFile = computed(() => canUpdateContract.value && detail.value?.status !== 4)
 
 async function openDetail(row: any) {
   detail.value = await getContract(row.id)
   detailTab.value = 'info'
   detailVisible.value = true
+  await loadContractFiles(row.id)
+}
+
+// ---------- 附件 tab（issue #17）：权限跟随合同，上传/删除挂 crm:contract:update ----------
+async function loadContractFiles(contractId: number) {
+  contractFiles.value = (await listContractFiles(contractId)) || []
+}
+
+async function handleFileUpload(options: any) {
+  if (!detail.value) return
+  await uploadContractFile(detail.value.id, options.file)
+  ElMessage.success('附件上传成功')
+  await loadContractFiles(detail.value.id)
+}
+
+async function removeContractFile(row: any) {
+  if (!detail.value) return
+  const confirmed = await ElMessageBox.confirm(
+    `确认删除附件「${row.name}」？删除后不可恢复。`,
+    '删除附件',
+    { type: 'warning' },
+  ).catch(() => false)
+  if (!confirmed) return
+  await deleteContractFile(detail.value.id, row.id)
+  ElMessage.success('附件已删除')
+  await loadContractFiles(detail.value.id)
 }
 
 // ---------- 状态流转（唯一状态入口 PUT /crm/contract/status） ----------
@@ -588,5 +656,18 @@ onMounted(async () => {
 .line-total {
   font-weight: 600;
   color: var(--el-color-danger);
+}
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.file-tip {
+  color: #909399;
+  font-size: 12px;
+  margin-left: 10px;
+}
+.file-link {
+  color: #409eff;
 }
 </style>

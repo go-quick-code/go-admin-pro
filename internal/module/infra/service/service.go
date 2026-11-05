@@ -43,6 +43,62 @@ func (s *Service) Scheduler() *JobScheduler { return s.scheduler }
 // ---------- 文件 ----------
 
 func (s *Service) UploadFile(ctx context.Context, fh *multipart.FileHeader) (*model.File, error) {
+	return s.uploadFile(ctx, fh, "", 0)
+}
+
+// UploadFileForBiz 上传文件并写入业务归属（biz_type + biz_id）。
+// 大小/扩展名限制与 UploadFile 完全一致（同一段校验），调用方只需给出归属键。
+func (s *Service) UploadFileForBiz(ctx context.Context, fh *multipart.FileHeader, bizType string, bizID int64) (*model.File, error) {
+	if err := validateFileBiz(bizType, bizID); err != nil {
+		return nil, err
+	}
+	return s.uploadFile(ctx, fh, bizType, bizID)
+}
+
+// ListFilesByBiz 按业务归属列出文件（新上传的在前）。
+func (s *Service) ListFilesByBiz(ctx context.Context, bizType string, bizID int64) ([]model.File, error) {
+	if err := validateFileBiz(bizType, bizID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListFilesByBiz(ctx, bizType, bizID)
+}
+
+// DeleteFileByBiz 删除业务归属下的文件：文件不属于该业务（或不存在、跨租户）时
+// 返回 404，不误删他人附件；归属校验通过后删除磁盘文件与记录。
+func (s *Service) DeleteFileByBiz(ctx context.Context, bizType string, bizID, fileID int64) error {
+	if err := validateFileBiz(bizType, bizID); err != nil {
+		return err
+	}
+	f, err := s.repo.FindFileByBiz(ctx, fileID, bizType, bizID)
+	if err != nil {
+		return err
+	}
+	if f == nil {
+		return xerr.NotFound("文件不存在")
+	}
+	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
+	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+		return xerr.Internal(err)
+	}
+	return s.repo.DeleteFile(ctx, f.ID)
+}
+
+// validateFileBiz 校验通用业务归属键：类型非空且不超过列宽 32，ID 为正。
+func validateFileBiz(bizType string, bizID int64) error {
+	if bizType == "" {
+		return xerr.BadRequest("业务类型不能为空")
+	}
+	if len(bizType) > 32 {
+		return xerr.BadRequest("业务类型长度不能超过 32 个字符")
+	}
+	if bizID <= 0 {
+		return xerr.BadRequest("业务 ID 必须大于 0")
+	}
+	return nil
+}
+
+// uploadFile 是上传的公共实现：校验 → 落磁盘 → 写记录（记录失败回滚磁盘文件）。
+func (s *Service) uploadFile(ctx context.Context, fh *multipart.FileHeader, bizType string, bizID int64) (*model.File, error) {
 	if fh.Size > maxUploadSize {
 		return nil, xerr.BadRequest("文件大小不能超过 20MB")
 	}
@@ -85,6 +141,8 @@ func (s *Service) UploadFile(ctx context.Context, fh *multipart.FileHeader) (*mo
 		Size:     written,
 		Type:     fh.Header.Get("Content-Type"),
 		Provider: "local",
+		BizType:  bizType,
+		BizID:    bizID,
 	}
 	if err := s.repo.CreateFile(ctx, f); err != nil {
 		_ = os.Remove(absPath)

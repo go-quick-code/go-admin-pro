@@ -57,3 +57,26 @@ func TestJobLogIsAppendOnly(t *testing.T) {
 		t.Errorf("JobLog 是追加型日志表，不应包含软删除字段")
 	}
 }
+
+// TestFileHasBizColumns 验证 infra_file 的通用业务归属列（issue #17）：
+// biz_type（字符串，空串表示未关联业务）与 biz_id（整数，0 表示未关联业务）。
+func TestFileHasBizColumns(t *testing.T) {
+	s, err := schema.Parse(model.File{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("解析 File 模型失败: %v", err)
+	}
+	bizType, ok := s.FieldsByDBName["biz_type"]
+	if !ok {
+		t.Fatal("File 缺少 biz_type 列")
+	}
+	if bizType.FieldType.Kind() != reflect.String {
+		t.Errorf("biz_type 类型为 %v，期望 string", bizType.FieldType)
+	}
+	bizID, ok := s.FieldsByDBName["biz_id"]
+	if !ok {
+		t.Fatal("File 缺少 biz_id 列")
+	}
+	if bizID.FieldType.Kind() != reflect.Int64 {
+		t.Errorf("biz_id 类型为 %v，期望 int64", bizID.FieldType)
+	}
+}

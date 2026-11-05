@@ -16,6 +16,10 @@ const (
 )
 
 // File 是上传文件记录。
+//
+// BizType/BizID 是通用业务归属（issue #17 合同附件起引入）：一个文件可挂在
+// 任意业务对象上（如 crm_contract + 合同 ID），空串/0 表示未关联业务。
+// infra 侧只按这对键做归属过滤，不认识具体业务语义。
 type File struct {
 	BaseEntity
 	TenantID int64  `gorm:"index;not null;default:1" json:"tenantId"`
@@ -25,6 +29,8 @@ type File struct {
 	Size     int64  `json:"size"`
 	Type     string `gorm:"size:100" json:"type"`
 	Provider string `gorm:"size:32;not null;default:'local'" json:"provider"`
+	BizType  string `gorm:"size:32;not null;default:''" json:"bizType"`
+	BizID    int64  `gorm:"not null;default:0" json:"bizId"`
 }
 
 func (File) TableName() string { return "infra_file" }

@@ -52,6 +52,9 @@ type Service struct {
 	// voidGuard 是作废/删除合同的守卫扩展点（#16 预留，#18 接
 	// 「有回款记录禁止作废/删除」，见 contract_guard.go）。
 	voidGuard VoidContractGuard
+	// files 是合同附件存储依赖面（issue #17，由 app 装配 infra 适配器，
+	// 见 contract_file.go；未装配时附件接口显式报错）。
+	files ContractFileStore
 }
 
 // New 创建 crm Service。合同回收排除缺省空实现（真实实现由 app 装配处注入）；

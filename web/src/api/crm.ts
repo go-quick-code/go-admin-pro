@@ -163,3 +163,20 @@ export function deleteContract(id: number) {
 export function changeContractStatus(id: number, status: number, reason = '') {
   return request.put('/crm/contract/status', { id, status, reason }) as Promise<any>
 }
+
+// ---------- 合同附件（issue #17：复用 infra_file，权限跟随合同） ----------
+// 列表挂 crm:contract:query，上传/删除挂 crm:contract:update，不要求 infra:file:*。
+// 上传为 multipart（字段名 file），20MB 与扩展名白名单由后端复用 infra 口径校验。
+export function listContractFiles(contractId: number) {
+  return request.get(`/crm/contract/${contractId}/files`) as Promise<any>
+}
+export function uploadContractFile(contractId: number, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/crm/contract/${contractId}/files`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+export function deleteContractFile(contractId: number, fileId: number) {
+  return request.delete(`/crm/contract/${contractId}/files/${fileId}`) as Promise<any>
+}

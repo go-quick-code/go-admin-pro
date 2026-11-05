@@ -77,6 +77,13 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	contract.PUT("/status", h.requirePermission("crm:contract:update"), h.ChangeContractStatus)
 	contract.DELETE("/:id", h.requirePermission("crm:contract:delete"), h.DeleteContract)
 
+	// 合同附件（issue #17）：复用 infra_file（biz_type=crm_contract），
+	// 权限跟随合同——查看挂 crm:contract:query，上传/删除挂 crm:contract:update，
+	// 不要求 infra:file:* 权限码。
+	contract.GET("/:id/files", h.requirePermission("crm:contract:query"), h.ListContractFiles)
+	contract.POST("/:id/files", h.requirePermission("crm:contract:update"), h.UploadContractFile)
+	contract.DELETE("/:id/files/:fileId", h.requirePermission("crm:contract:update"), h.DeleteContractFile)
+
 	// 公海租户配置（issue #14）：读复用公海可见性权限码（能看公海即可读），
 	// 写挂 crm:pool-config:update（菜单种子 4050）。
 	poolConfig := rg.Group("/crm/pool-config")
