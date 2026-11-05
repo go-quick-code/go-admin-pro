@@ -262,6 +262,13 @@ func seedMenus(db *gorm.DB) error {
 		btn(4164, 4061, "产品导出", "crm:product:export", 6),
 		btn(4165, 4100, "合同导出", "crm:contract:export", 6),
 		btn(4166, 4120, "回款导出", "crm:receivable:export", 5),
+
+		// OA（issue #43）：业务套件根目录（spec §7.2 菜单段 500，权限码为空——
+		// 目录不可授权动作）。子菜单与按钮码由各域工单按 500 段号段落地
+		//（501 公告、503 请假、504 报销、505 考勤、506 日程、507 会议室、
+		// 508 文档；510+ 为 bpm 根），开工前先 grep 本文件去重再取号。
+		// OA 业务记录的共享可见范围见 oa/service.VisibilityScopeOf（spec §4.6）。
+		dir(500, 0, "OA", "/oa", "Calendar", 50),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。

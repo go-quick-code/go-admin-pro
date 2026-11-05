@@ -238,6 +238,19 @@ func (r *Repository) DeleteDept(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Dept{}, id).Error
 }
 
+// ListDeptIDsByLeader 返回用户担任负责人的部门 ID 集合（leader_user_id 命中）。
+// oa 可见范围 helper 判定「部门负责人」身份用（issue #43）；租户插件自动
+// 限定当前租户，跨租户的 leader_user_id 不可能命中。
+func (r *Repository) ListDeptIDsByLeader(ctx context.Context, leaderUserID int64) ([]int64, error) {
+	if leaderUserID <= 0 {
+		return nil, nil
+	}
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.Dept{}).
+		Where("leader_user_id = ?", leaderUserID).Pluck("id", &ids).Error
+	return ids, err
+}
+
 // ---------- 岗位 ----------
 
 type PostFilter struct {
