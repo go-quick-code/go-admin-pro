@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
@@ -155,7 +154,7 @@ func TestIntegrationOpportunityCRUDAndNumber(t *testing.T) {
 	if !opportunityNoRe.MatchString(no1) {
 		t.Fatalf("商机编号 %q 不符合 SJ+yyyyMMdd+4位序号", no1)
 	}
-	if want := "SJ" + time.Now().Format("20060102") + "0001"; no1 != want {
+	if want := "SJ" + env.DateKey() + "0001"; no1 != want {
 		t.Fatalf("租户当日首号应为 %s，实际 %s", want, no1)
 	}
 	if id := first["ownerUserId"]; id != float64(1) {

@@ -55,6 +55,17 @@ type IntegrationEnv struct {
 	closed bool
 }
 
+// DateKey 返回业务时区下的当天 yyyyMMdd，与服务端编号的 DateKey 同口径。
+// 测试进程可能运行在 UTC，直接 time.Now() 会在 UTC/业务时区跨日时算错。
+func (e *IntegrationEnv) DateKey() string {
+	return time.Now().In(e.Config.Location()).Format("20060102")
+}
+
+// Date 返回业务时区下的当天 yyyy-MM-dd。
+func (e *IntegrationEnv) Date() string {
+	return time.Now().In(e.Config.Location()).Format("2006-01-02")
+}
+
 // NewIntegrationEnv 搭建集成测试环境并注册清理：
 // 迁移 → 清空业务表 → seed（app.New 内）→ httptest server。
 // 清理会重新清空业务表并关停 server 与连接池，用例无需手动收尾。

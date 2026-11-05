@@ -258,7 +258,7 @@ func TestIntegrationReceivableRecordAndDerivedStatus(t *testing.T) {
 	if !receivableRecordNoRe.MatchString(no) {
 		t.Fatalf("回款记录编号 %q 不符合 HK+yyyyMMdd+4位序号", no)
 	}
-	if want := "HK" + time.Now().Format("20060102") + "0001"; no != want {
+	if want := "HK" + env.DateKey() + "0001"; no != want {
 		t.Fatalf("租户当日首个回款记录编号应为 %s，实际 %s", want, no)
 	}
 	if first["contractId"] != float64(contractID) || first["planId"] != float64(planID) {

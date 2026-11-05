@@ -181,7 +181,7 @@ func TestIntegrationCustomerTenantIsolation(t *testing.T) {
 	// 租户 2 自己的编号序列从 0001 开始，与租户 1 同日编号互不干扰。
 	own := createCustomer(t, env, token2, "租户二客户", nil)
 	no2 := own["customerNo"].(string)
-	if want := "KH" + currentDateKey() + "0001"; no2 != want {
+	if want := "KH" + env.DateKey() + "0001"; no2 != want {
 		t.Fatalf("租户 2 首号应为 %s，实际 %s（序列按租户独立）", want, no2)
 	}
 	if no2 == no1 {
