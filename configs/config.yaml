@@ -23,8 +23,10 @@ database:
   max-open-conns: 100
   seed: true
   # CRM 演示数据（销售角色/账号、产品、客户、商机、合同、回款与仪表盘时间分布）。
-  # 仅在 crm_customer 为空时写入；集成测试基座会显式关闭。
-  seed-demo: true
+  # 默认关闭：演示数据只在显式开启时写入（GAP_SEED_DEMO=true 或 make run-demo），
+  # 避免生产/真实环境被演示账号与示例业务数据污染（PR #39 审查 P2）。
+  # 开启后仅在 crm_customer 为空时写入；集成测试基座始终显式关闭。
+  seed-demo: false
 
 jwt:
   secret: change-me-in-production-9f8a7b6c5d4e3f2a

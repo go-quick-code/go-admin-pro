@@ -37,8 +37,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	customer.GET("/import-template", h.requirePermission("crm:customer:import"), h.CustomerImportTemplate)
 	customer.POST("/import", h.requirePermission("crm:customer:import"), h.ImportCustomers)
 	customer.GET("/export-excel", h.requirePermission("crm:customer:export"), h.ExportCustomers)
-	customer.GET("/:id", h.requirePermission("crm:customer:query"), h.GetCustomer)
-	customer.GET("/:id/owner-history", h.requirePermission("crm:customer:query"), h.PageCustomerOwnerHistory)
+	// 详情/负责人历史：查询码或公海可见码任一即可（PR #39 审查 P2：只有公海
+	// 菜单的销售也能点进公海客户详情；非公海客户仍由 service 按数据范围 404）。
+	customer.GET("/:id", h.requireAnyPermission("crm:customer:query", service.PermCustomerPoolView), h.GetCustomer)
+	customer.GET("/:id/owner-history", h.requireAnyPermission("crm:customer:query", service.PermCustomerPoolView), h.PageCustomerOwnerHistory)
 	customer.POST("", h.requirePermission("crm:customer:create"), h.CreateCustomer)
 	customer.PUT("", h.requirePermission("crm:customer:update"), h.UpdateCustomer)
 	// 释放/转移的权限在 service 内做「负责人本人 或 权限码」组合校验
@@ -100,6 +102,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 权限跟随合同——查看挂 crm:contract:query，上传/删除挂 crm:contract:update，
 	// 不要求 infra:file:* 权限码。
 	contract.GET("/:id/files", h.requirePermission("crm:contract:query"), h.ListContractFiles)
+	// 鉴权下载（PR #39 审查 P2）：附件内容不再经公开静态目录暴露，
+	// 下载同样挂查询码并校验合同可见 + 文件归属。
+	contract.GET("/:id/files/:fileId/download", h.requirePermission("crm:contract:query"), h.DownloadContractFile)
 	contract.POST("/:id/files", h.requirePermission("crm:contract:update"), h.UploadContractFile)
 	contract.DELETE("/:id/files/:fileId", h.requirePermission("crm:contract:update"), h.DeleteContractFile)
 

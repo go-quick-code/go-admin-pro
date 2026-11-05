@@ -4,6 +4,12 @@
 package api
 
 import (
+	"fmt"
+	"net/http"
+	"net/url"
+	"path/filepath"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/lautung/go-admin-pro/internal/pkg/response"
@@ -41,6 +47,31 @@ func (h *Handler) UploadContractFile(c *gin.Context) {
 		return
 	}
 	response.OK(c, file)
+}
+
+// DownloadContractFile 鉴权下载合同附件（PR #39 审查 P2）：合同可见 + 文件属于
+// 该合同才流式返回内容；公开静态目录不再作为附件直链。Content-Disposition
+// 用 attachment（ASCII 回退名 + RFC 5987 中文名），浏览器按原文件名保存。
+func (h *Handler) DownloadContractFile(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	fileID, ok := web.ParseID(c, "fileId")
+	if !ok {
+		response.BadRequest(c, "非法的文件 ID")
+		return
+	}
+	content, err := h.svc.DownloadContractFile(c.Request.Context(), id, fileID)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	defer content.Reader.Close()
+	asciiName := fmt.Sprintf("file-%d%s", fileID, strings.ToLower(filepath.Ext(content.Name)))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`,
+		asciiName, url.PathEscape(content.Name)))
+	c.DataFromReader(http.StatusOK, content.Size, content.ContentType, content.Reader, nil)
 }
 
 // DeleteContractFile 删除合同附件（文件必须属于该合同，否则 404）。

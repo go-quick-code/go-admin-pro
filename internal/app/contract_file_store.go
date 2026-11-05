@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
+	crmservice "github.com/lautung/go-admin-pro/internal/module/crm/service"
 	inframodel "github.com/lautung/go-admin-pro/internal/module/infra/model"
 	infraservice "github.com/lautung/go-admin-pro/internal/module/infra/service"
 )
@@ -40,6 +41,21 @@ func (s contractFileStore) ListFiles(ctx context.Context, bizType string, bizID 
 
 func (s contractFileStore) DeleteFile(ctx context.Context, bizType string, bizID int64, fileID int64) error {
 	return s.infra.DeleteFileByBiz(ctx, bizType, bizID, fileID)
+}
+
+// OpenFile 实现 crmservice.ContractFileStore：按业务归属打开文件供鉴权下载。
+// 归属/租户不符或磁盘内容缺失时，infra 侧返回 404。
+func (s contractFileStore) OpenFile(ctx context.Context, bizType string, bizID int64, fileID int64) (*crmservice.ContractFileContent, error) {
+	f, fh, err := s.infra.OpenFileByBiz(ctx, bizType, bizID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	return &crmservice.ContractFileContent{
+		Name:        f.Name,
+		ContentType: f.Type,
+		Size:        f.Size,
+		Reader:      fh,
+	}, nil
 }
 
 // contractFileResp 把 infra_file 记录映射成合同附件视图（不暴露存储实现字段）。

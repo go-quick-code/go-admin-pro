@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
@@ -42,6 +41,13 @@ func (s *Service) canOperateOwner(ctx context.Context, ownerUserID int64, permis
 	return nil
 }
 
+// HasPermission 报告当前登录用户是否持有权限码。供 HTTP 层做「任一权限码」的
+// 组合校验（客户详情/负责人历史接受 crm:customer:query 或 crm:customer:pool:view，
+// PR #39 审查 P2）；业务动作仍走路由单码或 canOperateOwner。
+func (s *Service) HasPermission(ctx context.Context, code string) (bool, error) {
+	return s.sys.UserHasPermission(ctx, CurrentUserID(ctx), code)
+}
+
 // ReleaseCustomer 释放客户到公海：owner/部门快照置空、落池字段（进入时间与
 // 释放原因）、写历史（release）。操作权限：负责人本人或 crm:customer:release。
 func (s *Service) ReleaseCustomer(ctx context.Context, req *dto.CustomerReleaseReq) error {
@@ -55,7 +61,7 @@ func (s *Service) ReleaseCustomer(ctx context.Context, req *dto.CustomerReleaseR
 	if c.OwnerUserID == 0 {
 		return xerr.BadRequest("客户已在公海，无需重复释放")
 	}
-	now, fromOwner, fromDept := time.Now(), c.OwnerUserID, c.OwnerDeptID
+	now, fromOwner, fromDept := s.businessNow(), c.OwnerUserID, c.OwnerDeptID
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
 		// 条件更新即乐观并发：负责人已被并发操作变更时 0 行受影响 → 冲突。
 		rows, err := tx.ReleaseCustomerToPool(ctx, c.ID, fromOwner, now, req.Reason)
@@ -202,11 +208,12 @@ func (s *Service) ListPoolCustomers(ctx context.Context, req *dto.CustomerPoolPa
 }
 
 // ListCustomerOwnerHistory 按客户分页查负责人历史（新→旧）。
-// 可见性与客户详情一致：范围外/租户外一律 404，不泄露存在性。
+// 可见性与客户详情一致（findReadableCustomer）：公海客户对持
+// crm:customer:pool:view 的用户可读；其余范围外/租户外一律 404，不泄露存在性。
 func (s *Service) ListCustomerOwnerHistory(ctx context.Context, customerID int64, req *dto.OwnerHistoryPageReq) ([]model.CustomerOwnerHistory, int64, error) {
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
-	if _, err := s.findVisibleCustomer(ctx, customerID); err != nil {
+	if _, err := s.findReadableCustomer(ctx, customerID); err != nil {
 		return nil, 0, err
 	}
 	list, total, err := s.repo.ListOwnerHistory(ctx, customerID, page.Offset(), page.PageSize)

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/pkg/excel"
@@ -14,7 +13,7 @@ import (
 
 // ExportReceivablePlans 导出回款计划：含合同/客户、计划金额、已收金额、到期日与派生状态。
 func (s *Service) ExportReceivablePlans(ctx context.Context, req *dto.ReceivablePlanPageReq) ([]byte, error) {
-	now := time.Now()
+	now := s.businessNow()
 	filter, err := s.receivablePlanFilter(ctx, req, now)
 	if err != nil {
 		return nil, err

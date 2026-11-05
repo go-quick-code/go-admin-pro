@@ -30,5 +30,5 @@ func (h *Handler) ContactImportTemplate(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	sendExcel(c, "contact-import-template", "联系人导入模板", data)
+	h.sendExcel(c, "contact-import-template", "联系人导入模板", data)
 }

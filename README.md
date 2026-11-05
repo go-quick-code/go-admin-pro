@@ -173,13 +173,15 @@ Go 服务会自动托管 `web/dist`，单进程即可提供前端与 API（`app.
 
 ```bash
 make migrate-up            # 建表（幂等，可重复执行）
-go run ./cmd/server -c configs/config.yaml
+make run-demo              # 启动后端并写入 CRM 演示数据（等价于 GAP_SEED_DEMO=true）
 ```
 
-`database.seed` 与 `database.seed-demo` 默认都为 `true`（环境变量 `GAP_SEED`、
-`GAP_SEED_DEMO` 可覆盖）。首次启动在基础种子之后写入 CRM 演示组织与业务数据；
-只有 `crm_customer` 为空时才写入，重复启动不会重复插入。只想保留基础种子时设置
-`GAP_SEED_DEMO=false`。
+`database.seed` 默认 `true`（环境变量 `GAP_SEED` 可覆盖）；`database.seed-demo`
+默认 `false`，演示数据只在显式开启时写入，避免生产库被演示账号与示例业务数据
+污染。演示环境用 `make run-demo`，或手工
+`GAP_SEED_DEMO=true go run ./cmd/server -c configs/config.yaml`。首次启动在基础
+种子之后写入 CRM 演示组织与业务数据；只有 `crm_customer` 为空时才写入，
+重复启动不会重复插入。只想要基础种子（无演示数据）时正常 `make run` 即可。
 
 演示账号（租户 1，密码均为 `123456`）：
 
@@ -217,8 +219,8 @@ go run ./cmd/server -c configs/config.yaml
 
 ```bash
 make migrate-up                 # 建表
-make run                        # 启动后端
-GAP_SEED_DEMO=false make run    # 只写基础种子，不写 CRM 演示数据
+make run                        # 启动后端（基础种子，无演示数据）
+make run-demo                   # 启动后端并写入 CRM 演示数据
 make test-integration           # 全量集成测试（真实 MySQL）
 GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True' \
   go test -tags=integration -p 1 ./internal/module/crm/ ./internal/seed/
@@ -382,7 +384,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.cors.allowed-origins` | 跨域白名单：精确匹配 Origin，非白名单来源不返回 CORS 头；为空表示不放行任何跨域（可用 `GAP_CORS_ALLOWED_ORIGINS` 逗号分隔覆盖） |
 | `database.dsn` | MySQL DSN |
 | `database.seed` | 启动时写入种子数据 |
-| `database.seed-demo` | 是否写入 CRM 演示数据，默认 `true`（`GAP_SEED_DEMO=false` 关闭） |
+| `database.seed-demo` | 是否写入 CRM 演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
 | `security.login.max-fail` / `lock-duration` | 登录失败锁定策略 |

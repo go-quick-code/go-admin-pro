@@ -56,6 +56,17 @@ func (s *Service) businessLocation() *time.Location {
 	return time.Local
 }
 
+// businessNow 返回业务时区下的「现在」：编号日期键、派生状态与公海回收的
+// 「今天」一律走这里，不直接用 time.Now()（其 Location 是服务器本地时区，
+// 与 app.timezone 可能不同，跨日边界会落错日期——ADR 0006，PR #39 审查 P2）。
+func (s *Service) businessNow() time.Time {
+	clock := s.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	return clock().In(s.businessLocation())
+}
+
 // DashboardSummary 汇总当前用户可见范围内的仪表盘指标。
 func (s *Service) DashboardSummary(ctx context.Context) (*DashboardSummary, error) {
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
@@ -78,7 +89,7 @@ func (s *Service) DashboardSummary(ctx context.Context) (*DashboardSummary, erro
 	}
 
 	loc := s.businessLocation()
-	now := time.Now().In(loc)
+	now := s.businessNow()
 
 	customerCount, err := s.repo.CountDashboardCustomers(ctx, filter)
 	if err != nil {

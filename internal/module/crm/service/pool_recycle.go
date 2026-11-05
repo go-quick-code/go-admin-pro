@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
 	"github.com/lautung/go-admin-pro/internal/module/crm/repository"
@@ -79,7 +78,7 @@ func (s *Service) recycleTenantPool(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	now := time.Now()
+	now := s.businessNow()
 	cutoff := now.AddDate(0, 0, -cfg.RecycleDays)
 
 	candidates, err := s.repo.ListRecycleCandidates(ctx, cutoff)

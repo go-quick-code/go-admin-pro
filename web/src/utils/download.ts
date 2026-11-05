@@ -4,11 +4,16 @@
 
 // saveBlobResponse 把 axios（responseType: 'blob'）的成功响应保存为文件。
 export function saveBlobResponse(response: any, fallbackName: string) {
+  saveBlobAs(response, ensureXlsxSuffix(fallbackName))
+}
+
+// saveBlobAs 把二进制响应按后端 Content-Disposition 的文件名保存；
+// 拿不到文件名时用 fallbackName 原样（附件等非 Excel 文件使用，不补 .xlsx）。
+export function saveBlobAs(response: any, fallbackName: string) {
   const data = response?.data
   const blob = data instanceof Blob ? data : new Blob([data ?? ''])
   const filename =
-    parseDispositionFilename(response?.headers?.['content-disposition']) ||
-    ensureXlsxSuffix(fallbackName)
+    parseDispositionFilename(response?.headers?.['content-disposition']) || fallbackName
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url

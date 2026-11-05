@@ -78,16 +78,6 @@ func CanTransitionContractStatus(from, to int8) error {
 	return nil
 }
 
-// RequiresContractApprovePermission 报告该流转是否为审批人动作（须持
-// crm:contract:approve）：审批通过（待审→已签）与驳回（待审→草稿）。
-// 提交与作废是业务侧动作，只挂 crm:contract:update 路由码。
-func RequiresContractApprovePermission(from, to int8) bool {
-	if to == model.ContractStatusSigned {
-		return true
-	}
-	return from == model.ContractStatusPending && to == model.ContractStatusDraft
-}
-
 // ResolveContractAmount 落库金额裁决（金额不变量的唯一入口）：
 //   - 有行项目（lineAmounts 非空）：金额 = SUM(行项目金额)，handFilled 忽略
 //     （服务端计算保证不变量，spec §4.3）；

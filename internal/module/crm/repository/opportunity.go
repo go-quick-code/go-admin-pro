@@ -83,10 +83,14 @@ func (r *Repository) CreateOpportunity(ctx context.Context, o *model.Opportunity
 	return r.db.WithContext(ctx).Create(o).Error
 }
 
-// SaveOpportunity 全量保存商机（更新路径），编号列由 service 层保证不改写；
-// 阶段不在编辑路径变更（阶段推进走条件更新 AdvanceOpportunityStage）。
-func (r *Repository) SaveOpportunity(ctx context.Context, o *model.Opportunity) error {
-	return r.db.WithContext(ctx).Save(o).Error
+// UpdateOpportunityFields 只更新请求字段（编辑接口），不写编号、客户、
+// stage（阶段推进走 AdvanceOpportunityStage）与 owner_*（归属不随编辑变更）。
+// 用 map 更新而不是整行 Save：只写请求列、能写空值，且不覆盖并发推进的阶段。
+func (r *Repository) UpdateOpportunityFields(ctx context.Context, id int64, fields map[string]any) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.Opportunity{}).
+		Where("id = ?", id).
+		Updates(fields)
+	return res.RowsAffected, res.Error
 }
 
 // DeleteOpportunity 按 ID 软删除商机（GORM deleted_at，租户插件自动带租户条件）。

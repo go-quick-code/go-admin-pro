@@ -15,7 +15,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"mime/multipart"
+	"strings"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
@@ -24,6 +27,18 @@ import (
 
 // ContractFileBizType 是合同附件在 infra_file 中的业务类型标识。
 const ContractFileBizType = "crm_contract"
+
+// defaultAPIPrefix 是未注入 HTTP 前缀时的兜底（与 configs/config.yaml 默认值一致）。
+const defaultAPIPrefix = "/admin-api"
+
+// ContractFileContent 是合同附件的下载内容（已通过合同可见性与文件归属校验）。
+// Reader 由调用方负责关闭（API 层流式写出后关闭）。
+type ContractFileContent struct {
+	Name        string
+	ContentType string
+	Size        int64
+	Reader      io.ReadCloser
+}
 
 // ContractFileStore 是合同附件的存储依赖面（由 internal/app 装配 infra 适配器）。
 // 实现负责按 (bizType, bizID) 做归属过滤：不属于该业务的文件一律按不存在处理。
@@ -34,6 +49,8 @@ type ContractFileStore interface {
 	ListFiles(ctx context.Context, bizType string, bizID int64) ([]dto.ContractFileResp, error)
 	// DeleteFile 删除业务归属下的文件；文件不属于该业务时返回 404。
 	DeleteFile(ctx context.Context, bizType string, bizID int64, fileID int64) error
+	// OpenFile 打开业务归属下的文件供鉴权下载；不属于该业务时返回 404。
+	OpenFile(ctx context.Context, bizType string, bizID int64, fileID int64) (*ContractFileContent, error)
 }
 
 // SetContractFileStore 注入合同附件存储实现（app 装配处调用）。
@@ -41,7 +58,25 @@ func (s *Service) SetContractFileStore(store ContractFileStore) {
 	s.files = store
 }
 
+// SetAPIPrefix 注入 HTTP API 前缀，附件 URL 使用该前缀拼装鉴权下载地址。
+func (s *Service) SetAPIPrefix(prefix string) {
+	if prefix != "" {
+		s.apiPrefix = prefix
+	}
+}
+
+// contractFileDownloadURL 返回合同附件的鉴权下载地址（GET，挂 crm:contract:query）：
+// 不再暴露 /files/ 公开静态 URL，避免未登录/无权限者拿到直链（PR #39 审查 P2）。
+func (s *Service) contractFileDownloadURL(contractID, fileID int64) string {
+	prefix := s.apiPrefix
+	if prefix == "" {
+		prefix = defaultAPIPrefix
+	}
+	return fmt.Sprintf("%s/crm/contract/%d/files/%d/download", strings.TrimRight(prefix, "/"), contractID, fileID)
+}
+
 // ListContractFiles 列出合同附件：合同不存在或数据范围外 404。
+// 返回的 URL 统一改写成鉴权下载地址（存储层只给出归属元数据）。
 func (s *Service) ListContractFiles(ctx context.Context, contractID int64) ([]dto.ContractFileResp, error) {
 	if _, err := s.findVisibleContract(ctx, contractID); err != nil {
 		return nil, err
@@ -50,7 +85,14 @@ func (s *Service) ListContractFiles(ctx context.Context, contractID int64) ([]dt
 	if err != nil {
 		return nil, err
 	}
-	return store.ListFiles(ctx, ContractFileBizType, contractID)
+	files, err := store.ListFiles(ctx, ContractFileBizType, contractID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range files {
+		files[i].URL = s.contractFileDownloadURL(contractID, files[i].ID)
+	}
+	return files, nil
 }
 
 // UploadContractFile 上传合同附件：合同须可见且非作废（作废合同是失效凭据，
@@ -74,7 +116,32 @@ func (s *Service) UploadContractFile(ctx context.Context, contractID int64, fh *
 	if err != nil {
 		return nil, err
 	}
+	file.URL = s.contractFileDownloadURL(contractID, file.ID)
 	return &file, nil
+}
+
+// DownloadContractFile 打开合同附件供鉴权下载：合同须可见（数据范围外/跨租户
+// 404），文件必须属于该合同（跨合同 fileId 由存储层按归属过滤返回 404）。
+// 返回内容由 API 层以 Content-Disposition: attachment 流式写出。
+func (s *Service) DownloadContractFile(ctx context.Context, contractID, fileID int64) (*ContractFileContent, error) {
+	if _, err := s.findVisibleContract(ctx, contractID); err != nil {
+		return nil, err
+	}
+	store, err := s.contractFileStore()
+	if err != nil {
+		return nil, err
+	}
+	content, err := store.OpenFile(ctx, ContractFileBizType, contractID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if content == nil || content.Reader == nil {
+		return nil, xerr.NotFound("文件不存在")
+	}
+	if content.ContentType == "" {
+		content.ContentType = "application/octet-stream"
+	}
+	return content, nil
 }
 
 // DeleteContractFile 删除合同附件：合同须可见；文件必须属于该合同

@@ -7,6 +7,7 @@ import (
 	"github.com/lautung/go-admin-pro/internal/pkg/money"
 	"github.com/lautung/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ---------- 回款计划 + 回款记录（issue #18）----------
@@ -140,9 +141,28 @@ func (r *Repository) CreateReceivablePlan(ctx context.Context, p *model.Receivab
 	return r.db.WithContext(ctx).Create(p).Error
 }
 
-// SaveReceivablePlan 全量保存计划（更新路径）；合同归属由 service 层保证不改写。
-func (r *Repository) SaveReceivablePlan(ctx context.Context, p *model.ReceivablePlan) error {
-	return r.db.WithContext(ctx).Save(p).Error
+// UpdateReceivablePlanFields 只更新请求字段（编辑接口）：期次/金额/到期日/备注。
+// 合同归属不可经编辑改写（contract_id 不进入本方法），用 map 更新避免整行 Save
+// 回写并发改动（如合同切换、已收金额派生列）。
+func (r *Repository) UpdateReceivablePlanFields(ctx context.Context, id int64, fields map[string]any) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.ReceivablePlan{}).
+		Where("id = ?", id).
+		Updates(fields)
+	return res.RowsAffected, res.Error
+}
+
+// LockReceivablePlanByID 在事务内以 SELECT ... FOR UPDATE 锁定回款计划行并返回，
+// 供回款记录金额不变量校验串行化使用（同一计划的并发登记在此排队）。
+// 必须由调用方在 Transaction 内调用；租户插件自动带 tenant_id 条件。
+func (r *Repository) LockReceivablePlanByID(ctx context.Context, id int64) (*model.ReceivablePlan, error) {
+	var p model.ReceivablePlan
+	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).
+		First(&p, id).Error
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return &p, nil
 }
 
 // DeleteReceivablePlan 按 ID 软删除计划（租户插件自动带租户条件）。

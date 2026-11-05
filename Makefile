@@ -7,11 +7,12 @@ version ?= 1
 # 刻意不用 GAP_DATABASE_DSN：那个名字会被 config.Load 读取，泄漏进其他包的测试。
 GAP_TEST_DATABASE_DSN ?= root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True
 
-.PHONY: help run build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build web-type-check build-all docker-up docker-down docker-logs clean
+.PHONY: help run run-demo build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build web-type-check build-all docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
 	@echo "  make run          启动后端（go run）"
+	@echo "  make run-demo     启动后端并写入 CRM 演示数据（GAP_SEED_DEMO=true）"
 	@echo "  make build        构建后端二进制到 $(BIN)"
 	@echo "  make migrate-up   执行全部待执行迁移"
 	@echo "  make migrate-down 回滚一个迁移版本"
@@ -36,6 +37,10 @@ help:
 
 run:
 	go run ./cmd/server -c $(CONFIG)
+
+# CRM 演示环境（#21 一条命令路径）：演示数据默认关闭，这里显式开启。
+run-demo:
+	GAP_SEED_DEMO=true go run ./cmd/server -c $(CONFIG)
 
 build:
 	go build -trimpath -o $(BIN) ./cmd/server

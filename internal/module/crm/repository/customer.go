@@ -148,9 +148,16 @@ func (r *Repository) CreateCustomer(ctx context.Context, c *model.Customer) erro
 	return r.db.WithContext(ctx).Create(c).Error
 }
 
-// SaveCustomer 全量保存客户（更新路径），编号列由 service 层保证不改写。
-func (r *Repository) SaveCustomer(ctx context.Context, c *model.Customer) error {
-	return r.db.WithContext(ctx).Save(c).Error
+// UpdateCustomerFields 只更新请求字段（编辑接口），不写编号、status（由调用方
+// 按请求是否携带决定）、owner_*（转移走 TransferCustomerOwner）、池字段与
+// last_follow_time 等派生/归属列。用 map 而非结构体：GORM 结构体更新会跳过
+// 零值，无法把字段清空，也会把读到的整行回写、覆盖并发改动。
+// 返回受影响行数（0 表示行不存在或已被删除），租户插件自动带租户条件。
+func (r *Repository) UpdateCustomerFields(ctx context.Context, id int64, fields map[string]any) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.Customer{}).
+		Where("id = ?", id).
+		Updates(fields)
+	return res.RowsAffected, res.Error
 }
 
 // DeleteCustomer 按 ID 软删除客户（GORM deleted_at，租户插件自动带租户条件）。

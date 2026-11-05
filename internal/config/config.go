@@ -49,14 +49,16 @@ type DatabaseConfig struct {
 	MaxOpenConns int    `mapstructure:"max-open-conns"`
 	Seed         bool   `mapstructure:"seed"`
 	// SeedDemo 控制是否写入 CRM 演示数据（客户/商机/合同/回款等）。
-	// 指针是为了区分「未配置」与显式 false：未配置时默认开启，由
-	// SeedDemoEnabled 读取；集成测试基座显式关闭，保证用例数据可控。
+	// 指针是为了区分「未配置」与显式 false：未配置视为关闭（演示数据只在
+	// 显式开启时写入，避免生产环境被演示账号/示例数据污染，PR #39 审查 P2）；
+	// 集成测试基座显式关闭，保证用例数据可控。
 	SeedDemo *bool `mapstructure:"seed-demo"`
 }
 
-// SeedDemoEnabled 报告是否写入 CRM 演示数据：配置缺省（nil）视为开启。
+// SeedDemoEnabled 报告是否写入 CRM 演示数据：配置缺省（nil）视为关闭，
+// 只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
 func (c *Config) SeedDemoEnabled() bool {
-	return c.Database.SeedDemo == nil || *c.Database.SeedDemo
+	return c.Database.SeedDemo != nil && *c.Database.SeedDemo
 }
 
 type JWTConfig struct {

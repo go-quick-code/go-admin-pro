@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/lautung/go-admin-pro/internal/module/crm/dto"
 	"github.com/lautung/go-admin-pro/internal/module/crm/model"
@@ -128,7 +127,7 @@ func (s *Service) CreateOpportunity(ctx context.Context, req *dto.OpportunityCre
 		Remark:            req.Remark,
 	}
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		now := time.Now()
+		now := s.businessNow()
 		dateKey := DateKey(now)
 		seq, err := tx.NextSequenceValue(ctx, currentTenantID(ctx), BizTypeOpportunity, dateKey)
 		if err != nil {
@@ -172,12 +171,16 @@ func (s *Service) UpdateOpportunity(ctx context.Context, req *dto.OpportunityUpd
 		return err
 	}
 
-	o.Name = req.Name
-	o.ExpectedAmount = req.ExpectedAmount
-	o.ExpectedCloseDate = closeDate
-	o.Remark = req.Remark
+	// 只写请求列（PR #39 审查 P1）：编号/客户/stage/owner_* 不在编辑路径写入，
+	// 并发阶段推进或归属变更不会被旧快照回写覆盖。
+	fields := map[string]any{
+		"name":                req.Name,
+		"expected_amount":     req.ExpectedAmount,
+		"expected_close_date": closeDate,
+		"remark":              req.Remark,
+	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.SaveOpportunity(ctx, o); err != nil {
+		if _, err := tx.UpdateOpportunityFields(ctx, o.ID, fields); err != nil {
 			return err
 		}
 		if req.Products != nil {

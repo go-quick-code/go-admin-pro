@@ -31,7 +31,7 @@ func (h *Handler) ProductImportTemplate(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	sendExcel(c, "product-import-template", "产品导入模板", data)
+	h.sendExcel(c, "product-import-template", "产品导入模板", data)
 }
 
 // ExportProducts 导出产品（复用列表筛选）。
@@ -45,5 +45,5 @@ func (h *Handler) ExportProducts(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	sendExcel(c, "products", "产品列表", data)
+	h.sendExcel(c, "products", "产品列表", data)
 }
