@@ -138,3 +138,28 @@ export function deleteOpportunity(id: number) {
 export function advanceOpportunityStage(id: number, stage: number) {
   return request.put('/crm/opportunity/stage', { id, stage }) as Promise<any>
 }
+
+// ---------- 合同（issue #16：owner-scoped，状态流转走独立端点） ----------
+// 金额一律十进制字符串（如 "5000.00"）；有行项目时后端按 SUM(行项目金额) 落库，
+// 前端只提交 { productId, quantity, price }。status 唯一入口是 PUT /crm/contract/status：
+// 1 草稿 → 2 待审（提交）→ 3 已签（审批通过）；待审可驳回回草稿；4 作废。
+export function pageContracts(params: any) {
+  return request.get('/crm/contract/page', { params }) as Promise<any>
+}
+export function getContract(id: number) {
+  return request.get(`/crm/contract/${id}`) as Promise<any>
+}
+export function createContract(data: any) {
+  return request.post('/crm/contract', data) as Promise<any>
+}
+export function updateContract(data: any) {
+  return request.put('/crm/contract', data) as Promise<any>
+}
+export function deleteContract(id: number) {
+  return request.delete(`/crm/contract/${id}`) as Promise<any>
+}
+// 状态流转（唯一状态入口，crm:contract:update）：提交/作废；审批通过与驳回
+// 后端还会校验 crm:contract:approve（无码 403）。reason 仅驳回时使用。
+export function changeContractStatus(id: number, status: number, reason = '') {
+  return request.put('/crm/contract/status', { id, status, reason }) as Promise<any>
+}

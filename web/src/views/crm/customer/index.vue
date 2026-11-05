@@ -108,6 +108,30 @@
             </template>
           </ProTable>
         </el-tab-pane>
+        <el-tab-pane label="合同" name="contracts">
+          <!-- 合同 tab（issue #16）：列表范围锁定当前客户，可见性跟随合同的数据范围
+               （owner-scoped 正体，范围外合同不出现）。 -->
+          <ProTable
+            :columns="contractColumns"
+            :form-items="contractFormItems"
+            :search-items="contractSearchItems"
+            :api="contractApi"
+            :extra-query="contractExtraQuery"
+            :default-form="contractDefaultForm"
+            :before-submit="submitContract"
+            perm-prefix="crm:contract"
+            title="合同"
+          >
+            <template #cell-status="{ row }">
+              <el-tag :type="contractStatusTagType(row.status)" size="small">
+                {{ contractStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+            <template #form-amount="{ form }">
+              <el-input v-model="form.amount" clearable placeholder="0.00（元，可留空）" />
+            </template>
+          </ProTable>
+        </el-tab-pane>
         <el-tab-pane label="负责人历史" name="owner-history">
           <el-timeline v-if="history.length" class="history-list">
             <el-timeline-item
@@ -193,6 +217,8 @@ import {
   deleteContact,
   pageOpportunities,
   createOpportunity,
+  pageContracts,
+  createContract,
   pageFollowUps,
   getFollowUp,
   createFollowUp,
@@ -497,6 +523,72 @@ function submitOpportunity(payload: any, mode: 'create' | 'update') {
   }
   const out = { ...payload }
   if (out.expectedAmount === '' || out.expectedAmount == null) delete out.expectedAmount
+  return out
+}
+
+// ---------- 合同 tab（issue #16）：列表范围锁定当前客户；合同的可见性跟随其
+// 负责人（owner-scoped 正体），因此本 tab 只显示当前用户可见的合同 ----------
+// 合同状态对齐规格：1 草稿 / 2 待审 / 3 已签 / 4 作废（终态）。
+const contractStatusOptions = [
+  { label: '草稿', value: 1 },
+  { label: '待审', value: 2 },
+  { label: '已签', value: 3 },
+  { label: '作废', value: 4 },
+]
+
+function contractStatusLabel(status: number) {
+  return dictLabel(contractStatusOptions, status)
+}
+
+function contractStatusTagType(status: number) {
+  if (status === 2) return 'warning'
+  if (status === 3) return 'success'
+  if (status === 4) return 'danger'
+  return 'info'
+}
+
+const contractColumns = [
+  { prop: 'contractNo', label: '合同编号', width: 150 },
+  { prop: 'name', label: '合同名称', minWidth: 150 },
+  { prop: 'amount', label: '合同金额（元）', width: 130 },
+  { prop: 'status', label: '状态', width: 90, slot: true },
+  { prop: 'ownerUserName', label: '负责人', minWidth: 130 },
+  {
+    prop: 'createTime',
+    label: '创建时间',
+    minWidth: 170,
+    formatter: (row: any) => formatTime(row.createTime),
+  },
+]
+
+const contractSearchItems = [
+  { prop: 'name', label: '合同名称' },
+  { prop: 'status', label: '状态', type: 'select', options: contractStatusOptions },
+]
+
+// tab 内只做轻量新建（名称/金额/备注）；行项目与状态流转在合同管理页操作。
+const contractFormItems = [
+  { prop: 'name', label: '合同名称', required: true },
+  { prop: 'amount', label: '合同金额', slot: true },
+  { prop: 'remark', label: '备注', type: 'textarea' },
+]
+
+const contractDefaultForm = {}
+
+const contractExtraQuery = computed(() => (detail.value ? { customerId: detail.value.id } : {}))
+
+const contractApi = {
+  page: pageContracts,
+  create: createContract,
+}
+
+// tab 内新建合同：注入所属客户 + 金额空串省略（后端 money 只收十进制字符串）。
+function submitContract(payload: any, mode: 'create' | 'update') {
+  if (mode === 'create' && detail.value) {
+    payload = { ...payload, customerId: detail.value.id }
+  }
+  const out = { ...payload }
+  if (out.amount === '' || out.amount == null) delete out.amount
   return out
 }
 
