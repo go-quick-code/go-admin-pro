@@ -185,6 +185,11 @@ export function uploadContractFile(contractId: number, file: File) {
 export function deleteContractFile(contractId: number, fileId: number) {
   return request.delete(`/crm/contract/${contractId}/files/${fileId}`) as Promise<any>
 }
+// 鉴权下载（PR #39 审查 P2）：附件内容不再走公开静态目录，下载走该端点并带
+// Authorization。后端返回的 url 已含 /admin-api 前缀，这里用 baseURL: '' 原样请求。
+export function downloadContractFile(url: string) {
+  return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
+}
 
 // ---------- 回款计划 + 回款记录（issue #18：可见性 join 合同套用合同数据范围） ----------
 // 金额一律十进制字符串（如 "3000.00"）。计划状态不落库：列表返回派生状态

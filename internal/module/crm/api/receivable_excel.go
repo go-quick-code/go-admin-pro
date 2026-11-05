@@ -20,5 +20,5 @@ func (h *Handler) ExportReceivablePlans(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	sendExcel(c, "receivable-plans", "回款计划", data)
+	h.sendExcel(c, "receivable-plans", "回款计划", data)
 }

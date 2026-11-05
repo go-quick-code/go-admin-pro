@@ -58,8 +58,9 @@ func (h *Handler) receiveImportFile(c *gin.Context) (io.ReadCloser, bool) {
 }
 
 // sendExcel 输出 xlsx 附件：ASCII 文件名兼容旧客户端，filename* 提供中文名。
-func sendExcel(c *gin.Context, base, title string, data []byte) {
-	dateKey := time.Now().Format("20060102")
+// 文件名日期键按业务时区（ADR 0006），不依赖服务器 TZ（PR #39 审查 P2）。
+func (h *Handler) sendExcel(c *gin.Context, base, title string, data []byte) {
+	dateKey := time.Now().In(h.location).Format("20060102")
 	asciiName := base + "-" + dateKey + ".xlsx"
 	chineseName := title + "-" + dateKey + ".xlsx"
 	disposition := fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`,

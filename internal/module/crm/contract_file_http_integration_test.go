@@ -84,6 +84,30 @@ func deleteContractFileRaw(t *testing.T, env *testutil.IntegrationEnv, token str
 	return env.Request(t, http.MethodDelete, fmt.Sprintf("/crm/contract/%d/files/%d", contractID, fileID), token, nil)
 }
 
+// downloadContractFileRaw 走鉴权下载端点取原始响应：返回状态、响应头与字节内容
+// （附件是二进制，不能按统一 JSON 信封解码）。
+func downloadContractFileRaw(t *testing.T, env *testutil.IntegrationEnv, token string, contractID, fileID int64) (int, http.Header, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet,
+		env.APIPrefixURL(fmt.Sprintf("/crm/contract/%d/files/%d/download", contractID, fileID)), nil)
+	if err != nil {
+		t.Fatalf("构造附件下载请求: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := env.Server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("下载合同附件: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("读取附件内容: %v", err)
+	}
+	return resp.StatusCode, resp.Header, body
+}
+
 // TestIntegrationContractFileLifecycle 全链路：上传（落 infra_file 归属）→ 列表 →
 // 通过返回的 URL 下载 → 再上传 → 删除 → 列表与磁盘同步；multipart 缺文件 400。
 // 并使用只持有合同菜单/按钮（无 infra:file:*）的用户完成一次上传，验证权限跟随合同。
@@ -110,29 +134,32 @@ func TestIntegrationContractFileLifecycle(t *testing.T) {
 	if first["size"] != float64(len(body)) {
 		t.Fatalf("附件大小应为 %d，实际 %v", len(body), first["size"])
 	}
+	firstID := int64(first["id"].(float64))
 	url, _ := first["url"].(string)
-	if !strings.HasPrefix(url, "/files/") {
-		t.Fatalf("附件应返回可访问的下载 URL（/files/ 前缀），实际 %q", url)
+	wantURL := fmt.Sprintf("/admin-api/crm/contract/%d/files/%d/download", contractID, firstID)
+	if url != wantURL {
+		t.Fatalf("附件 URL 应为鉴权下载地址 %q，实际 %q", wantURL, url)
 	}
 	if first["createTime"] == nil || first["createTime"] == "" {
 		t.Fatalf("附件应返回上传时间，实际 %v", first["createTime"])
 	}
-	firstID := int64(first["id"].(float64))
 
 	files := listContractFiles(t, env, admin, contractID)
 	if len(files) != 1 || int64(files[0]["id"].(float64)) != firstID {
 		t.Fatalf("列表应返回刚上传的附件，实际 %d 条", len(files))
 	}
 
-	// 下载链接：静态文件路由直接返回上传内容。
-	resp, err := http.Get(env.Server.URL + url)
-	if err != nil {
-		t.Fatalf("下载附件: %v", err)
+	// 下载：鉴权端点返回上传内容，Content-Type 取存储值，Content-Disposition 为 attachment。
+	dStatus, dHeader, downloaded := downloadContractFileRaw(t, env, admin, contractID, firstID)
+	if dStatus != http.StatusOK || !bytes.Equal(downloaded, body) {
+		t.Fatalf("下载附件内容不符：HTTP %d body=%q", dStatus, string(downloaded))
 	}
-	downloaded, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !bytes.Equal(downloaded, body) {
-		t.Fatalf("下载附件内容不符：HTTP %d body=%q", resp.StatusCode, string(downloaded))
+	if ct := dHeader.Get("Content-Type"); ct != first["type"] {
+		t.Fatalf("附件 Content-Type = %q，期望存储值 %q", ct, first["type"])
+	}
+	if disp := dHeader.Get("Content-Disposition"); !strings.HasPrefix(disp, "attachment;") ||
+		!strings.Contains(disp, "filename*=UTF-8''") {
+		t.Fatalf("附件应带 attachment 与 filename*，实际 %q", disp)
 	}
 
 	// 再上传一个：列表新→旧。
@@ -156,13 +183,8 @@ func TestIntegrationContractFileLifecycle(t *testing.T) {
 	if len(files) != 1 || int64(files[0]["id"].(float64)) != secondID {
 		t.Fatalf("删除后列表应只剩第二个附件，实际 %d 条", len(files))
 	}
-	resp, err = http.Get(env.Server.URL + url)
-	if err != nil {
-		t.Fatalf("删除后访问旧链接: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("删除后旧下载链接应 404，实际 HTTP %d", resp.StatusCode)
+	if dStatus, _, _ = downloadContractFileRaw(t, env, admin, contractID, firstID); dStatus != http.StatusNotFound {
+		t.Fatalf("删除后旧下载链接应 404，实际 HTTP %d", dStatus)
 	}
 	if status, api = deleteContractFileRaw(t, env, admin, contractID, firstID); status != http.StatusNotFound {
 		t.Fatalf("重复删除附件：HTTP %d code %d msg %q，期望 404", status, api.Code, api.Msg)
@@ -404,5 +426,79 @@ func TestIntegrationContractFileTenantIsolation(t *testing.T) {
 	}
 	if files := listContractFiles(t, env, admin2, contract2ID); len(files) != 1 {
 		t.Fatalf("租户二附件应仍为 1 条，实际 %d", len(files))
+	}
+}
+
+// TestIntegrationContractFileDownloadAuthorization 鉴权下载（PR #39 审查 P2）：
+// 未登录 401；无合同查询码 403；只读角色可下载；跨合同 fileId 404；
+// 数据范围外合同 404；文件不存在 404。公开静态目录不再是附件的可用直链。
+func TestIntegrationContractFileDownloadAuthorization(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	customer := createCustomer(t, env, admin, "附件下载宿主客户", nil)
+	customerID := int64(customer["id"].(float64))
+	contractA := createContract(t, env, admin, "下载合同A", map[string]any{"customerId": customerID})
+	contractB := createContract(t, env, admin, "下载合同B", map[string]any{"customerId": customerID})
+	aID := int64(contractA["id"].(float64))
+	bID := int64(contractB["id"].(float64))
+
+	body := []byte("download-body")
+	status, api := uploadContractFile(t, env, admin, aID, "file", "下载附件.txt", body)
+	mustOK(t, "准备下载附件", status, api)
+	var file map[string]any
+	if err := json.Unmarshal(api.Data, &file); err != nil {
+		t.Fatalf("解析附件: %v", err)
+	}
+	fileID := int64(file["id"].(float64))
+
+	// 未登录：401（公开静态目录的旧直链不再适用）。
+	if status, _, _ := downloadContractFileRaw(t, env, "", aID, fileID); status != http.StatusUnauthorized {
+		t.Fatalf("未登录下载附件：HTTP %d，期望 401", status)
+	}
+
+	// 无合同查询码：403。
+	noPermRole := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "下载无权限角色", "code": "contract_download_noperm", "dataScope": 1, "menuIds": []int64{401},
+	})
+	createUserByAPI(t, env, admin, "contract_download_noperm", 102, []int64{noPermRole})
+	noPerm := env.Login(t, "contract_download_noperm", "123456")
+	if status, _, _ := downloadContractFileRaw(t, env, noPerm, aID, fileID); status != http.StatusForbidden {
+		t.Fatalf("无查询码下载附件：HTTP %d，期望 403", status)
+	}
+
+	// 只读角色（合同菜单 + 查询按钮）：正常下载，内容与上传一致。
+	readRole := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "下载只读角色", "code": "contract_download_readonly", "dataScope": 1,
+		"menuIds": []int64{crmContractMenuID, 4101},
+	})
+	createUserByAPI(t, env, admin, "contract_download_readonly", 102, []int64{readRole})
+	readonly := env.Login(t, "contract_download_readonly", "123456")
+	dStatus, _, downloaded := downloadContractFileRaw(t, env, readonly, aID, fileID)
+	if dStatus != http.StatusOK || !bytes.Equal(downloaded, body) {
+		t.Fatalf("只读角色下载：HTTP %d body=%q，期望 200 且内容一致", dStatus, string(downloaded))
+	}
+
+	// 跨合同：合同 B 的路径访问合同 A 的文件 → 404（归属校验）。
+	if status, _, _ := downloadContractFileRaw(t, env, admin, bID, fileID); status != http.StatusNotFound {
+		t.Fatalf("跨合同下载：HTTP %d，期望 404", status)
+	}
+
+	// 数据范围外（仅本人）：合同不可见 → 404。
+	scopeRole := createRoleByAPI(t, env, admin, map[string]any{
+		"name": "下载范围外角色", "code": "contract_download_scope", "dataScope": 5,
+		"menuIds": []int64{crmContractMenuID, 4101},
+	})
+	createUserByAPI(t, env, admin, "contract_download_scope", 102, []int64{scopeRole})
+	scopeUser := env.Login(t, "contract_download_scope", "123456")
+	if status, _, _ := downloadContractFileRaw(t, env, scopeUser, aID, fileID); status != http.StatusNotFound {
+		t.Fatalf("范围外下载：HTTP %d，期望 404", status)
+	}
+
+	// 文件不存在、合同不存在：404。
+	if status, _, _ := downloadContractFileRaw(t, env, admin, aID, 999999); status != http.StatusNotFound {
+		t.Fatalf("下载不存在的文件：HTTP %d，期望 404", status)
+	}
+	if status, _, _ := downloadContractFileRaw(t, env, admin, 999999, fileID); status != http.StatusNotFound {
+		t.Fatalf("下载不存在合同的文件：HTTP %d，期望 404", status)
 	}
 }

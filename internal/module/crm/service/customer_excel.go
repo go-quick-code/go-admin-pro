@@ -67,7 +67,7 @@ func (s *Service) ImportCustomers(ctx context.Context, r io.Reader, location *ti
 	}
 
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		dateKey := DateKey(time.Now())
+		dateKey := DateKey(s.businessNow())
 		for i := range rows {
 			status := model.CustomerStatusPotential
 			if rows[i].Status != nil {

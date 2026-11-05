@@ -262,7 +262,9 @@
           <el-table v-if="contractFiles.length" :data="contractFiles" border size="small">
             <el-table-column label="文件名" min-width="220">
               <template #default="{ row }">
-                <a :href="row.url" target="_blank" class="file-link">{{ row.name }}</a>
+                <el-button link type="primary" class="file-link" @click="downloadFile(row)">
+                  {{ row.name }}
+                </el-button>
               </template>
             </el-table-column>
             <el-table-column label="大小" width="110">
@@ -350,6 +352,7 @@ import {
   statusTagType,
   type StatusTagType,
 } from '@/utils/format'
+import { saveBlobAs } from '@/utils/download'
 import {
   pageContracts,
   getContract,
@@ -360,6 +363,7 @@ import {
   listContractFiles,
   uploadContractFile,
   deleteContractFile,
+  downloadContractFile,
   exportContracts,
   pageCustomers,
   pageOpportunities,
@@ -566,6 +570,13 @@ async function openDetail(row: any) {
 // ---------- 附件 tab（issue #17）：权限跟随合同，上传/删除挂 crm:contract:update ----------
 async function loadContractFiles(contractId: number) {
   contractFiles.value = (await listContractFiles(contractId)) || []
+}
+
+// 附件下载走鉴权端点（后端返回的 url 已含 /admin-api 前缀）：
+// 带 Authorization 取 blob，按 Content-Disposition 的原文件名保存。
+async function downloadFile(row: any) {
+  const response = await downloadContractFile(row.url)
+  saveBlobAs(response, row.name)
 }
 
 async function handleFileUpload(options: any) {

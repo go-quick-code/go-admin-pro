@@ -31,7 +31,7 @@ func (h *Handler) CustomerImportTemplate(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	sendExcel(c, "customer-import-template", "客户导入模板", data)
+	h.sendExcel(c, "customer-import-template", "客户导入模板", data)
 }
 
 // ExportCustomers 导出客户（复用列表筛选与数据范围）。
@@ -45,5 +45,5 @@ func (h *Handler) ExportCustomers(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	sendExcel(c, "customers", "客户列表", data)
+	h.sendExcel(c, "customers", "客户列表", data)
 }

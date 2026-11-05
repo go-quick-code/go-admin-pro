@@ -112,6 +112,8 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 合同附件（issue #17）：crm 只依赖 ContractFileStore 接口，这里装配 infra 的
 	// 通用业务文件能力（infra_file 按 biz_type/biz_id 归属，见 contract_file_store.go）。
 	crmSvc.SetContractFileStore(contractFileStore{infra: infraSvc})
+	// 附件 URL 走鉴权下载端点（PR #39 审查 P2）：拼装地址需要 HTTP API 前缀。
+	crmSvc.SetAPIPrefix(cfg.App.APIPrefix)
 
 	// 注册公海自动回收任务（issue #14）：handlerName 为 recyclePoolCustomers，
 	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed

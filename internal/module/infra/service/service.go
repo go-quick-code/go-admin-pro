@@ -79,6 +79,31 @@ func (s *Service) DeleteFileByBiz(ctx context.Context, bizType string, bizID, fi
 	return s.deleteFile(ctx, f)
 }
 
+// OpenFileByBiz 打开业务归属文件供流式下载（PR #39 审查 P2）：文件不属于
+// 该业务（或不存在、跨租户）返回 404；磁盘内容缺失同样按 404 处理，
+// 不把内部存储路径暴露给调用方。调用方负责关闭返回的文件句柄。
+func (s *Service) OpenFileByBiz(ctx context.Context, bizType string, bizID, fileID int64) (*model.File, *os.File, error) {
+	if err := validateFileBiz(bizType, bizID); err != nil {
+		return nil, nil, err
+	}
+	f, err := s.repo.FindFileByBiz(ctx, fileID, bizType, bizID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if f == nil {
+		return nil, nil, xerr.NotFound("文件不存在")
+	}
+	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
+	fh, err := os.Open(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, xerr.NotFound("文件不存在")
+		}
+		return nil, nil, xerr.Internal(err)
+	}
+	return f, fh, nil
+}
+
 // deleteFile 删除磁盘文件与数据库记录（两个删除入口的公共实现）：
 // 磁盘文件已不存在时视为删除成功，记录照常清理。
 func (s *Service) deleteFile(ctx context.Context, f *model.File) error {

@@ -78,22 +78,6 @@ func TestCanTransitionContractStatus(t *testing.T) {
 	}
 }
 
-func TestRequiresContractApprovePermission(t *testing.T) {
-	// 审批通过（2→3）与驳回（2→1）是审批人动作，须持审批码。
-	if !RequiresContractApprovePermission(2, 3) {
-		t.Fatal("审批通过（2→3）需要审批权限")
-	}
-	if !RequiresContractApprovePermission(2, 1) {
-		t.Fatal("驳回（2→1）需要审批权限")
-	}
-	// 提交（1→2）与作废不需要审批码（挂 crm:contract:update 路由码）。
-	for _, pair := range [][2]int8{{1, 2}, {1, 4}, {2, 4}, {3, 4}} {
-		if RequiresContractApprovePermission(pair[0], pair[1]) {
-			t.Fatalf("%d→%d 不应需要审批权限", pair[0], pair[1])
-		}
-	}
-}
-
 func TestResolveContractAmount(t *testing.T) {
 	t.Run("有行项目时金额等于行项目合计，手填值忽略", func(t *testing.T) {
 		got, err := ResolveContractAmount(

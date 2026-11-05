@@ -10,7 +10,8 @@ func TestApplyEnvSeedDemo(t *testing.T) {
 		initial    bool
 		want       bool
 	}{
-		{name: "未配置默认开启", env: "", configured: false, want: true},
+		{name: "未配置默认关闭", env: "", configured: false, want: false},
+		{name: "显式开启保持开启", env: "", configured: true, initial: true, want: true},
 		{name: "显式关闭保持关闭", env: "", configured: true, initial: false, want: false},
 		{name: "环境变量开启", env: "true", configured: false, want: true},
 		{name: "环境变量大写开启", env: "TRUE", configured: true, initial: false, want: true},
@@ -35,12 +36,18 @@ func TestApplyEnvSeedDemo(t *testing.T) {
 	}
 }
 
-// TestSeedDemoEnabledDefaultsOn 验证未配置 seed-demo 时默认开启演示数据
-// （指针 nil），显式 false 才关闭。
-func TestSeedDemoEnabledDefaultsOn(t *testing.T) {
+// TestSeedDemoEnabledDefaultsOff 验证未配置 seed-demo 时默认关闭演示数据
+// （指针 nil，PR #39 审查 P2：演示数据必须显式开启，避免污染生产库），
+// 显式 true 才开启。
+func TestSeedDemoEnabledDefaultsOff(t *testing.T) {
 	cfg := &Config{}
+	if cfg.SeedDemoEnabled() {
+		t.Fatal("未配置 database.seed-demo 时应默认关闭")
+	}
+	enabled := true
+	cfg.Database.SeedDemo = &enabled
 	if !cfg.SeedDemoEnabled() {
-		t.Fatal("未配置 database.seed-demo 时应默认开启")
+		t.Fatal("显式 seed-demo=true 时应开启")
 	}
 	disabled := false
 	cfg.Database.SeedDemo = &disabled
