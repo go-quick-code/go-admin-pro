@@ -24,7 +24,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 用户
 	user := rg.Group("/system/user")
 	user.GET("/page", h.RequirePermission("system:user:query"), h.PageUsers)
-	user.GET("/simple-list", h.ListSimpleUsers)
+	user.GET("/simple-list", h.RequirePermission("system:user:simple-list"), h.ListSimpleUsers)
 	user.GET("/:id", h.RequirePermission("system:user:query"), h.GetUser)
 	user.POST("", h.RequirePermission("system:user:create"), h.CreateUser)
 	user.PUT("", h.RequirePermission("system:user:update"), h.UpdateUser)
@@ -35,7 +35,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 角色
 	role := rg.Group("/system/role")
 	role.GET("/page", h.RequirePermission("system:role:query"), h.PageRoles)
-	role.GET("/simple-list", h.ListSimpleRoles)
+	role.GET("/simple-list", h.RequirePermission("system:role:simple-list"), h.ListSimpleRoles)
 	role.GET("/:id", h.RequirePermission("system:role:query"), h.GetRole)
 	role.POST("", h.RequirePermission("system:role:create"), h.CreateRole)
 	role.PUT("", h.RequirePermission("system:role:update"), h.UpdateRole)
@@ -60,7 +60,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 岗位
 	post := rg.Group("/system/post")
 	post.GET("/page", h.RequirePermission("system:post:query"), h.PagePosts)
-	post.GET("/simple-list", h.ListSimplePosts)
+	post.GET("/simple-list", h.RequirePermission("system:post:simple-list"), h.ListSimplePosts)
 	post.POST("", h.RequirePermission("system:post:create"), h.CreatePost)
 	post.PUT("", h.RequirePermission("system:post:update"), h.UpdatePost)
 	post.DELETE("/:id", h.RequirePermission("system:post:delete"), h.DeletePost)

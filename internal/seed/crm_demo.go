@@ -191,16 +191,20 @@ func findDemoUser(tx *gorm.DB, username string) (demoOrgUser, error) {
 // crmDemoMenuIDs 返回 CRM 目录（400）与全部 CRM 权限菜单/按钮。
 // 按权限码前缀查询而不是硬编码 ID 列表：新增 CRM 菜单时演示角色自动获得授权，
 // 与 seedMenus 的权限码约定保持一致。
+//
+// 额外绑定 system:user:simple-list（PR #39 残余风险 C）：CRM 客户页的负责人
+// 下拉调用用户简表，该接口已收口为需要权限码，演示销售角色必须显式持有，
+// 否则演示账号无法选择负责人。
 func crmDemoMenuIDs(tx *gorm.DB) ([]int64, error) {
 	var ids []int64
 	err := tenant.Skip(tx).Model(&sysmodel.Menu{}).
-		Where("id = ? OR permission LIKE ?", 400, "crm:%").
+		Where("id = ? OR permission LIKE ? OR permission = ?", 400, "crm:%", "system:user:simple-list").
 		Order("id ASC").Pluck("id", &ids).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询 CRM 菜单: %w", err)
 	}
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("未找到 CRM 菜单（id=400 或 crm:*）：请确认 seedMenus 已执行")
+		return nil, fmt.Errorf("未找到 CRM 菜单（id=400、crm:* 或 system:user:simple-list）：请确认 seedMenus 已执行")
 	}
 	return ids, nil
 }

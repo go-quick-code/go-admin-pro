@@ -140,9 +140,13 @@ func seedMenus(db *gorm.DB) error {
 		btn(1011, 101, "用户新增", "system:user:create", 1),
 		btn(1012, 101, "用户修改", "system:user:update", 2),
 		btn(1013, 101, "用户删除", "system:user:delete", 3),
+		// 简表权限（PR #39 残余风险 C）：simple-list 不再对任意登录用户开放。
+		// 用户简表同时供 CRM 负责人下拉使用，演示销售角色在 crm_demo.go 单独绑定。
+		btn(1014, 101, "用户简表", "system:user:simple-list", 4),
 		btn(1021, 102, "角色新增", "system:role:create", 1),
 		btn(1022, 102, "角色修改", "system:role:update", 2),
 		btn(1023, 102, "角色删除", "system:role:delete", 3),
+		btn(1024, 102, "角色简表", "system:role:simple-list", 4),
 		btn(1031, 103, "菜单新增", "system:menu:create", 1),
 		btn(1032, 103, "菜单修改", "system:menu:update", 2),
 		btn(1033, 103, "菜单删除", "system:menu:delete", 3),
@@ -152,6 +156,7 @@ func seedMenus(db *gorm.DB) error {
 		btn(1051, 105, "岗位新增", "system:post:create", 1),
 		btn(1052, 105, "岗位修改", "system:post:update", 2),
 		btn(1053, 105, "岗位删除", "system:post:delete", 3),
+		btn(1054, 105, "岗位简表", "system:post:simple-list", 4),
 		btn(1061, 106, "字典新增", "system:dict:create", 1),
 		btn(1062, 106, "字典修改", "system:dict:update", 2),
 		btn(1063, 106, "字典删除", "system:dict:delete", 3),
