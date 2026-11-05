@@ -91,6 +91,15 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
 	crmRepo := crmrepo.New(db)
 	crmSvc := crmservice.New(crmRepo, sysSvc)
+	// 产品删除引用校验（issue #15 接 #11 扩展点）：商机行项目引用的产品禁删。
+	// #16 合同行项目落地后在此组合两份实现，例如：
+	//   crmSvc.SetProductRefCountChecker(refCheckerChain{
+	//       crmservice.NewOpportunityProductRefChecker(crmRepo),
+	//       crmservice.NewContractProductRefChecker(crmRepo), // #16 提供并命名
+	//   })
+	// chain 的 CheckProductRefs 依次调用、首个非 nil 错误即返回（组合建议见
+	// #15 提交说明）；届时替换下面这一行注册即可。
+	crmSvc.SetProductRefCountChecker(crmservice.NewOpportunityProductRefChecker(crmRepo))
 	// #16 接入点：合同模块落地后在此调用 crmSvc.SetContractChecker(实现)，
 	// 替换公海自动回收的空合同检查（v1 恒「无合同」，见
 	// crmservice.ContractChecker 接口注释）。

@@ -27,17 +27,21 @@ const (
 	PermFollowUpDelete = "crm:follow-up:delete"
 )
 
-// ListFollowUps 分页查询跟进，可见性跟随所属客户（spec §4.1）。
+// ListFollowUps 分页查询跟进，可见性跟随所属对象（客户或商机，spec §4.1）。
 func (s *Service) ListFollowUps(ctx context.Context, req *dto.FollowUpPageReq) ([]model.FollowUp, int64, error) {
 	if err := ValidateFollowUpType(req.Type); err != nil {
 		return nil, 0, err
+	}
+	if req.CustomerID > 0 && req.OpportunityID > 0 {
+		return nil, 0, xerr.BadRequest("customerId 与 opportunityId 二选一，不能同时筛选")
 	}
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
 
 	filter := repository.FollowUpFilter{
-		CustomerID: req.CustomerID,
-		Type:       req.Type,
+		CustomerID:    req.CustomerID,
+		OpportunityID: req.OpportunityID,
+		Type:          req.Type,
 	}
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
@@ -49,7 +53,7 @@ func (s *Service) ListFollowUps(ctx context.Context, req *dto.FollowUpPageReq) (
 	if err != nil {
 		return nil, 0, err
 	}
-	s.fillFollowUpCustomerNames(ctx, list)
+	s.fillFollowUpParentNames(ctx, list)
 	return list, total, nil
 }
 
@@ -59,13 +63,13 @@ func (s *Service) GetFollowUp(ctx context.Context, id int64) (*model.FollowUp, e
 	if err != nil {
 		return nil, err
 	}
-	s.fillFollowUpCustomerName(ctx, followUp)
+	s.fillFollowUpParentName(ctx, followUp)
 	return followUp, nil
 }
 
-// CreateFollowUp 在客户下创建跟进：客户必须存在且对当前用户可见（404 兜底），
-// 类型/下次跟进时间先做校验（400）；创建与客户 last_follow_time 刷新同事务
-// （spec §4.2，repository.CreateFollowUp）。
+// CreateFollowUp 创建跟进：挂客户或挂商机二选一（同时传/都不传 400），
+// 所属对象必须存在且对当前用户可见（404 兜底），类型/下次跟进时间先做校验（400）；
+// 创建与客户 last_follow_time 刷新同事务（spec §4.2，repository.CreateFollowUp）。
 func (s *Service) CreateFollowUp(ctx context.Context, req *dto.FollowUpCreateReq) (*model.FollowUp, error) {
 	if err := ValidateFollowUpType(req.Type); err != nil {
 		return nil, err
@@ -74,24 +78,36 @@ func (s *Service) CreateFollowUp(ctx context.Context, req *dto.FollowUpCreateReq
 	if err != nil {
 		return nil, err
 	}
-	// 客户必须存在且可见才能写跟进；复用客户的可见性解析（范围外 404）。
-	if _, err := s.findVisibleCustomer(ctx, req.CustomerID); err != nil {
-		return nil, err
+	if (req.CustomerID > 0) == (req.OpportunityID > 0) {
+		return nil, xerr.BadRequest("请选择跟进对象：customerId 与 opportunityId 二选一")
 	}
 	followUp := &model.FollowUp{
-		CustomerID: req.CustomerID,
-		Content:    req.Content,
-		NextTime:   nextTime,
+		CustomerID:    req.CustomerID,
+		OpportunityID: req.OpportunityID,
+		Content:       req.Content,
+		NextTime:      nextTime,
 	}
 	if req.Type != nil {
 		followUp.Type = *req.Type
 	} else {
 		followUp.Type = model.FollowUpTypeOther
 	}
-	if err := s.repo.CreateFollowUp(ctx, followUp); err != nil {
+	// 所属对象必须存在且可见才能写跟进；复用各自的可见性解析（范围外 404）。
+	refreshCustomerID := req.CustomerID
+	if req.OpportunityID > 0 {
+		opportunity, err := s.findVisibleOpportunity(ctx, req.OpportunityID)
+		if err != nil {
+			return nil, err
+		}
+		// 商机跟进也刷新其所属客户的 last_follow_time（spec §4.2）。
+		refreshCustomerID = opportunity.CustomerID
+	} else if _, err := s.findVisibleCustomer(ctx, req.CustomerID); err != nil {
 		return nil, err
 	}
-	s.fillFollowUpCustomerName(ctx, followUp)
+	if err := s.repo.CreateFollowUp(ctx, followUp, refreshCustomerID); err != nil {
+		return nil, err
+	}
+	s.fillFollowUpParentName(ctx, followUp)
 	return followUp, nil
 }
 
@@ -135,8 +151,9 @@ func (s *Service) DeleteFollowUp(ctx context.Context, id int64) error {
 	return s.repo.DeleteFollowUp(ctx, followUp.ID)
 }
 
-// findVisibleFollowUp 取跟进并做可见性校验：先解析所属客户的数据范围，
-// 跟进不存在（含已删除）或父客户不存在/范围外都返回 404。
+// findVisibleFollowUp 取跟进并做可见性校验：按所属对象解析数据范围
+// （挂客户套客户谓词，挂商机套商机谓词，issue #15），跟进不存在（含已删除）
+// 或父记录不存在/范围外都返回 404。
 func (s *Service) findVisibleFollowUp(ctx context.Context, id int64) (*model.FollowUp, error) {
 	followUp, err := s.repo.FindFollowUpByID(ctx, id)
 	if err != nil {
@@ -145,19 +162,35 @@ func (s *Service) findVisibleFollowUp(ctx context.Context, id int64) (*model.Fol
 	if followUp == nil {
 		return nil, xerr.NotFound("跟进记录不存在")
 	}
-	customer, err := s.repo.FindCustomerByID(ctx, followUp.CustomerID)
-	if err != nil {
-		return nil, err
-	}
-	if customer == nil {
-		// 父客户已删除：子记录不级联硬删，但随之不可见（spec §4.5）。
+	var deptID, userID int64
+	if followUp.CustomerID > 0 {
+		customer, err := s.repo.FindCustomerByID(ctx, followUp.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if customer == nil {
+			// 父客户已删除：子记录不级联硬删，但随之不可见（spec §4.5）。
+			return nil, xerr.NotFound("跟进记录不存在")
+		}
+		deptID, userID = customer.OwnerDeptID, customer.OwnerUserID
+	} else if followUp.OpportunityID > 0 {
+		opportunity, err := s.repo.FindOpportunityByID(ctx, followUp.OpportunityID)
+		if err != nil {
+			return nil, err
+		}
+		if opportunity == nil {
+			// 父商机已删除：跟进随之不可见（spec §4.5，与客户路径同一口径）。
+			return nil, xerr.NotFound("跟进记录不存在")
+		}
+		deptID, userID = opportunity.OwnerDeptID, opportunity.OwnerUserID
+	} else {
 		return nil, xerr.NotFound("跟进记录不存在")
 	}
 	scope, err := s.sys.DataScopeFilter(ctx, CurrentUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
-	if !scope.Permits(customer.OwnerDeptID, customer.OwnerUserID) {
+	if !scope.Permits(deptID, userID) {
 		return nil, xerr.NotFound("跟进记录不存在")
 	}
 	return followUp, nil
@@ -179,37 +212,58 @@ func (s *Service) canOperateFollowUp(ctx context.Context, followUp *model.Follow
 	return nil
 }
 
-// fillFollowUpCustomerNames 批量补齐所属客户名称，供列表展示。
-func (s *Service) fillFollowUpCustomerNames(ctx context.Context, list []model.FollowUp) {
-	ids := make([]int64, 0, len(list))
-	seen := make(map[int64]bool, len(list))
+// fillFollowUpParentNames 批量补齐所属客户/商机名称，供列表展示。
+func (s *Service) fillFollowUpParentNames(ctx context.Context, list []model.FollowUp) {
+	customerIDs := make([]int64, 0, len(list))
+	opportunityIDs := make([]int64, 0, len(list))
+	seenC, seenO := make(map[int64]bool, len(list)), make(map[int64]bool, len(list))
 	for _, f := range list {
-		if f.CustomerID > 0 && !seen[f.CustomerID] {
-			ids = append(ids, f.CustomerID)
-			seen[f.CustomerID] = true
+		if f.CustomerID > 0 && !seenC[f.CustomerID] {
+			customerIDs = append(customerIDs, f.CustomerID)
+			seenC[f.CustomerID] = true
+		}
+		if f.OpportunityID > 0 && !seenO[f.OpportunityID] {
+			opportunityIDs = append(opportunityIDs, f.OpportunityID)
+			seenO[f.OpportunityID] = true
 		}
 	}
-	customers, err := s.repo.FindCustomersByIDs(ctx, ids)
+	customers, err := s.repo.FindCustomersByIDs(ctx, customerIDs)
 	if err != nil {
 		return // 名称缺失不阻塞查询
 	}
-	names := make(map[int64]string, len(customers))
+	customerNames := make(map[int64]string, len(customers))
 	for _, c := range customers {
-		names[c.ID] = c.Name
+		customerNames[c.ID] = c.Name
+	}
+	opportunityNames := map[int64]string{}
+	if len(opportunityIDs) > 0 {
+		if opportunities, err := s.repo.FindOpportunitiesByIDs(ctx, opportunityIDs); err == nil {
+			opportunityNames = make(map[int64]string, len(opportunities))
+			for _, o := range opportunities {
+				opportunityNames[o.ID] = o.Name
+			}
+		}
 	}
 	for i := range list {
-		list[i].CustomerName = names[list[i].CustomerID]
+		list[i].CustomerName = customerNames[list[i].CustomerID]
+		list[i].OpportunityName = opportunityNames[list[i].OpportunityID]
 	}
 }
 
-// fillFollowUpCustomerName 补齐单个跟进的所属客户名称（创建/详情返回值用）。
-func (s *Service) fillFollowUpCustomerName(ctx context.Context, f *model.FollowUp) {
-	if f.CustomerID <= 0 {
-		return
+// fillFollowUpParentName 补齐单个跟进的所属客户/商机名称（创建/详情返回值用）。
+func (s *Service) fillFollowUpParentName(ctx context.Context, f *model.FollowUp) {
+	if f.CustomerID > 0 {
+		customers, err := s.repo.FindCustomersByIDs(ctx, []int64{f.CustomerID})
+		if err != nil || len(customers) == 0 {
+			return
+		}
+		f.CustomerName = customers[0].Name
 	}
-	customers, err := s.repo.FindCustomersByIDs(ctx, []int64{f.CustomerID})
-	if err != nil || len(customers) == 0 {
-		return
+	if f.OpportunityID > 0 {
+		opportunities, err := s.repo.FindOpportunitiesByIDs(ctx, []int64{f.OpportunityID})
+		if err != nil || len(opportunities) == 0 {
+			return
+		}
+		f.OpportunityName = opportunities[0].Name
 	}
-	f.CustomerName = customers[0].Name
 }
