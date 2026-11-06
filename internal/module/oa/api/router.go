@@ -204,6 +204,22 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	event.PUT("", h.requirePermission("oa:calendar:update"), h.UpdateCalendarEvent)
 	event.DELETE("/:id", h.requirePermission("oa:calendar:delete"), h.CancelCalendarEvent)
 	event.POST("/:id/cancel", h.requirePermission("oa:calendar:delete"), h.CancelCalendarEvent)
+
+	// 文档目录与 ACL（issue #58，菜单种子 526 段 / 员工侧 537，spec §4.12/§5）：
+	// 目录树/详情挂 oa:document:query（不可见目录不出现在树里，详情 404）；
+	// 创建挂 oa:document:create（5261）。改名/删除/ACL 设置只要求「目录管理权」
+	//（owner 或 oa:document:manage），因此不在路由上挂独立权限码——owner 可能
+	// 没有管理按钮码；服务层区分 403（可见无管理权）/404（不可见）。
+	// 文件上传/下载由 #59 承接（file 表 schema 已在 00021 建全）。
+	document := oa.Group("/document")
+	folder := document.Group("/folder")
+	folder.GET("/tree", h.requirePermission(documentQuery), h.ListDocumentFolderTree)
+	folder.GET("/:id", h.requirePermission(documentQuery), h.GetDocumentFolder)
+	folder.GET("/:id/acl", h.GetDocumentFolderACL)
+	folder.POST("", h.requirePermission("oa:document:create"), h.CreateDocumentFolder)
+	folder.PUT("", h.UpdateDocumentFolder)
+	folder.PUT("/:id/acl", h.SetDocumentFolderACL)
+	folder.DELETE("/:id", h.DeleteDocumentFolder)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。

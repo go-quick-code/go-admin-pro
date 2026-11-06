@@ -8,7 +8,7 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=54  断言 up 后的业务表数量（默认 54；CI 继承此默认值；
+#   EXPECTED_TABLES=57  断言 up 后的业务表数量（默认 57；CI 继承此默认值；
 #                       00003 新增 system_role_dept，00004 新增 crm_customer、crm_sequence，
 #                       00005 新增 crm_contact，00006 新增 crm_customer_owner_history，
 #                       00007 新增 crm_follow_up，00008 新增 crm_pool_config，
@@ -28,6 +28,8 @@
 #                       oa_attendance_group_user、oa_attendance_punch、
 #                       oa_attendance_result，
 #                       00020 新增 oa_calendar_event、oa_meeting_room、oa_room_booking，
+#                       00021 新增 oa_document_folder、oa_document_folder_acl、
+#                       oa_document_file，
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -35,7 +37,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-54}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-57}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

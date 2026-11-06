@@ -386,6 +386,20 @@ func seedMenus(db *gorm.DB) error {
 		btn(5244, 524, "公开日程", "oa:calendar:public", 4),
 		menu(536, 500, "我的日程", "calendar-mine", "oa/calendar/index", "oa:calendar:query", "Calendar", 15),
 
+		// 文档目录与 ACL（issue #58，spec §3.8/§4.12）：526 段（协调台账分配；
+		// grep 去重确认 525/526/5261–5263/537 未被占用）。查询码挂菜单（目录树
+		// 入口）；5261 创建目录（顶层必须带显式 ACL）；5262 是管理旁路码
+		//（owner 之外的全目录可见/可管理，服务层判定 403/404）；5263 文件上传
+		// 码预留给 #59（本工单只建 file 表 schema）。员工侧「我的文档」537 复用
+		// 同一页面（500–549 空位自取：523 报销/524 日程/529 我的请假/530 考勤组/
+		// 531 我的考勤/532 我的公告/533 考勤结果/534 考勤汇总/535 我的报销/
+		// 536 我的日程已占用，grep 去重取 537），只挂查询码，可见目录按 ACL 过滤。
+		menu(526, 500, "文档", "document", "oa/document/index", "oa:document:query", "FolderOpened", 16),
+		btn(5261, 526, "目录创建", "oa:document:create", 1),
+		btn(5262, 526, "目录管理", "oa:document:manage", 2),
+		btn(5263, 526, "文件上传", "oa:document:upload", 3),
+		menu(537, 500, "我的文档", "document-mine", "oa/document/index", "oa:document:query", "FolderOpened", 17),
+
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。
@@ -542,6 +556,11 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 5241},
 		{RoleID: 2, MenuID: 5242},
 		{RoleID: 2, MenuID: 5243},
+		// 文档员工侧（issue #58，spec §7.3「内置普通角色授予…文档…的基础
+		// 菜单」）：我的文档页面（537，携带 oa:document:query），可见目录由
+		// 目录 ACL 过滤；不含 526 管理菜单、5261 创建与 5262 管理码
+		//（顶层目录创建与全租户管理由管理员另行授予）。
+		{RoleID: 2, MenuID: 537},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }
