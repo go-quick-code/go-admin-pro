@@ -54,6 +54,22 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	balance.GET("/mine", h.MyBalances)
 	balance.POST("/init", h.requirePermission(manageLeave), h.InitBalances)
 	balance.POST("/adjust", h.requirePermission(manageLeave), h.AdjustBalance)
+
+	// 请假申请（issue #52，菜单种子 529 段）：本人列表/详情/附件查看登录即可
+	//（服务层按本人收口，非本人 404）；写动作逐码——创建/编辑/删除/提交，
+	// 附件上传与删除跟随编辑码（oa:leave:update）。审批走通用待办
+	//（/bpm/task/*），本组不提供审批接口（spec §5：审批人的动作由 bpm 收口）。
+	request := leave.Group("/request")
+	request.GET("/page", h.PageMyLeaveRequests)
+	request.GET("/:id", h.GetMyLeaveRequest)
+	request.POST("", h.requirePermission("oa:leave:create"), h.CreateLeaveRequest)
+	request.PUT("", h.requirePermission("oa:leave:update"), h.UpdateLeaveRequest)
+	request.DELETE("/:id", h.requirePermission("oa:leave:delete"), h.DeleteLeaveRequest)
+	request.POST("/:id/submit", h.requirePermission("oa:leave:submit"), h.SubmitLeaveRequest)
+	request.GET("/:id/files", h.ListLeaveRequestFiles)
+	request.GET("/:id/files/:fileId/download", h.DownloadLeaveRequestFile)
+	request.POST("/:id/files", h.requirePermission("oa:leave:update"), h.UploadLeaveRequestFile)
+	request.DELETE("/:id/files/:fileId", h.requirePermission("oa:leave:update"), h.DeleteLeaveRequestFile)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。

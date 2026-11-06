@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 
+	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
@@ -31,6 +32,13 @@ type SystemGateway interface {
 type Service struct {
 	sys  SystemGateway
 	repo *repository.Repository
+	// bpm 是审批引擎（issue #52 请假提交/回调的接点）：OA → bpm 单向依赖，
+	// bpm 不反向依赖业务模块（ADR 0008/0009）。装配前为 nil，相关入口显式报错。
+	bpm *bpmservice.Service
+	// files 是请假附件的存储依赖面（由 internal/app 装配 infra 适配器）。
+	files LeaveFileStore
+	// apiPrefix 是附件鉴权下载地址的 HTTP 前缀。
+	apiPrefix string
 }
 
 // New 创建 oa Service。repo 是 OA 实体表仓储（issue #50 起引入，工作日历
