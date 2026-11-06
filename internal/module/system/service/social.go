@@ -206,6 +206,69 @@ func (s *SocialService) ensureSocialClientCodeFree(ctx context.Context, code str
 	return nil
 }
 
+// ---------- 可用平台列表（issue #77，登录页公开端点） ----------
+
+// ListEnabledSocialProviders 登录页可用社交平台（spec §4.4.1：登录页只展示
+// 启用的客户端）：按启用客户端返回，同平台去重，并过滤掉未注册 provider 的
+// 平台（点了也无法完成授权）。公开端点，只暴露 provider 编码与展示名称。
+func (s *SocialService) ListEnabledSocialProviders(ctx context.Context) ([]dto.SocialProviderResp, error) {
+	clients, err := s.repo.ListEnabledSocialClients(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.SocialProviderResp, 0, len(clients))
+	seen := make(map[string]bool, len(clients))
+	for _, c := range clients {
+		if seen[c.Provider] || s.socialProvider(c.Provider) == nil {
+			continue
+		}
+		seen[c.Provider] = true
+		out = append(out, dto.SocialProviderResp{Provider: c.Provider, Name: c.Name})
+	}
+	return out, nil
+}
+
+// ---------- 个人中心：我的社交绑定（issue #77，登录即可） ----------
+
+// ListMySocialUsers 当前用户的社交绑定列表（个人中心 tab 用，登录即可，
+// 无需 system:social-user:query 权限）。
+func (s *SocialService) ListMySocialUsers(ctx context.Context, userID int64) ([]dto.SocialUserResp, int64, error) {
+	list, total, err := s.repo.ListSocialUsers(ctx, repository.SocialUserFilter{UserID: userID}, 0, 100)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]dto.SocialUserResp, 0, len(list))
+	for _, row := range list {
+		createTime := row.CreatedAt
+		out = append(out, dto.SocialUserResp{
+			ID:          row.ID,
+			UserID:      row.UserID,
+			Provider:    row.Provider,
+			OpenID:      row.OpenID,
+			UnionID:     row.UnionID,
+			Nickname:    row.Nickname,
+			Avatar:      row.Avatar,
+			Status:      row.Status,
+			LastLoginAt: row.LastLoginAt,
+			CreateTime:  &createTime,
+		})
+	}
+	return out, total, nil
+}
+
+// UnbindMySocialUser 解绑本人绑定（个人中心用，登录即可）：只能解绑本人，
+// 非本人/不存在一律 404，不泄露他人绑定是否存在（spec §4.4.7）。
+func (s *SocialService) UnbindMySocialUser(ctx context.Context, id, userID int64) error {
+	binding, err := s.repo.FindSocialUserByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if binding == nil || binding.UserID != userID {
+		return xerr.NotFound("绑定关系不存在")
+	}
+	return s.repo.DeleteSocialUser(ctx, id)
+}
+
 // ---------- 授权地址与回调 ----------
 
 // AuthorizeURL 生成授权跳转地址（公开端点，登录模式）：

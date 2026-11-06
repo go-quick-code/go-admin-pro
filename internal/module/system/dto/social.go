@@ -112,3 +112,10 @@ type SocialUserResp struct {
 	LastLoginAt *time.Time `json:"lastLoginAt"`
 	CreateTime  *time.Time `json:"createTime"`
 }
+
+// SocialProviderResp 登录页可用社交平台（公开端点，issue #77）：
+// 仅暴露展示用字段（provider 编码与客户端名称），不含任何密钥/端点配置。
+type SocialProviderResp struct {
+	Provider string `json:"provider"`
+	Name     string `json:"name"`
+}

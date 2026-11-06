@@ -174,9 +174,8 @@ export function deleteTenantPackage(id: number) {
   return request.delete(`/system/tenant-package/${id}`) as Promise<any>
 }
 
-// ---------- 社交登录（issue #76） ----------
+// ---------- 社交登录（issue #76；provider 实现与前端流程为 issue #77） ----------
 // 客户端管理仅平台租户可见；绑定用户列表为租户内管理动作。
-// provider 具体 OAuth2 实现（微信/钉钉/企微）由 #77 承接。
 export function pageSocialClients(params: any) {
   return request.get('/system/social/client/page', { params }) as Promise<any>
 }
@@ -195,6 +194,12 @@ export function pageSocialUsers(params: any) {
 export function deleteSocialUser(id: number) {
   return request.delete(`/system/social/user/${id}`) as Promise<any>
 }
+// 登录页可用社交平台（公开端点）：仅返回启用客户端且已注册 provider 的平台。
+export function listSocialProviders() {
+  return request.get('/system/social/providers') as Promise<
+    Array<{ provider: string; name: string }>
+  >
+}
 // 生成三方授权跳转地址（公开端点）：登录页 provider 按钮与绑定流程使用。
 export function getSocialAuthorizeUrl(params: { provider: string; tenantId?: number }) {
   return request.get('/system/social/authorize-url', { params }) as Promise<any>
@@ -206,6 +211,14 @@ export function socialBind(provider: string) {
 // 社交回调换登录态/完成绑定（公开端点）：三方重定向携带 code/state。
 export function socialCallback(params: { provider: string; code: string; state: string }) {
   return request.get('/system/social/callback', { params }) as Promise<any>
+}
+// 我的社交绑定列表（登录即可，个人中心 tab）。
+export function listMySocialBindings() {
+  return request.get('/system/social/my') as Promise<any>
+}
+// 解绑本人社交绑定（登录即可）：非本人/不存在一律 404。
+export function unbindMySocialUser(id: number) {
+  return request.delete(`/system/social/my/${id}`) as Promise<any>
 }
 
 // ---------- 日志 ----------

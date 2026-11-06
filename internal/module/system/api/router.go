@@ -14,6 +14,8 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	social := rg.Group("/system/social")
 	social.GET("/authorize-url", h.SocialAuthorizeURL)
 	social.GET("/callback", h.SocialCallback)
+	// 登录页可用平台列表（issue #77）：按启用客户端 + 已注册 provider 过滤。
+	social.GET("/providers", h.ListSocialProviders)
 }
 
 // RegisterProtected 注册需要登录的接口，rg 上应已挂载 Auth 中间件。
@@ -120,6 +122,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 按权限码收口；客户端 CRUD 仅平台租户（平台级资源，同租户管理面）。
 	social := rg.Group("/system/social")
 	social.POST("/bind", h.SocialBind)
+	// 个人中心「我的社交绑定」（issue #77，登录即可）：列表与解绑本人，
+	// 无需权限码（只能操作本人绑定，服务层校验属主）。
+	social.GET("/my", h.ListMySocialBindings)
+	social.DELETE("/my/:id", h.UnbindMySocialBinding)
 	socialUser := rg.Group("/system/social/user")
 	socialUser.GET("/page", h.RequirePermission("system:social-user:query"), h.PageSocialUsers)
 	socialUser.DELETE("/:id", h.RequirePermission("system:social-user:delete"), h.DeleteSocialUser)
