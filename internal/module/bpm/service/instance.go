@@ -103,73 +103,87 @@ func requireOperator(ctx context.Context) (int64, error) {
 //  3. 解析首节点审批人（解析不到 → 400，不跳过节点、不自动通过）；
 //  4. 落实例（锁定 definition_id + version 快照、标题/摘要快照）并按候选池
 //     物化首节点任务（每候选人一条）；
-//  5. 同事务投递 bpm_todo 通知。
+//  5. 同事务投递 bpm_todo 通知，事务提交后显式发布实时推送（issue #78，
+//     spec §4.5.5；推送 best-effort，丢失由前端 60 秒轮询兜底，ADR 0013）。
 func (s *Service) StartInstance(ctx context.Context, in StartInstanceInput) (*model.ProcessInstance, error) {
 	var inst *model.ProcessInstance
+	var pending []notifyservice.Input
 	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row, err := s.startInstance(ctx, tx, in)
+		pendingInTx, row, err := s.startInstance(ctx, tx, in)
 		if err != nil {
 			return err
 		}
 		inst = row
+		pending = pendingInTx
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：此刻发布的必然是已落库的通知。
+	s.notify.PublishInputs(ctx, pending)
 	return inst, nil
 }
 
 // StartInstanceInTx 在调用方事务内发起实例：业务模块「写业务单据 + 发起审批」
 // 原子化的接点（与 notify.CreateInTx 同款约定，tx 由调用方开启并提交）。
+// 嵌套事务下无法感知外层提交时机：startInstance 返回即发布是 best-effort，
+// 外层回滚产生的瞬时事件以前端刷新为准（spec §4.5.5 / ADR 0013）。
 func (s *Service) StartInstanceInTx(ctx context.Context, tx *gorm.DB, in StartInstanceInput) (*model.ProcessInstance, error) {
 	if tx == nil {
 		return nil, xerr.Internal(errors.New("bpm: StartInstanceInTx 需要调用方事务句柄，独立发起请用 StartInstance"))
 	}
-	return s.startInstance(ctx, repository.New(tx), in)
-}
-
-func (s *Service) startInstance(ctx context.Context, tx *repository.Repository, in StartInstanceInput) (*model.ProcessInstance, error) {
-	operator, err := requireOperator(ctx)
+	pending, inst, err := s.startInstance(ctx, repository.New(tx), in)
 	if err != nil {
 		return nil, err
 	}
+	s.notify.PublishInputs(ctx, pending)
+	return inst, nil
+}
+
+// startInstance 发起实例的事务体：除实例外还返回本次投递的待办通知输入，
+// 供调用方在事务提交后显式发布实时推送（spec §4.5.5）。
+func (s *Service) startInstance(ctx context.Context, tx *repository.Repository, in StartInstanceInput) ([]notifyservice.Input, *model.ProcessInstance, error) {
+	operator, err := requireOperator(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	if in.BusinessID <= 0 {
-		return nil, xerr.BadRequest("业务记录 ID 不能为空")
+		return nil, nil, xerr.BadRequest("业务记录 ID 不能为空")
 	}
 	if err := validateText("标题", in.Title, MaxInstanceTitleLen, true); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateText("摘要", in.Summary, MaxInstanceSummaryLen, false); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 行锁读定义：与停用/发布动作互斥，状态判定不被并发迁移。
 	def, err := tx.FindDefinitionByIDForUpdate(ctx, in.DefinitionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if def == nil {
-		return nil, xerr.NotFound("流程定义不存在")
+		return nil, nil, xerr.NotFound("流程定义不存在")
 	}
 	switch def.Status {
 	case model.DefinitionStatusDraft:
-		return nil, xerr.BadRequest("流程定义未发布，不可发起新实例")
+		return nil, nil, xerr.BadRequest("流程定义未发布，不可发起新实例")
 	case model.DefinitionStatusDisabled:
-		return nil, xerr.BadRequest("流程定义已停用，不可发起新实例（在途实例不受影响）")
+		return nil, nil, xerr.BadRequest("流程定义已停用，不可发起新实例（在途实例不受影响）")
 	}
 	if _, ok := s.handlerFor(def.BusinessType); !ok {
-		return nil, xerr.BadRequest(fmt.Sprintf("业务类型 %s 未注册处理器，不能发起", def.BusinessType))
+		return nil, nil, xerr.BadRequest(fmt.Sprintf("业务类型 %s 未注册处理器，不能发起", def.BusinessType))
 	}
 	nodes := def.Nodes
 	if len(nodes) == 0 {
-		return nil, xerr.BadRequest("流程定义没有审批节点，不可发起")
+		return nil, nil, xerr.BadRequest("流程定义没有审批节点，不可发起")
 	}
 
 	// 首节点审批人解析：解析不到 → 400（spec §4.2），整笔回滚。
 	assignees, err := ResolveAssignees(ctx, s.sys, nodes[0], operator)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	now := time.Now()
@@ -186,7 +200,7 @@ func (s *Service) startInstance(ctx context.Context, tx *repository.Repository, 
 		StartedAt:         now,
 	}
 	if err := tx.CreateInstance(ctx, inst); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 候选池物化：每候选人一条待办任务（节点名快照）。
@@ -201,16 +215,18 @@ func (s *Service) startInstance(ctx context.Context, tx *repository.Repository, 
 		})
 	}
 	if err := tx.CreateTasks(ctx, tasks); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := s.notifyTodo(ctx, tx.DB(), inst.Title, tasks); err != nil {
-		return nil, err
+	pending, err := s.notifyTodo(ctx, tx.DB(), inst.Title, tasks)
+	if err != nil {
+		return nil, nil, err
 	}
-	return inst, nil
+	return pending, inst, nil
 }
 
-// notifyTodo 给候选池任务批量投递 bpm_todo 通知（跳转任务详情）。
-func (s *Service) notifyTodo(ctx context.Context, tx *gorm.DB, title string, tasks []model.Task) error {
+// notifyTodo 给候选池任务批量投递 bpm_todo 通知（跳转任务详情），返回投递的
+// 输入批次供调用方在事务提交后显式发布实时推送（spec §4.5.5）。
+func (s *Service) notifyTodo(ctx context.Context, tx *gorm.DB, title string, tasks []model.Task) ([]notifyservice.Input, error) {
 	inputs := make([]notifyservice.Input, 0, len(tasks))
 	for _, task := range tasks {
 		inputs = append(inputs, notifyservice.Input{
@@ -224,12 +240,13 @@ func (s *Service) notifyTodo(ctx context.Context, tx *gorm.DB, title string, tas
 			RouteParams: fmt.Sprintf(`{"taskId":%d}`, task.ID),
 		})
 	}
-	return s.notify.CreateInTx(ctx, tx, inputs)
+	return inputs, s.notify.CreateInTx(ctx, tx, inputs)
 }
 
-// notifyResult 给发起人投递审批结果通知（bpm_result，跳转我发起 tab）。
-func (s *Service) notifyResult(ctx context.Context, tx *gorm.DB, inst *model.ProcessInstance, title string) error {
-	return s.notify.CreateInTx(ctx, tx, []notifyservice.Input{{
+// notifyResult 给发起人投递审批结果通知（bpm_result，跳转我发起 tab），返回
+// 投递的输入批次供调用方在事务提交后显式发布实时推送（spec §4.5.5）。
+func (s *Service) notifyResult(ctx context.Context, tx *gorm.DB, inst *model.ProcessInstance, title string) ([]notifyservice.Input, error) {
+	inputs := []notifyservice.Input{{
 		UserID:      inst.InitiatorID,
 		Type:        notifymodel.TypeBpmResult,
 		Title:       title,
@@ -238,7 +255,8 @@ func (s *Service) notifyResult(ctx context.Context, tx *gorm.DB, inst *model.Pro
 		BizID:       inst.ID,
 		Route:       "/bpm/task",
 		RouteParams: fmt.Sprintf(`{"tab":"initiated","instanceId":%d}`, inst.ID),
-	}})
+	}}
+	return inputs, s.notify.CreateInTx(ctx, tx, inputs)
 }
 
 // markTodoRead 把办理人名下指定任务的 bpm_todo 通知置已读（与任务状态变更
@@ -348,17 +366,22 @@ func (s *Service) ApproveTask(ctx context.Context, taskID int64, comment string)
 		return nil, err
 	}
 	var inst *model.ProcessInstance
+	var pending []notifyservice.Input
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row, err := s.approveTask(ctx, tx, taskID, operator, comment)
+		pendingInTx, row, err := s.approveTask(ctx, tx, taskID, operator, comment)
 		if err != nil {
 			return err
 		}
 		inst = row
+		pending = pendingInTx
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+	// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
 	// 事务已提交：可选的提交后钩子只在**实例最终通过**时调用一次（中间节点
 	// 通过只推进任务，不触发业务完成动作，PR #66 审查 P2-1）。钩子在已提交
 	// 数据上执行（issue #62 请假通过后的考勤结果重算），失败不回滚审批。
@@ -372,20 +395,23 @@ func (s *Service) ApproveTask(ctx context.Context, taskID int64, comment string)
 	return inst, nil
 }
 
-func (s *Service) approveTask(ctx context.Context, tx *repository.Repository, taskID, operator int64, comment string) (*model.ProcessInstance, error) {
+// approveTask 办理通过的事务体：除实例外还返回本次投递的通知输入（推进节点
+// 的 bpm_todo 与终审的 bpm_result），供调用方在事务提交后显式发布实时推送
+// （spec §4.5.5）。
+func (s *Service) approveTask(ctx context.Context, tx *repository.Repository, taskID, operator int64, comment string) ([]notifyservice.Input, *model.ProcessInstance, error) {
 	task, inst, err := s.lockForAction(ctx, tx, taskID, operator)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := checkTodo(task); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nodes, err := s.loadDefinitionNodes(ctx, tx, inst)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if task.NodeIndex < 0 || task.NodeIndex >= len(nodes) {
-		return nil, xerr.Internal(fmt.Errorf("bpm: 任务 %d 节点序号 %d 越界（共 %d 节点）", task.ID, task.NodeIndex, len(nodes)))
+		return nil, nil, xerr.Internal(fmt.Errorf("bpm: 任务 %d 节点序号 %d 越界（共 %d 节点）", task.ID, task.NodeIndex, len(nodes)))
 	}
 
 	now := time.Now()
@@ -393,10 +419,10 @@ func (s *Service) approveTask(ctx context.Context, tx *repository.Repository, ta
 	// 待办通知不能被误消化）。
 	todos, err := tx.ListInstanceTodoTasks(ctx, inst.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.CompleteTask(ctx, task.ID, model.TaskStatusApproved, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.CreateRecord(ctx, &model.ApprovalRecord{
 		InstanceID: inst.ID,
@@ -408,20 +434,21 @@ func (s *Service) approveTask(ctx context.Context, tx *repository.Repository, ta
 		Comment:    strings.TrimSpace(comment),
 		CreatedAt:  now,
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// 先办者胜出：取消同节点兄弟待办。
 	if _, err := tx.CancelSiblingTasks(ctx, inst.ID, task.NodeIndex, task.ID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	var pending []notifyservice.Input
 	nextIndex := task.NodeIndex + 1
 	if nextIndex < len(nodes) {
 		// 推进下一节点：解析下一批审批人（空 → 400，整笔回滚，任务保持待办）。
 		next := nodes[nextIndex]
 		assignees, err := ResolveAssignees(ctx, s.sys, next, inst.InitiatorID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		tasks := make([]model.Task, 0, len(assignees))
 		for _, assignee := range assignees {
@@ -434,35 +461,37 @@ func (s *Service) approveTask(ctx context.Context, tx *repository.Repository, ta
 			})
 		}
 		if err := tx.CreateTasks(ctx, tasks); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if err := s.notifyTodo(ctx, tx.DB(), inst.Title, tasks); err != nil {
-			return nil, err
+		pending, err = s.notifyTodo(ctx, tx.DB(), inst.Title, tasks)
+		if err != nil {
+			return nil, nil, err
 		}
 	} else {
 		// 最后一节点通过：实例通过，同事务回调业务。
 		if err := tx.FinishInstance(ctx, inst.ID, model.InstanceStatusApproved, now); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		inst.Status = model.InstanceStatusApproved
 		inst.EndedAt = &now
 		handler, ok := s.handlerFor(inst.BusinessType)
 		if !ok {
-			return nil, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
+			return nil, nil, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
 		}
 		if err := handler.OnApproved(ctx, inst, tx.DB()); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if err := s.notifyResult(ctx, tx.DB(), inst, "您发起的审批已通过"); err != nil {
-			return nil, err
+		pending, err = s.notifyResult(ctx, tx.DB(), inst, "您发起的审批已通过")
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 	// 本人任务（已通过）+ 被取消兄弟任务的待办通知一并消化（按办理人分组）。
 	todos = append(todos, *task)
 	if err := s.resolveTodoNotifies(ctx, tx.DB(), todos); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return inst, nil
+	return pending, inst, nil
 }
 
 // ---------- 驳回 ----------
@@ -478,36 +507,43 @@ func (s *Service) RejectTask(ctx context.Context, taskID int64, reason string) (
 		return nil, err
 	}
 	var inst *model.ProcessInstance
+	var pending []notifyservice.Input
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row, err := s.rejectTask(ctx, tx, taskID, operator, strings.TrimSpace(reason))
+		pendingInTx, row, err := s.rejectTask(ctx, tx, taskID, operator, strings.TrimSpace(reason))
 		if err != nil {
 			return err
 		}
 		inst = row
+		pending = pendingInTx
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+	// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
 	return inst, nil
 }
 
-func (s *Service) rejectTask(ctx context.Context, tx *repository.Repository, taskID, operator int64, reason string) (*model.ProcessInstance, error) {
+// rejectTask 驳回的事务体：除实例外还返回本次投递的 bpm_result 输入，供
+// 调用方在事务提交后显式发布实时推送（spec §4.5.5）。
+func (s *Service) rejectTask(ctx context.Context, tx *repository.Repository, taskID, operator int64, reason string) ([]notifyservice.Input, *model.ProcessInstance, error) {
 	task, inst, err := s.lockForAction(ctx, tx, taskID, operator)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := checkTodo(task); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := time.Now()
 	// 先收集全部待办（取消后查不到）：驳回后按办理人分组置其通知已读。
 	todos, err := tx.ListInstanceTodoTasks(ctx, inst.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.CompleteTask(ctx, task.ID, model.TaskStatusRejected, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.CreateRecord(ctx, &model.ApprovalRecord{
 		InstanceID: inst.ID,
@@ -519,33 +555,34 @@ func (s *Service) rejectTask(ctx context.Context, tx *repository.Repository, tas
 		Comment:    reason,
 		CreatedAt:  now,
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// 实例驳回：同实例所有待办取消（含同节点兄弟）。
 	if _, err := tx.CancelInstanceTodoTasks(ctx, inst.ID, task.ID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.FinishInstance(ctx, inst.ID, model.InstanceStatusRejected, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	inst.Status = model.InstanceStatusRejected
 	inst.EndedAt = &now
 	handler, ok := s.handlerFor(inst.BusinessType)
 	if !ok {
-		return nil, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
+		return nil, nil, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
 	}
 	if err := handler.OnRejected(ctx, inst, tx.DB(), reason); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := s.notifyResult(ctx, tx.DB(), inst, "您发起的审批被驳回"); err != nil {
-		return nil, err
+	pending, err := s.notifyResult(ctx, tx.DB(), inst, "您发起的审批被驳回")
+	if err != nil {
+		return nil, nil, err
 	}
 	// 办理人已读自己处理的任务；全部候选人的待办通知随任务取消一并消化。
 	todos = append(todos, *task)
 	if err := s.resolveTodoNotifies(ctx, tx.DB(), todos); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return inst, nil
+	return pending, inst, nil
 }
 
 // ---------- 撤回 ----------
@@ -561,46 +598,53 @@ func (s *Service) WithdrawInstance(ctx context.Context, instanceID int64, commen
 		return nil, err
 	}
 	var inst *model.ProcessInstance
+	var pending []notifyservice.Input
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row, err := s.withdrawInstance(ctx, tx, instanceID, operator, strings.TrimSpace(comment))
+		pendingInTx, row, err := s.withdrawInstance(ctx, tx, instanceID, operator, strings.TrimSpace(comment))
 		if err != nil {
 			return err
 		}
 		inst = row
+		pending = pendingInTx
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+	// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
 	return inst, nil
 }
 
-func (s *Service) withdrawInstance(ctx context.Context, tx *repository.Repository, instanceID, operator int64, comment string) (*model.ProcessInstance, error) {
+// withdrawInstance 撤回的事务体：除实例外还返回本次投递的 bpm_result 输入，
+// 供调用方在事务提交后显式发布实时推送（spec §4.5.5）。
+func (s *Service) withdrawInstance(ctx context.Context, tx *repository.Repository, instanceID, operator int64, comment string) ([]notifyservice.Input, *model.ProcessInstance, error) {
 	inst, err := tx.FindInstanceByIDForUpdate(ctx, instanceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if inst == nil {
-		return nil, xerr.NotFound("流程实例不存在")
+		return nil, nil, xerr.NotFound("流程实例不存在")
 	}
 	if inst.InitiatorID != operator {
-		return nil, xerr.Forbidden("仅发起人可撤回")
+		return nil, nil, xerr.Forbidden("仅发起人可撤回")
 	}
 	if inst.Status != model.InstanceStatusRunning {
-		return nil, xerr.Conflict(fmt.Sprintf("流程已%s，不可撤回", instanceStatusName(inst.Status)))
+		return nil, nil, xerr.Conflict(fmt.Sprintf("流程已%s，不可撤回", instanceStatusName(inst.Status)))
 	}
 	count, err := tx.CountRecordsByInstanceActions(ctx, inst.ID, model.RecordActionApprove, model.RecordActionReject)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if count > 0 {
-		return nil, xerr.Conflict("已存在审批动作，不可撤回")
+		return nil, nil, xerr.Conflict("已存在审批动作，不可撤回")
 	}
 
 	// 收集全部待办（取消后查不到）：撤回后按办理人分组置其通知已读。
 	todos, err := tx.ListInstanceTodoTasks(ctx, inst.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	now := time.Now()
@@ -614,30 +658,31 @@ func (s *Service) withdrawInstance(ctx context.Context, tx *repository.Repositor
 		Comment:    comment,
 		CreatedAt:  now,
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := tx.CancelInstanceTodoTasks(ctx, inst.ID, 0); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.FinishInstance(ctx, inst.ID, model.InstanceStatusWithdrawn, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	inst.Status = model.InstanceStatusWithdrawn
 	inst.EndedAt = &now
 	handler, ok := s.handlerFor(inst.BusinessType)
 	if !ok {
-		return nil, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
+		return nil, nil, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
 	}
 	if err := handler.OnWithdrawn(ctx, inst, tx.DB()); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := s.notifyResult(ctx, tx.DB(), inst, "您发起的审批已撤回"); err != nil {
-		return nil, err
+	pending, err := s.notifyResult(ctx, tx.DB(), inst, "您发起的审批已撤回")
+	if err != nil {
+		return nil, nil, err
 	}
 	if err := s.resolveTodoNotifies(ctx, tx.DB(), todos); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return inst, nil
+	return pending, inst, nil
 }
 
 // ---------- 转办 ----------
@@ -653,39 +698,46 @@ func (s *Service) TransferTask(ctx context.Context, taskID, toUserID int64, comm
 		return nil, err
 	}
 	var created *model.Task
+	var pending []notifyservice.Input
 	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row, err := s.transferTask(ctx, tx, taskID, toUserID, operator, strings.TrimSpace(comment))
+		pendingInTx, row, err := s.transferTask(ctx, tx, taskID, toUserID, operator, strings.TrimSpace(comment))
 		if err != nil {
 			return err
 		}
 		created = row
+		pending = pendingInTx
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+	// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
 	return created, nil
 }
 
-func (s *Service) transferTask(ctx context.Context, tx *repository.Repository, taskID, toUserID, operator int64, comment string) (*model.Task, error) {
+// transferTask 转办的事务体：除新任务外还返回投递给目标用户的 bpm_todo 输入，
+// 供调用方在事务提交后显式发布实时推送（spec §4.5.5）。
+func (s *Service) transferTask(ctx context.Context, tx *repository.Repository, taskID, toUserID, operator int64, comment string) ([]notifyservice.Input, *model.Task, error) {
 	task, inst, err := s.lockForAction(ctx, tx, taskID, operator)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := checkTodo(task); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	active, err := s.sys.ActiveUserExists(ctx, toUserID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !active {
-		return nil, xerr.BadRequest("转办目标用户不存在或已停用")
+		return nil, nil, xerr.BadRequest("转办目标用户不存在或已停用")
 	}
 
 	now := time.Now()
 	if err := tx.TransferTask(ctx, task.ID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	newTask := model.Task{
 		InstanceID: inst.ID,
@@ -695,7 +747,7 @@ func (s *Service) transferTask(ctx context.Context, tx *repository.Repository, t
 		Status:     model.TaskStatusTodo,
 	}
 	if err := tx.CreateTasks(ctx, []model.Task{newTask}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.CreateRecord(ctx, &model.ApprovalRecord{
 		InstanceID:       inst.ID,
@@ -708,16 +760,17 @@ func (s *Service) transferTask(ctx context.Context, tx *repository.Repository, t
 		TransferToUserID: toUserID,
 		CreatedAt:        now,
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := s.notifyTodo(ctx, tx.DB(), inst.Title, []model.Task{newTask}); err != nil {
-		return nil, err
+	pending, err := s.notifyTodo(ctx, tx.DB(), inst.Title, []model.Task{newTask})
+	if err != nil {
+		return nil, nil, err
 	}
 	// 原任务的待办通知随转办关闭置已读。
 	if err := s.markTodoRead(ctx, tx.DB(), operator, []int64{task.ID}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &newTask, nil
+	return pending, &newTask, nil
 }
 
 // ---------- 查询（通用待办页，spec §5）----------
@@ -970,12 +1023,16 @@ func (s *Service) CancelInstanceInTx(ctx context.Context, tx *gorm.DB, instanceI
 	if err := handler.OnWithdrawn(ctx, inst, tx); err != nil {
 		return false, err
 	}
-	if err := s.notifyResult(ctx, tx, inst, "您发起的审批已终止"); err != nil {
+	pending, err := s.notifyResult(ctx, tx, inst, "您发起的审批已终止")
+	if err != nil {
 		return false, err
 	}
 	if err := s.resolveTodoNotifies(ctx, tx, todos); err != nil {
 		return false, err
 	}
+	// 嵌套事务（业务单据事务内调用）：此处发布是 best-effort，外层回滚产生的
+	// 瞬时事件以前端刷新为准（spec §4.5.5 / ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
 	return true, nil
 }
 

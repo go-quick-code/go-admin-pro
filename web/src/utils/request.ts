@@ -29,7 +29,9 @@ service.interceptors.response.use(
       // 业务错误码与 data 一并挂到错误上：Excel 导入失败（code=4201）需要
       // 在页面上按行展示 data.errors，而不是只弹一条概要。
       err.responseBody = body
-      ElMessage.error(body.msg || '请求失败')
+      if (!response.config.silent) {
+        ElMessage.error(body.msg || '请求失败')
+      }
       return Promise.reject(err)
     }
     return body
@@ -54,11 +56,19 @@ service.interceptors.response.use(
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)
         window.location.href = `/login?redirect=${redirect}`
       }
-    } else {
+    } else if (!error.config?.silent) {
       ElMessage.error(msg)
     }
     return Promise.reject(error)
   },
 )
+
+// silent 请求不弹全局错误提示：后台轮询/重连类调用（如推送换票）失败时
+// 由调用方自行降级，不能每次重试都打扰用户。
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    silent?: boolean
+  }
+}
 
 export default service

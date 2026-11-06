@@ -39,3 +39,19 @@ export function markMessageRead(id: number) {
 export function markAllMessagesRead() {
   return request.put('/notify/message/read-all') as Promise<boolean>
 }
+
+// ---------- 实时推送（issue #78，spec §4.5）----------
+// SSE/WebSocket 不能带 Authorization 头：先带 Bearer 换一次性票据，
+// 再凭票据建立流，避免 JWT 进入 URL/日志（ADR 0013）。
+
+export interface PushTicket {
+  ticket: string
+  expiresIn: number
+  transports: string[]
+}
+
+// getPushTicket 换取一次性推送票据。silent：票据失败由 NotifyBell 自行
+// 降级 60 秒轮询，不弹全局错误提示。
+export function getPushTicket() {
+  return request.post('/notify/push/ticket', null, { silent: true }) as Promise<PushTicket>
+}

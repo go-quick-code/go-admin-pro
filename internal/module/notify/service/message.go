@@ -50,10 +50,19 @@ func (s *Service) CreateInTx(ctx context.Context, tx *gorm.DB, inputs []Input) e
 
 // Create 无既有事务的生产者入口：在本模块连接上自开事务批量写入，
 // 事务语义与 CreateInTx 一致（校验失败整批不写）。
+//
+// 事务提交成功后向在线用户发布实时推送（issue #78，spec §4.5.5）：
+// 回滚路径不会走到 PublishInputs——已提交数据才推送；推送 best-effort，
+// 丢失由前端 60 秒轮询兜底（ADR 0013）。
 func (s *Service) Create(ctx context.Context, inputs []Input) error {
-	return s.repo.Transaction(ctx, func(tx *gorm.DB) error {
+	err := s.repo.Transaction(ctx, func(tx *gorm.DB) error {
 		return s.CreateInTx(ctx, tx, inputs)
 	})
+	if err != nil {
+		return err
+	}
+	s.PublishInputs(ctx, inputs)
+	return nil
 }
 
 // buildRows 校验并物化输入；空批次返回空切片（CreateInTx 视为 no-op）。

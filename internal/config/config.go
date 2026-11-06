@@ -18,9 +18,22 @@ type Config struct {
 	Storage  StorageConfig  `mapstructure:"storage"`
 	Tenant   TenantConfig   `mapstructure:"tenant"`
 	Logger   LoggerConfig   `mapstructure:"logger"`
+	Push     PushConfig     `mapstructure:"push"`
 
 	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
 	loc *time.Location
+}
+
+// PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。
+// hub 与票据都在进程内（单实例限制见 ADR 0013）。
+type PushConfig struct {
+	// Enabled 总开关：关闭时不注册推送路由，前端换票失败自动降级 60 秒轮询。
+	// 代码默认 false（fail-safe），configs/config.yaml 示例显式开启。
+	Enabled bool `mapstructure:"enabled"`
+	// TicketTTL 一次性票据有效期，默认 30 秒（spec §4.5.2）。
+	TicketTTL time.Duration `mapstructure:"ticket-ttl"`
+	// Heartbeat SSE 心跳间隔（注释行），默认 25 秒（spec §4.5.3）。
+	Heartbeat time.Duration `mapstructure:"heartbeat"`
 }
 
 // DefaultTimezone 是 app.timezone 为空时的默认业务时区。
@@ -231,6 +244,13 @@ func (c *Config) applyDefaults() {
 	if c.Logger.Format == "" {
 		c.Logger.Format = "text"
 	}
+	// 实时推送（issue #78）：TTL 30s / 心跳 25s（spec §4.5.2/§4.5.3）。
+	if c.Push.TicketTTL <= 0 {
+		c.Push.TicketTTL = 30 * time.Second
+	}
+	if c.Push.Heartbeat <= 0 {
+		c.Push.Heartbeat = 25 * time.Second
+	}
 }
 
 func (c *Config) applyEnv() {
@@ -268,6 +288,22 @@ func (c *Config) applyEnv() {
 	case "false":
 		enabled := false
 		c.Database.SeedDemo = &enabled
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_PUSH_ENABLED"))) {
+	case "true", "1":
+		c.Push.Enabled = true
+	case "false", "0":
+		c.Push.Enabled = false
+	}
+	if v := os.Getenv("GAP_PUSH_TICKET_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Push.TicketTTL = d
+		}
+	}
+	if v := os.Getenv("GAP_PUSH_HEARTBEAT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Push.Heartbeat = d
+		}
 	}
 }
 

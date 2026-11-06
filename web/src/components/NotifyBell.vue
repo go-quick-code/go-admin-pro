@@ -51,6 +51,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatTime } from '@/utils/format'
 import {
+  getPushTicket,
   getUnreadCount,
   markAllMessagesRead,
   markMessageRead,
@@ -58,8 +59,11 @@ import {
   type NotifyMessage,
 } from '@/api/notify'
 
-// 顶栏通知铃铛（issue #45）：60 秒轮询未读数（spec §4.13：不做 WebSocket）；
-// 列表抽屉点击条目按跳转目标（route + routeParams）路由跳转，未读点击即已读。
+// 顶栏通知铃铛（issue #45 轮询 + issue #78 实时推送）：优先 SSE 收事件
+//（spec §4.5.6 传输优先级 WebSocket → SSE → 轮询，WS 由 #79 接入）；
+// 事件到达刷新未读数，SSE 不可用降级 60 秒轮询，断线按 1/2/5/10/30 秒
+// 退避重连。列表抽屉点击条目按跳转目标（route + routeParams）路由跳转，
+// 未读点击即已读。
 const PAGE_SIZE = 20
 
 const router = useRouter()
@@ -69,8 +73,6 @@ const loading = ref(false)
 const markingAll = ref(false)
 const messages = ref<NotifyMessage[]>([])
 const total = ref(0)
-
-let timer: number | undefined
 
 // typeLabel/typeTag：类型枚举的展示文案与标签色（值由后端枚举约束）。
 function typeLabel(type: string): string {
@@ -109,6 +111,80 @@ async function refresh() {
     unread.value = data?.count ?? 0
   } catch {
     // 轮询失败静默（未登录/网络抖动），下次轮询重试
+  }
+}
+
+// ---------- 实时推送（issue #78，spec §4.5.6）----------
+// EventSource 不能带 Authorization 头：先带 Bearer 换一次性票据再建流
+//（ADR 0013，避免 JWT 进入 URL）。票据一次性：浏览器 EventSource 的原生
+// 重连会复用已消费的 URL（必然 401），因此出错即手动关闭，换新票据重连。
+const SSE_RETRY_DELAYS = [1000, 2000, 5000, 10000, 30000]
+
+let eventSource: EventSource | undefined
+let retryIndex = 0
+let reconnectTimer: number | undefined
+let pollTimer: number | undefined
+let disposed = false
+
+function startPolling() {
+  if (pollTimer !== undefined) return
+  pollTimer = window.setInterval(refresh, 60_000)
+}
+
+function stopPolling() {
+  if (pollTimer !== undefined) {
+    window.clearInterval(pollTimer)
+    pollTimer = undefined
+  }
+}
+
+// scheduleReconnect 断线退避重连：1/2/5/10/30 秒，封顶 30 秒。
+function scheduleReconnect() {
+  if (disposed || reconnectTimer !== undefined) return
+  const delay = SSE_RETRY_DELAYS[Math.min(retryIndex, SSE_RETRY_DELAYS.length - 1)]
+  retryIndex++
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = undefined
+    connectPush()
+  }, delay)
+}
+
+function closeSSE() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = undefined
+  }
+}
+
+async function connectPush() {
+  if (disposed || eventSource) return
+  let ticket = ''
+  try {
+    ticket = (await getPushTicket())?.ticket ?? ''
+  } catch {
+    // 换票失败（推送未开启 404 / 网络抖动）：降级轮询并退避重试。
+    // 401 会经 request 拦截器跳登录页，组件随页面卸载停止。
+    startPolling()
+    scheduleReconnect()
+    return
+  }
+  if (!ticket || disposed) return
+  const source = new EventSource(`/admin-api/notify/push/sse?ticket=${encodeURIComponent(ticket)}`)
+  eventSource = source
+  source.onopen = () => {
+    // 连通：重置退避；未读数交给实时事件，轮询暂停。
+    retryIndex = 0
+    stopPolling()
+  }
+  source.onmessage = () => {
+    // 事件到达即刷新未读数；抽屉打开时一并刷新列表。
+    refresh()
+    if (visible.value) load()
+  }
+  source.onerror = () => {
+    closeSSE()
+    startPolling()
+    scheduleReconnect()
   }
 }
 
@@ -179,12 +255,16 @@ async function goto(msg: NotifyMessage) {
 
 onMounted(() => {
   refresh()
-  timer = window.setInterval(refresh, 60_000)
+  connectPush()
 })
 
 onBeforeUnmount(() => {
-  if (timer !== undefined) {
-    window.clearInterval(timer)
+  disposed = true
+  closeSSE()
+  stopPolling()
+  if (reconnectTimer !== undefined) {
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
   }
 })
 </script>
