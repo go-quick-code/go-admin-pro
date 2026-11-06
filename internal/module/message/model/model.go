@@ -34,10 +34,12 @@ const (
 
 // 内置 provider 编码（ADR 0010）：
 //   - log：开发/演示用，只写应用日志不真正投递（#72）；
-//   - smtp：stdlib net/smtp + STARTTLS 邮件通道（#73）。
+//   - smtp：stdlib net/smtp + STARTTLS 邮件通道（#73）；
+//   - aliyun_sms：stdlib HTTP + RPC 签名阿里云短信通道（#74）。
 const (
-	ProviderLog  = "log"
-	ProviderSMTP = "smtp"
+	ProviderLog       = "log"
+	ProviderSMTP      = "smtp"
+	ProviderAliyunSMS = "aliyun_sms"
 )
 
 // Channel 是消息渠道（平台级）：provider 配置以 JSON 文本存储，
