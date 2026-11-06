@@ -163,8 +163,9 @@ export function updateContract(data: any) {
 export function deleteContract(id: number) {
   return request.delete(`/crm/contract/${id}`) as Promise<any>
 }
-// 状态流转（唯一状态入口，crm:contract:update）：提交/作废；审批通过与驳回
-// 后端还会校验 crm:contract:approve（无码 403）。reason 仅驳回时使用。
+// 状态流转（用户唯一状态入口，crm:contract:update）：提交审批/作废；
+// 审批通过与驳回统一在 bpm 待办中心办理（issue #47，不再内嵌审批按钮）。
+// reason 保留兼容占位，当前用户动作不使用。
 export function changeContractStatus(id: number, status: number, reason = '') {
   return request.put('/crm/contract/status', { id, status, reason }) as Promise<any>
 }

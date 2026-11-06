@@ -1,105 +1,153 @@
-// approval.go 是合同审批依赖面（issue #16，docs/crm-mvp-spec.md §4.4 审批）。
+// approval.go 是合同审批依赖面与 bpm 实现（issue #16 接缝，issue #47 迁移）。
 //
-// v1 直通实现：有 crm:contract:approve 权限的用户审批/驳回时直接改合同状态，
-// 不产生流程实例、不留审批人轨迹；提交审批只需编辑侧权限（路由码 crm:contract:update），
-// 提交人可以自己审批（规格未约束提交与审批分离，保持简单，见提交说明）。
-//
-// bpm 上线后替换：GLOSSARY 的审批流引擎（流程定义/任务/表单域）落地后，
-// 由 bpm 侧实现本接口（Submit 创建流程实例，Approve/Reject 完成审批任务并
-// 回写合同状态），internal/app 装配处 SetApprovalService 替换直通实现即可，
-// 合同服务与 HTTP 层不需要任何改动——状态机校验（CanTransitionContractStatus）
-// 与条件更新（repository.TransitionContractStatus）两侧都不感知审批实现。
+// issue #47 起合同审批统一走 bpm（spec docs/oa-mvp-spec.md §4.5，ADR 0008）：
+//   - 提交（草稿 → 待审）在同一事务内启动 crm_contract_approval 实例；
+//   - 审批通过/驳回由通用待办中心完成，bpm 在同一事务内回调 CRM 的
+//     OnApproved/OnRejected/OnWithdrawn 更新合同状态（见 contract_approval.go）；
+//   - 合同状态端点不再提供「待审 → 已签/草稿」的直通审批，审批动作只能经
+//     /bpm/task/:id/approve|reject 与 /bpm/instance/:id/withdraw 发生。
 package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	bpmdto "github.com/go-quick-code/go-admin-pro/internal/module/bpm/dto"
+	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
+	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
-// PermContractApprove 是合同审批权限码（internal/seed 菜单种子保持一致）：
-// 审批通过与驳回必须持有；v1 直通实现据此放行。
-const PermContractApprove = "crm:contract:approve"
+// ContractApprovalBusinessType 是合同审批的 bpm 业务类型（spec §4.5）：
+// 流程定义 key 与 BusinessHandler 注册键都是 crm_contract_approval。
+const ContractApprovalBusinessType = "crm_contract_approval"
+
+// MaxContractRejectReasonLen 是驳回原因落库上限（crm_contract.reject_reason
+// 为 varchar(500)；bpm 意见允许 500 字，超长按列宽截断保留可读前缀）。
+const MaxContractRejectReasonLen = 500
 
 // ApprovalService 是合同审批依赖面（依赖接口而非实现）。
 //
 // tx 是调用方已开启的事务仓储：合同行已 SELECT ... FOR UPDATE 锁定，并已按
 // 锁定后的最新状态复核过流转合法性（PR #39 审查 P1）。实现必须在 tx 上写状态，
-// 让「锁定 → 复核 → 流转」在同一事务内完成；bpm 实现若需要额外持久化，也用
-// 同一 tx，保证与合同状态一起提交/回滚。
+// 让「锁定 → 复核 → 发起审批」在同一事务内完成；bpm 实例与合同状态同生共死。
+//
+// 审批通过与驳回不在此接口：它们由 bpm 待办动作触发，经 BusinessHandler 在
+// bpm 事务内回写合同（spec §4.4/§4.5）。
 type ApprovalService interface {
-	// Submit 提交合同进入审批（草稿 → 待审）。
+	// Submit 提交合同进入审批（草稿 → 待审），同事务启动 bpm 实例。
 	Submit(ctx context.Context, tx *repository.Repository, contract *model.Contract) error
-	// Approve 审批通过（待审 → 已签）。
-	Approve(ctx context.Context, tx *repository.Repository, contract *model.Contract) error
-	// Reject 驳回回草稿（待审 → 草稿），reason 为驳回原因（可空）。
-	Reject(ctx context.Context, tx *repository.Repository, contract *model.Contract, reason string) error
 }
 
-// PassthroughApprovalService 是 ApprovalService 的 v1 直通实现：
-// 审批人持 crm:contract:approve 即直接条件更新合同状态（防并发覆盖）。
-// 状态写入走调用方事务（tx），不再持有根仓储。
-type PassthroughApprovalService struct {
-	sys SystemGateway
+// bpmApprovalService 是 ApprovalService 的 bpm 实现。
+type bpmApprovalService struct {
+	bpm *bpmservice.Service
 }
 
-// NewPassthroughApprovalService 创建直通审批实现（app 装配时注入 system 网关）。
-func NewPassthroughApprovalService(sys SystemGateway) *PassthroughApprovalService {
-	return &PassthroughApprovalService{sys: sys}
+// NewBPMApprovalService 创建 bpm 审批实现（app 装配时注入 bpm Service）。
+func NewBPMApprovalService(bpm *bpmservice.Service) ApprovalService {
+	return &bpmApprovalService{bpm: bpm}
 }
 
-// Submit 提交审批（草稿 → 待审）：v1 无审批配置可查，直接条件更新。
-func (s *PassthroughApprovalService) Submit(ctx context.Context, tx *repository.Repository, contract *model.Contract) error {
-	return s.transition(ctx, tx, contract, model.ContractStatusPending, "")
-}
-
-// Approve 审批通过（待审 → 已签）：须持 crm:contract:approve。
-func (s *PassthroughApprovalService) Approve(ctx context.Context, tx *repository.Repository, contract *model.Contract) error {
-	if err := s.requireApprovePermission(ctx); err != nil {
-		return err
+// Submit 提交审批（草稿 → 待审）：解析当前发布版本的 crm_contract_approval，
+// 在调用方事务内启动实例，再条件更新合同状态并清空上一轮驳回原因。
+// 流程未发布/审批人解析为空等错误由 bpm 以可读 400 返回，整笔回滚。
+func (s *bpmApprovalService) Submit(ctx context.Context, tx *repository.Repository, contract *model.Contract) error {
+	if s.bpm == nil {
+		return xerr.Internal(errors.New("crm: 审批引擎未装配"))
 	}
-	return s.transition(ctx, tx, contract, model.ContractStatusSigned, "")
-}
-
-// Reject 驳回回草稿（待审 → 草稿）：须持 crm:contract:approve，reason 落库供
-// 草稿负责人查看（重新提交时由 TransitionContractStatus 清空）。
-func (s *PassthroughApprovalService) Reject(ctx context.Context, tx *repository.Repository, contract *model.Contract, reason string) error {
-	if err := s.requireApprovePermission(ctx); err != nil {
-		return err
-	}
-	return s.transition(ctx, tx, contract, model.ContractStatusDraft, reason)
-}
-
-// requireApprovePermission 校验当前用户持有审批权限码（super_admin 以 "*" 通配）。
-func (s *PassthroughApprovalService) requireApprovePermission(ctx context.Context) error {
-	ok, err := s.sys.UserHasPermission(ctx, CurrentUserID(ctx), PermContractApprove)
+	definitionID, err := publishedContractDefinitionID(ctx, s.bpm)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return xerr.Forbidden("没有审批权限：" + PermContractApprove)
+	if _, err := startContractApproval(ctx, tx, s.bpm, definitionID, contract); err != nil {
+		return err
 	}
-	return nil
-}
-
-// transition 条件更新状态并把新状态回填到内存模型（0 行 = 状态已被并发请求变更）。
-// 必须在调用方已锁合同行的事务仓储上执行：条件更新是第二道保险，锁内复核是
-// 第一道（PR #39 审查 P1）。
-func (s *PassthroughApprovalService) transition(ctx context.Context, tx *repository.Repository, contract *model.Contract, to int8, reason string) error {
-	rows, err := tx.TransitionContractStatus(ctx, contract.ID, contract.Status, to, reason)
+	rows, err := tx.TransitionContractStatus(ctx, contract.ID, contract.Status, model.ContractStatusPending, "")
 	if err != nil {
 		return err
 	}
 	if rows == 0 {
 		return xerr.Conflict("合同状态已被其他操作变更，请刷新后重试")
 	}
-	contract.Status = to
+	contract.Status = model.ContractStatusPending
+	contract.RejectReason = ""
 	return nil
 }
 
-// SetApprovalService 注入审批依赖面实现（bpm 上线后的替换点，见文件头注释）。
+// unavailableApprovalService 是未装配审批引擎时的缺省实现：提交入口显式报错，
+// 不静默降级成直通审批（issue #47 移除直通路径）。
+type unavailableApprovalService struct{}
+
+func (unavailableApprovalService) Submit(context.Context, *repository.Repository, *model.Contract) error {
+	return xerr.Internal(errors.New("crm: 审批引擎未装配"))
+}
+
+// startContractApproval 在调用方事务内启动 crm_contract_approval 实例。
+// 标题/摘要快照只包含展示所需的最小业务信息（合同号/名称/客户/金额，ADR 0008）；
+// 发起人取 ctx 中的当前登录主体（存量 backfill 由调用方以合同负责人身份构造）。
+func startContractApproval(
+	ctx context.Context,
+	tx *repository.Repository,
+	bpm *bpmservice.Service,
+	definitionID int64,
+	contract *model.Contract,
+) (*bpmmodel.ProcessInstance, error) {
+	if bpm == nil {
+		return nil, xerr.Internal(errors.New("crm: 审批引擎未装配"))
+	}
+	customerName := ""
+	if contract.CustomerID > 0 {
+		customer, err := tx.FindCustomerByID(ctx, contract.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if customer != nil {
+			customerName = customer.Name
+		}
+	}
+	title, summary := contractApprovalSnapshot(contract.ContractNo, contract.Name, customerName, contract.Amount)
+	return bpm.StartInstanceInTx(ctx, tx.DB(), bpmservice.StartInstanceInput{
+		DefinitionID: definitionID,
+		BusinessID:   contract.ID,
+		Title:        title,
+		Summary:      summary,
+	})
+}
+
+// publishedContractDefinitionID 取 crm_contract_approval 当前发布版本的定义 ID：
+// v1 每个业务类型只用一个 key，同 key 同时只有一个发布版本（ADR 0008）。
+func publishedContractDefinitionID(ctx context.Context, bpm *bpmservice.Service) (int64, error) {
+	if bpm == nil {
+		return 0, xerr.Internal(errors.New("crm: 审批引擎未装配"))
+	}
+	published := bpmmodel.DefinitionStatusPublished
+	rows, _, err := bpm.ListDefinitions(ctx, &bpmdto.DefinitionPageReq{
+		BusinessType: ContractApprovalBusinessType,
+		Status:       &published,
+		PageNo:       1,
+		PageSize:     1,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, xerr.BadRequest(fmt.Sprintf(
+			"合同审批流程未发布（%s），请联系管理员发布流程定义", ContractApprovalBusinessType,
+		))
+	}
+	return rows[0].ID, nil
+}
+
+// SetApprovalService 注入审批依赖面实现（测试替身或自定义装配用；
+// 生产装配由 SetBPM 统一接线，见 customer.go/New 与 internal/app）。
 func (s *Service) SetApprovalService(a ApprovalService) {
+	if a == nil {
+		s.approvals = unavailableApprovalService{}
+		return
+	}
 	s.approvals = a
 }

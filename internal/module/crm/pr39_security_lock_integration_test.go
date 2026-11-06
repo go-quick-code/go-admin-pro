@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	crmrepo "github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
@@ -30,6 +31,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
+	"gorm.io/gorm"
 )
 
 // newContractTestService 用集成环境同一 DB 装配一个 crm Service（真实仓储 +
@@ -86,41 +88,36 @@ func (g *blockingVoidGuard) CanVoidContractTx(context.Context, *crmrepo.Reposito
 	return nil
 }
 
-// blockingApproval 是可阻塞的审批实现：Approve 在持有合同行锁的事务里暂停，
-// 让并发编辑请求在锁上排队；释放后按最新状态条件更新为已签。
-type blockingApproval struct {
+// blockingContractApproval 是可阻塞的 BusinessHandler：在 bpm 审批事务内先锁定
+// 合同行，再暂停等待并发编辑请求排队；释放后委托真实 CRM 回调落已签。
+// issue #47 起审批通过发生在 bpm 事务内，锁序（实例 → 合同）由 bpm 保证。
+type blockingContractApproval struct {
+	real    *crmservice.Service
 	entered chan struct{}
 	release chan struct{}
 }
 
-func newBlockingApproval() *blockingApproval {
-	return &blockingApproval{entered: make(chan struct{}), release: make(chan struct{})}
+func newBlockingContractApproval(real *crmservice.Service) *blockingContractApproval {
+	return &blockingContractApproval{
+		real: real, entered: make(chan struct{}), release: make(chan struct{}),
+	}
 }
 
-func transitionApprovalTx(ctx context.Context, tx *crmrepo.Repository, c *crmmodel.Contract, to int8, reason string) error {
-	rows, err := tx.TransitionContractStatus(ctx, c.ID, c.Status, to, reason)
-	if err != nil {
+func (h *blockingContractApproval) OnApproved(ctx context.Context, inst *bpmmodel.ProcessInstance, tx *gorm.DB) error {
+	if _, err := crmrepo.New(tx).LockContractByID(ctx, inst.BusinessID); err != nil {
 		return err
 	}
-	if rows == 0 {
-		return fmt.Errorf("合同状态已被并发变更")
-	}
-	c.Status = to
-	return nil
+	close(h.entered)
+	<-h.release
+	return h.real.OnApproved(ctx, inst, tx)
 }
 
-func (a *blockingApproval) Submit(ctx context.Context, tx *crmrepo.Repository, c *crmmodel.Contract) error {
-	return transitionApprovalTx(ctx, tx, c, crmmodel.ContractStatusPending, "")
+func (h *blockingContractApproval) OnRejected(ctx context.Context, inst *bpmmodel.ProcessInstance, tx *gorm.DB, reason string) error {
+	return h.real.OnRejected(ctx, inst, tx, reason)
 }
 
-func (a *blockingApproval) Approve(ctx context.Context, tx *crmrepo.Repository, c *crmmodel.Contract) error {
-	close(a.entered)
-	<-a.release
-	return transitionApprovalTx(ctx, tx, c, crmmodel.ContractStatusSigned, "")
-}
-
-func (a *blockingApproval) Reject(ctx context.Context, tx *crmrepo.Repository, c *crmmodel.Contract, reason string) error {
-	return transitionApprovalTx(ctx, tx, c, crmmodel.ContractStatusDraft, reason)
+func (h *blockingContractApproval) OnWithdrawn(ctx context.Context, inst *bpmmodel.ProcessInstance, tx *gorm.DB) error {
+	return h.real.OnWithdrawn(ctx, inst, tx)
 }
 
 // waitResult 等待 goroutine 结果或超时（避免死锁把测试挂住）。
@@ -237,24 +234,29 @@ func TestIntegrationContractEditApprovalSerialized(t *testing.T) {
 	}
 
 	svc, adminID := newContractTestService(t, env)
-	approval := newBlockingApproval()
-	svc.SetApprovalService(approval)
 	ctx := platformCtx(adminID)
+
+	// 在 bpm 事务内插入可控阻塞点：审批回调先锁合同行，再等待并发编辑排队。
+	blocking := newBlockingContractApproval(env.App.CRM)
+	env.App.BPM.RegisterBusinessHandler(crmservice.ContractApprovalBusinessType, blocking)
+	todo := myContractApprovalTodo(t, env, admin, contractID)
+	if todo == nil {
+		t.Fatal("提交后应生成管理员的合同审批待办")
+	}
+	taskID := int64(todo["id"].(float64))
 
 	approveDone := make(chan error, 1)
 	go func() {
-		_, err := svc.ChangeContractStatus(ctx, &dto.ContractStatusReq{
-			ID: contractID, Status: crmmodel.ContractStatusSigned,
-		})
+		_, err := env.App.BPM.ApproveTask(ctx, taskID, "")
 		approveDone <- err
 	}()
 	select {
-	case <-approval.entered:
+	case <-blocking.entered:
 	case <-time.After(10 * time.Second):
 		t.Fatal("等待审批进入超时")
 	}
 
-	// 并发编辑：把金额改成 999（新实现会阻塞在合同行锁上，旧实现会读到待审后直接写回）。
+	// 并发编辑：把金额改成 999（编辑在合同行锁上排队，审批提交后读到已签状态）。
 	editedAmount, err := money.ParseMoney("999.00")
 	if err != nil {
 		t.Fatalf("解析金额: %v", err)
@@ -267,7 +269,7 @@ func TestIntegrationContractEditApprovalSerialized(t *testing.T) {
 	}()
 
 	time.Sleep(200 * time.Millisecond)
-	close(approval.release)
+	close(blocking.release)
 
 	if err := waitResult(t, "审批通过", approveDone); err != nil {
 		t.Fatalf("审批通过失败: %v", err)

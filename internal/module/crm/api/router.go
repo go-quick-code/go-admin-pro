@@ -85,9 +85,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	opportunity.PUT("/stage", h.requirePermission("crm:opportunity:stage"), h.AdvanceOpportunityStage)
 	opportunity.DELETE("/:id", h.requirePermission("crm:opportunity:delete"), h.DeleteOpportunity)
 
-	// 合同（issue #16）：owner-scoped 正体，CRUD + 状态流转（唯一状态入口，
-	// 路由挂 crm:contract:update——审批通过与驳回在 ApprovalService 内追加
-	// 校验 crm:contract:approve，无码 403；作废走 VoidContractGuard 守卫）。
+	// 合同（issue #16）：owner-scoped 正体，CRUD + 用户状态流转（提交/作废，
+	// 唯一状态入口，路由挂 crm:contract:update；审批通过与驳回由 bpm 待办中心
+	// 办理并回调 CRM，issue #47，不再有直通审批；作废走 VoidContractGuard 守卫）。
 	contract := rg.Group("/crm/contract")
 	contract.GET("/page", h.requirePermission("crm:contract:query"), h.PageContracts)
 	// Excel 导出（issue #20）：挂 crm:contract:export，静态路由先于 /:id。

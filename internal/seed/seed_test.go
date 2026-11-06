@@ -3,6 +3,7 @@ package seed_test
 import (
 	"testing"
 
+	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
@@ -37,6 +38,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
 		&inframodel.Config{}, &inframodel.Job{},
 		&crmmodel.PoolConfig{},
+		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
 	); err != nil {
 		t.Fatalf("建表: %v", err)
@@ -61,6 +63,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）。
 	assertCount(t, db, &inframodel.Job{}, 3, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
+	// 默认审批流程（issue #47，spec §7.3）：crm_contract_approval v1 已发布。
+	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 1, "默认流程定义")
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -86,6 +90,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
+	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 1, "默认流程定义（幂等）")
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 }
