@@ -219,6 +219,21 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil
 	})
 
+	// 会议提醒任务（issue #57，spec §4.11）：系统级 handler（跨租户迭代），
+	// infra_job 种子默认行每 5 分钟一次。扫描 (now, now+15m] 内开始的有效
+	// 未提醒预约，条件更新 reminded_at 认领后向预约人写 meeting_reminder
+	// 通知（只发一次）。handler_param 可填 YYYY-MM-DD HH:mm:ss 固定「现在」
+	// （测试/回放）；留空取业务时区当前时间。
+	scheduler.RegisterSystem(oaservice.RoomBookingReminderHandlerName, func(ctx context.Context, param string) error {
+		summary, err := oaSvc.RunRoomBookingReminders(ctx, param)
+		if err != nil {
+			return err
+		}
+		slog.Info("room booking reminder job finished",
+			"now", summary.Now, "tenants", summary.Tenants, "sent", summary.Sent)
+		return nil
+	})
+
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 

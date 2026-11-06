@@ -548,3 +548,67 @@ export function deleteDocumentFile(fileId: number) {
 export function downloadDocumentFile(url: string) {
   return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
+
+// ---------- OA 会议室与预约（issue #57，spec #42 §4.11/§4.14/§5） ----------
+// 权限模型：会议室查询/详情与预约列表挂 oa:room:query（菜单 525 管理入口 /
+// 538 会议室预约 / 539 我的会议）；会议室 CRUD/启停/删除挂 oa:room:manage
+// （有未来有效预约时删除返回 409，只能停用）；创建预约挂 oa:room:booking；
+// 取消预约登录即可（后端校验预约人本人或 oa:room:manage）。
+// 无 oa:room:manage 的查看者在预约列表里只会看到本人预约（服务端收口）。
+
+export interface MeetingRoomPayload {
+  name: string
+  location?: string
+  capacity?: number
+  sort?: number
+}
+
+export interface RoomBookingPayload {
+  roomId: number
+  title: string
+  // 业务时区墙钟 "YYYY-MM-DD HH:mm:ss"。
+  startTime: string
+  endTime: string
+}
+
+// 启用会议室列表（员工预约下拉）。
+export function listMeetingRooms() {
+  return request.get('/oa/room/list') as Promise<any>
+}
+// 会议室分页（名称模糊、状态精确）——管理端。
+export function pageMeetingRooms(params: any) {
+  return request.get('/oa/room/page', { params }) as Promise<any>
+}
+export function getMeetingRoom(id: number) {
+  return request.get(`/oa/room/${id}`) as Promise<any>
+}
+export function createMeetingRoom(data: MeetingRoomPayload) {
+  return request.post('/oa/room', data) as Promise<any>
+}
+export function updateMeetingRoom(id: number, data: MeetingRoomPayload) {
+  return request.put(`/oa/room/${id}`, data) as Promise<any>
+}
+// 启停：0 启用 / 1 停用。
+export function setMeetingRoomStatus(id: number, status: number) {
+  return request.put(`/oa/room/${id}/status`, { status }) as Promise<any>
+}
+// 删除：有未来有效预约时 409（只能停用）。
+export function deleteMeetingRoom(id: number) {
+  return request.delete(`/oa/room/${id}`) as Promise<any>
+}
+
+// 预约分页：roomId/date/status 可选；管理端可按 userId 过滤，员工侧强制本人。
+export function pageRoomBookings(params: any) {
+  return request.get('/oa/room/booking/list', { params }) as Promise<any>
+}
+export function getRoomBooking(id: number) {
+  return request.get(`/oa/room/booking/${id}`) as Promise<any>
+}
+// 创建预约：同事务生成部门可见日程（source=room_booking）；冲突 400。
+export function createRoomBooking(data: RoomBookingPayload) {
+  return request.post('/oa/room/booking', data) as Promise<any>
+}
+// 取消预约：同步软取消生成的日程；重复取消 409。
+export function cancelRoomBooking(id: number) {
+  return request.post(`/oa/room/booking/${id}/cancel`) as Promise<any>
+}
