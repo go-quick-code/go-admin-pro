@@ -40,13 +40,14 @@ export function markAllMessagesRead() {
   return request.put('/notify/message/read-all') as Promise<boolean>
 }
 
-// ---------- 实时推送（issue #78，spec §4.5）----------
+// ---------- 实时推送（issue #78 SSE + issue #79 WebSocket，spec §4.5）----------
 // SSE/WebSocket 不能带 Authorization 头：先带 Bearer 换一次性票据，
 // 再凭票据建立流，避免 JWT 进入 URL/日志（ADR 0013）。
 
 export interface PushTicket {
   ticket: string
   expiresIn: number
+  /** 服务端支持的传输，按优先级排序：ws → sse（spec §4.5.3）。 */
   transports: string[]
 }
 
