@@ -1,6 +1,8 @@
 package seed
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -43,6 +45,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 		return err
 	}
 	if err := seedDicts(db); err != nil {
+		return err
+	}
+	if err := seedExpenseCategoryDict(db); err != nil {
 		return err
 	}
 	if err := seedConfigs(db); err != nil {
@@ -323,6 +328,22 @@ func seedMenus(db *gorm.DB) error {
 		btn(5295, 529, "请假撤回", "oa:leave:withdraw", 5),
 		btn(5296, 529, "请假取消", "oa:leave:cancel", 6),
 
+		// 报销（issue #54）：523 报销（管理/财务入口，查询码挂菜单；spec §7.2 的
+		// 504 段在本仓库协调台账改为 523 段）+ 535 我的报销（员工侧空位自取：
+		// 529 我的请假/530 考勤组/531 我的考勤/532 我的公告/533 考勤结果/
+		// 534 考勤汇总已占用，合并 #62 后 grep 去重取 535）。两页面共用同一
+		// 视图，可见范围由后端 §4.6 收口。
+		// 按钮码 = 菜单 ID×10+n：5231 创建/5232 编辑/5233 删除/5234 提交
+		//（提交逻辑属 #55，码先登记，路由由 #55 落地）/5235 管理（财务/管理
+		// 可见范围，spec §4.6/§4.9 默认审批流节点 2）。
+		menu(523, 500, "报销", "expense", "oa/expense/index", "oa:expense:query", "Money", 4),
+		btn(5231, 523, "报销申请", "oa:expense:create", 1),
+		btn(5232, 523, "报销编辑", "oa:expense:update", 2),
+		btn(5233, 523, "报销删除", "oa:expense:delete", 3),
+		btn(5234, 523, "报销提交", "oa:expense:submit", 4),
+		btn(5235, 523, "报销管理", "oa:expense:manage", 5),
+		menu(535, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 13),
+
 		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
 		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
 		// 530/531）。权限码按 spec §5/§7.2：
@@ -490,6 +511,14 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 500},
 		{RoleID: 2, MenuID: 532},
 		{RoleID: 2, MenuID: 531},
+		// 报销员工侧（issue #54，spec §7.3「内置普通角色授予…报销…的基础菜单」）：
+		// 我的报销页面 + 草稿创建/编辑/删除/提交按钮码；不含管理菜单 523 与
+		// oa:expense:manage（财务/管理员）。
+		{RoleID: 2, MenuID: 535},
+		{RoleID: 2, MenuID: 5231},
+		{RoleID: 2, MenuID: 5232},
+		{RoleID: 2, MenuID: 5233},
+		{RoleID: 2, MenuID: 5234},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }
@@ -578,6 +607,51 @@ func seedDicts(db *gorm.DB) error {
 		{TenantID: 1, DictType: "crm_product_unit", Label: "人天", Value: "人天", Sort: 6, Status: sysmodel.StatusEnable},
 	}
 	return tenant.Skip(db).Create(&data).Error
+}
+
+// seedExpenseCategoryDict 写入报销类别字典（issue #54，spec §4.9/§7.3：
+// 交通、餐饮、住宿、办公、其他）。与 seedDicts 的「整表为空才写」不同，
+// 这里按字典类型与字典项逐行幂等：既有库升级时会补齐缺失的字典/字典项，
+// 重复启动不重复插入；管理员改过的名称/排序不会被覆盖。
+func seedExpenseCategoryDict(db *gorm.DB) error {
+	const dictType = "oa_expense_category"
+	var typ sysmodel.DictType
+	err := tenant.Skip(db).Where("`type` = ?", dictType).First(&typ).Error
+	switch {
+	case err == nil:
+		// 已存在，保持管理员的修改。
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		row := sysmodel.DictType{
+			TenantID: 1, Name: "报销类别", Type: dictType,
+			Status: sysmodel.StatusEnable, Remark: "报销明细的费用类别（OA v1 默认值）",
+		}
+		if err := tenant.Skip(db).Create(&row).Error; err != nil {
+			return fmt.Errorf("seed expense category dict type: %w", err)
+		}
+	default:
+		return fmt.Errorf("seed expense category dict type: %w", err)
+	}
+
+	values := []string{"交通", "餐饮", "住宿", "办公", "其他"}
+	for i, value := range values {
+		var count int64
+		if err := tenant.Skip(db).Model(&sysmodel.DictData{}).
+			Where("`dict_type` = ? AND `value` = ?", dictType, value).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("seed expense category dict data: %w", err)
+		}
+		if count > 0 {
+			continue
+		}
+		row := sysmodel.DictData{
+			TenantID: 1, DictType: dictType, Label: value, Value: value,
+			Sort: i + 1, Status: sysmodel.StatusEnable,
+		}
+		if err := tenant.Skip(db).Create(&row).Error; err != nil {
+			return fmt.Errorf("seed expense category dict data: %w", err)
+		}
+	}
+	return nil
 }
 
 func seedConfigs(db *gorm.DB) error {

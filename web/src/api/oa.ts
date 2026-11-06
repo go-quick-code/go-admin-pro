@@ -354,3 +354,68 @@ export function downloadLeaveRequestFile(url: string) {
   return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
 
+
+// ---------- OA 报销（issue #54，spec #42 §4.9/§5） ----------
+// 权限模型：列表/详情/附件查看登录即可（服务端按 §4.6 可见范围收口）；
+// 写动作逐码 oa:expense:create/update/delete；提交（oa:expense:submit）与
+// 审批回调属 #55，本工单只登记按钮码。金额一律十进制字符串（分单位由后端
+// money.Money 解析，拒绝 JSON 数字以避免浮点丢精度）。
+
+export interface ExpenseItemPayload {
+  id?: number
+  category: string
+  amount: string
+  expenseDate: string
+  remark?: string
+}
+
+export interface ExpenseClaimPayload {
+  id?: number
+  title: string
+  reason: string
+  // totalAmount 仅回显用，服务端按明细求和覆盖（spec §4.9）。
+  totalAmount?: string
+  items: ExpenseItemPayload[]
+}
+
+// 报销分页：status 精确过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回）；
+// 服务端按可见范围返回（manage → 全租户、部门负责人 → 部门子树、否则本人）。
+export function pageExpenseClaims(params?: { pageNo?: number; pageSize?: number; status?: number }) {
+  return request.get('/oa/expense/claim/page', { params }) as Promise<any>
+}
+// 报销详情：表头 + 明细 + 附件 + bpm 审批时间线（草稿 approval 为空）；范围外 404。
+export function getExpenseClaim(id: number) {
+  return request.get(`/oa/expense/claim/${id}`) as Promise<any>
+}
+// 创建草稿（明细至少一条，每条金额 > 0，类别取字典 oa_expense_category）。
+export function createExpenseClaim(data: ExpenseClaimPayload) {
+  return request.post('/oa/expense/claim', data) as Promise<any>
+}
+// 更新草稿/已驳回单据：明细行集整体替换，服务端重算合计。
+export function updateExpenseClaim(data: ExpenseClaimPayload) {
+  return request.put('/oa/expense/claim', data) as Promise<any>
+}
+// 删除草稿/已驳回单据（明细级联软删；其他状态 409）。
+export function deleteExpenseClaim(id: number) {
+  return request.delete(`/oa/expense/claim/${id}`) as Promise<any>
+}
+// 附件列表（新上传的在前）。
+export function listExpenseClaimFiles(id: number) {
+  return request.get(`/oa/expense/claim/${id}/files`) as Promise<any>
+}
+// 上传附件（multipart 字段名 file；仅草稿/已驳回）。
+export function uploadExpenseClaimFile(id: number, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/oa/expense/claim/${id}/files`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+// 删除附件（仅草稿/已驳回）。
+export function deleteExpenseClaimFile(id: number, fileId: number) {
+  return request.delete(`/oa/expense/claim/${id}/files/${fileId}`) as Promise<any>
+}
+// 鉴权下载（后端返回的 url 已含 /admin-api 前缀，baseURL: '' 原样请求）。
+export function downloadExpenseClaimFile(url: string) {
+  return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
+}

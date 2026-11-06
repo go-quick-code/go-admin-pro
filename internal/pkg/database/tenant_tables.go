@@ -61,6 +61,11 @@ var TenantTables = []string{
 	"oa_leave_type",
 	"oa_leave_balance",
 	"oa_leave_request",
+	// 报销（issue #54，迁移 00019）：报销单 + 明细两表。明细按 claim_id 归属，
+	// 表头 total_amount 由明细求和（服务端计算）；两表都经租户插件限定，
+	// 跨租户业务 ID 一律 404（spec §4.6）。
+	"oa_expense_claim",
+	"oa_expense_item",
 	// 考勤基础（issue #60，迁移 00022）：班次/考勤组/组员/打卡/结果五张表
 	// 全量租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。
 	// 组员唯一键 (tenant_id, user_id)——一个用户只属于一个考勤组；
