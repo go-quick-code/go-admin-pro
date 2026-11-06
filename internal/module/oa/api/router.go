@@ -8,13 +8,22 @@ import (
 )
 
 // 公告权限码（菜单种子 521 段：521 查询、5211 创建、5212 编辑、5213 删除、
-// 5214 发布/撤回、5215 已读统计（#49 使用）；issue #48）。
+// 5214 发布/撤回、5215 已读统计（#49 使用）；issue #48/#49）。
 const (
-	announcementQuery   = "oa:announcement:query"
-	announcementCreate  = "oa:announcement:create"
-	announcementUpdate  = "oa:announcement:update"
-	announcementDelete  = "oa:announcement:delete"
-	announcementPublish = "oa:announcement:publish"
+	announcementQuery     = "oa:announcement:query"
+	announcementCreate    = "oa:announcement:create"
+	announcementUpdate    = "oa:announcement:update"
+	announcementDelete    = "oa:announcement:delete"
+	announcementPublish   = "oa:announcement:publish"
+	announcementReadStats = "oa:announcement:read-stats"
+)
+
+// 考勤结果权限码（菜单种子 533 段；issue #61）：
+// 533 查询、5331 校正/撤销校正/手工重算。可见范围的「全租户」判定复用
+// #43 的 oa:attendance:manage（按钮 5332 承载，供 HR/管理员授权）。
+const (
+	attendanceResultQuery   = "oa:attendance:result:query"
+	attendanceResultCorrect = "oa:attendance:result:correct"
 )
 
 // Handler 是 oa 模块的 HTTP 入口。
@@ -85,6 +94,18 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	punch.GET("/today", h.GetMyPunchToday)
 	punch.GET("/page", h.PageMyPunches)
 
+	// 考勤结果与校正（issue #61，菜单种子 533 段，spec §4.10/§5）：管理端
+	// 结果查询挂 oa:attendance:result:query；校正/撤销/手工重算挂
+	// oa:attendance:result:correct；员工「我的考勤」结果列表登录即可（强制本人）。
+	// 可见范围由 service 经 VisibilityScopeOf("attendance") 收口：
+	// oa:attendance:manage → 全租户、部门负责人 → 子树、否则本人。
+	result := oa.Group("/attendance/result")
+	result.GET("/page", h.requirePermission(attendanceResultQuery), h.PageAttendanceResults)
+	result.GET("/mine", h.PageMyAttendanceResults)
+	result.POST("/recompute", h.requirePermission(attendanceResultCorrect), h.RecomputeAttendanceResults)
+	result.PUT("/:id/correct", h.requirePermission(attendanceResultCorrect), h.CorrectAttendanceResult)
+	result.DELETE("/:id/correct", h.requirePermission(attendanceResultCorrect), h.ClearAttendanceResultCorrection)
+
 	// 请假类型与额度（issue #51，菜单种子 522 段）：类型列表与本人余额
 	// 登录即可（员工发起请假/查看余额的前置）；类型与额度的全部管理动作
 	// 挂 oa:leave:manage（默认审批流节点 2 的 HR/管理员码，spec §7.3）。
@@ -113,6 +134,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	announcement.DELETE("/:id", h.requirePermission(announcementDelete), h.DeleteAnnouncement)
 	announcement.POST("/:id/publish", h.requirePermission(announcementPublish), h.PublishAnnouncement)
 	announcement.POST("/:id/withdraw", h.requirePermission(announcementPublish), h.WithdrawAnnouncement)
+	// 已读统计（issue #49）：人数 + 分页名单，挂按钮码 5215；撤回保留历史
+	// 已读、重新发布不重置（service 只读 oa_announcement_read）。
+	announcement.GET("/:id/read-stats", h.requirePermission(announcementReadStats), h.GetAnnouncementReadStats)
 	// 附件沿用 infra_file（biz_type=oa_announcement）：查看跟随公告可见性，
 	// 上传/删除挂 oa:announcement:update 且仅草稿（service 层校验状态）。
 	announcement.GET("/:id/files", h.ListAnnouncementFiles)

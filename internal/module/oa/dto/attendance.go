@@ -1,6 +1,10 @@
 package dto
 
-import "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
+import (
+	"time"
+
+	"github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
+)
 
 // ---------- 考勤：班次（issue #60，docs/oa-mvp-spec.md §3.9/§4.10）----------
 
@@ -163,4 +167,113 @@ type PunchPageReq struct {
 	PageSize  int    `form:"pageSize"`
 	StartDate string `form:"startDate"`
 	EndDate   string `form:"endDate"`
+}
+
+// ---------- 考勤：结果与校正（issue #61，spec §4.10/§5）----------
+
+// AttendanceResultPageReq 管理端结果分页：userId 精确过滤（0=按可见范围）、
+// 日期区间闭区间、status 过滤生效状态（override 优先）。权限
+// oa:attendance:result:query（菜单 533）。
+type AttendanceResultPageReq struct {
+	PageNo    int    `form:"pageNo"`
+	PageSize  int    `form:"pageSize"`
+	UserID    int64  `form:"userId"`
+	StartDate string `form:"startDate"`
+	EndDate   string `form:"endDate"`
+	Status    *int8  `form:"status"`
+}
+
+// MyAttendanceResultPageReq 员工「我的考勤」结果分页（服务端强制本人）。
+type MyAttendanceResultPageReq struct {
+	PageNo    int    `form:"pageNo"`
+	PageSize  int    `form:"pageSize"`
+	StartDate string `form:"startDate"`
+	EndDate   string `form:"endDate"`
+}
+
+// AttendanceRecomputeReq 手工重算：按用户 + 日期范围（含两端，最多
+// MaxAttendanceResultRangeDays 天）。写动作挂 oa:attendance:result:correct。
+type AttendanceRecomputeReq struct {
+	UserID    int64  `json:"userId"`
+	StartDate string `json:"startDate"`
+	EndDate   string `json:"endDate"`
+}
+
+// AttendanceRecomputeResp 重算结果：days = 实际写入/覆盖的结果行数。
+type AttendanceRecomputeResp struct {
+	Days int `json:"days"`
+}
+
+// AttendanceCorrectReq 管理员校正：overrideStatus 必填（0–6，语义同结果
+// 状态）；remark 1–200 字必填。校正只写 override_*，不覆盖原始打卡与派生字段。
+type AttendanceCorrectReq struct {
+	OverrideStatus *int8  `json:"overrideStatus"`
+	Remark         string `json:"remark"`
+}
+
+// AttendanceResultResp 是考勤结果响应行。status 为**生效状态**（校正优先），
+// derivedStatus 保留派生值；corrected 为列表标记（spec §4.10「以标记区分」）。
+type AttendanceResultResp struct {
+	ID                int64   `json:"id"`
+	UserID            int64   `json:"userId"`
+	Nickname          string  `json:"nickname"`
+	WorkDate          string  `json:"workDate"`
+	ShiftID           *int64  `json:"shiftId"`
+	InTime            string  `json:"inTime"`
+	OutTime           string  `json:"outTime"`
+	LateMinutes       int     `json:"lateMinutes"`
+	EarlyMinutes      int     `json:"earlyMinutes"`
+	MissingIn         bool    `json:"missingIn"`
+	MissingOut        bool    `json:"missingOut"`
+	LeaveDays         float64 `json:"leaveDays"`
+	Status            int8    `json:"status"`
+	StatusName        string  `json:"statusName"`
+	DerivedStatus     int8    `json:"derivedStatus"`
+	DerivedStatusName string  `json:"derivedStatusName"`
+	Corrected         bool    `json:"corrected"`
+	OverrideStatus    *int8   `json:"overrideStatus"`
+	OverrideRemark    string  `json:"overrideRemark"`
+	CorrectedBy       *int64  `json:"correctedBy"`
+	CorrectedAt       string  `json:"correctedAt"`
+	ComputedAt        string  `json:"computedAt"`
+}
+
+// NewAttendanceResultResp 由结果行构造响应（生效状态 = override 优先）。
+func NewAttendanceResultResp(row *model.AttendanceResult) AttendanceResultResp {
+	effective := row.Status
+	if row.OverrideStatus != nil && model.ValidAttendanceResultStatus(*row.OverrideStatus) {
+		effective = *row.OverrideStatus
+	}
+	return AttendanceResultResp{
+		ID:                row.ID,
+		UserID:            row.UserID,
+		WorkDate:          row.WorkDate.Format("2006-01-02"),
+		ShiftID:           row.ShiftID,
+		InTime:            formatWallClock(row.InTime),
+		OutTime:           formatWallClock(row.OutTime),
+		LateMinutes:       row.LateMinutes,
+		EarlyMinutes:      row.EarlyMinutes,
+		MissingIn:         row.MissingIn == 1,
+		MissingOut:        row.MissingOut == 1,
+		LeaveDays:         row.LeaveDays,
+		Status:            effective,
+		StatusName:        model.AttendanceResultStatusName(effective),
+		DerivedStatus:     row.Status,
+		DerivedStatusName: model.AttendanceResultStatusName(row.Status),
+		Corrected:         row.OverrideStatus != nil,
+		OverrideStatus:    row.OverrideStatus,
+		OverrideRemark:    row.OverrideRemark,
+		CorrectedBy:       row.CorrectedBy,
+		CorrectedAt:       formatWallClock(row.CorrectedAt),
+		ComputedAt:        formatWallClock(row.ComputedAt),
+	}
+}
+
+// formatWallClock 把时间按墙钟格式化为 YYYY-MM-DD HH:MM:SS（nil 输出空串）：
+// 考勤时间列落库为业务时区墙钟，展示侧不做时区再换算。
+func formatWallClock(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
 }

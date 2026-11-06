@@ -127,13 +127,55 @@ type AttendancePunch struct {
 
 func (AttendancePunch) TableName() string { return "oa_attendance_punch" }
 
+// 考勤结果状态（issue #61，spec §3.9/§4.10）：派生优先级为
+// 非工作日 → 休息；leave_days >= 1 → 请假；缺上班卡或缺下班卡 → 缺卡；
+// 迟到且早退 → 迟到且早退；仅迟到 → 迟到；仅早退 → 早退；否则正常。
+// 0 是迁移列默认值，因此「正常」必须取 0。派生与校正共用同一枚举
+// （override_status 也取这些值，校正优先于派生）。
+const (
+	AttendanceResultNormal       = int8(0) // 正常
+	AttendanceResultLate         = int8(1) // 迟到
+	AttendanceResultEarly        = int8(2) // 早退
+	AttendanceResultLateAndEarly = int8(3) // 迟到且早退
+	AttendanceResultMissing      = int8(4) // 缺卡（缺上班卡/下班卡，明细见 missing_* 列）
+	AttendanceResultRest         = int8(5) // 休息（非工作日）
+	AttendanceResultLeave        = int8(6) // 请假（整天）
+)
+
+// AttendanceResultStatusName 返回考勤结果状态的中文展示名。
+func AttendanceResultStatusName(status int8) string {
+	switch status {
+	case AttendanceResultNormal:
+		return "正常"
+	case AttendanceResultLate:
+		return "迟到"
+	case AttendanceResultEarly:
+		return "早退"
+	case AttendanceResultLateAndEarly:
+		return "迟到且早退"
+	case AttendanceResultMissing:
+		return "缺卡"
+	case AttendanceResultRest:
+		return "休息"
+	case AttendanceResultLeave:
+		return "请假"
+	default:
+		return fmt.Sprintf("未知状态(%d)", status)
+	}
+}
+
+// ValidAttendanceResultStatus 报告结果状态取值是否合法（0–6，派生与校正共用）。
+func ValidAttendanceResultStatus(status int8) bool {
+	return status >= AttendanceResultNormal && status <= AttendanceResultLeave
+}
+
 // AttendanceResult 是考勤结果（spec §3.9/§4.10）——issue #60 只建 schema 与模型，
-// 派生/校正写入由 #61 承接；此处建模只为锁定列语义（列注释与迁移一致）。
+// 派生/校正写入由 #61 承接（见 service/attendance_result.go 与
+// attendance_result_rule.go）。
 // 唯一键 (tenant_id, user_id, work_date)：一人一天一条结果。
-// 派生优先级（#61 实现）：非工作日 → 休息；leave_days >= 1 → 请假；缺上班卡或缺
-// 下班卡 → 缺卡；迟到且早退 → 迟到且早退；仅迟到 → 迟到；仅早退 → 早退；否则正常。
-// leave_days=0.5（半天，对齐 #50 HalfAM/HalfPM）不改变状态，只记录半天请假。
-// override_* 是管理员校正位：校正结果优先于派生结果，不覆盖原始打卡。
+// 派生优先级见上方状态常量；leave_days=0.5（半天，对齐 #50 HalfAM/HalfPM）
+// 不改变状态，只记录半天请假。override_* 是管理员校正位：校正结果优先于
+// 派生结果，不覆盖原始打卡（in_time/out_time 保留打卡事实）。
 type AttendanceResult struct {
 	BaseEntity
 	TenantID int64 `gorm:"not null;default:1" json:"tenantId"`

@@ -85,6 +85,12 @@ func (f *fakeSystemGateway) ListActiveUserIDs(_ context.Context) ([]int64, error
 	return nil, nil
 }
 
+// ListEnabledTenantIDs 服务于考勤日结果任务的租户迭代（issue #61）：
+// 可见范围单测不触达，返回零值即可。
+func (f *fakeSystemGateway) ListEnabledTenantIDs(_ context.Context) ([]int64, error) {
+	return nil, nil
+}
+
 func (f *fakeSystemGateway) DeptNames(_ context.Context, _ []int64) (map[int64]string, error) {
 	return map[int64]string{}, nil
 }

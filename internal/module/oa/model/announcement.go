@@ -83,7 +83,8 @@ func (AnnouncementTarget) TableName() string { return "oa_announcement_target" }
 
 // AnnouncementRead 是公告已读记录（追加型表：无软删除与 creator/updater；
 // 唯一键 (tenant_id, announcement_id, user_id) 保证打开详情的写入幂等）。
-// #48 只建 schema，写入与统计由 #49 承接。
+// #48 建 schema，写入（service.GetAnnouncement 幂等 upsert）与统计
+// （read-stats 人数/名单）由 #49 承接。
 type AnnouncementRead struct {
 	ID             int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	CreatedAt      time.Time `json:"createTime"`

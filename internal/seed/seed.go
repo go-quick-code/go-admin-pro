@@ -329,9 +329,9 @@ func seedMenus(db *gorm.DB) error {
 		btn(5296, 529, "请假取消", "oa:leave:cancel", 6),
 
 		// 报销（issue #54）：523 报销（管理/财务入口，查询码挂菜单；spec §7.2 的
-		// 504 段在本仓库协调台账改为 523 段）+ 533 我的报销（员工侧空位自取，
-		// 500–549 内 grep 去重确认 533 未被占用；529/530/531/532 已被请假/考勤/
-		// 公告占用）。两页面共用同一视图，可见范围由后端 §4.6 收口。
+		// 504 段在本仓库协调台账改为 523 段）+ 534 我的报销（员工侧空位自取，
+		// 合并 #61 后 533 已被考勤结果占用，grep 去重后取 534；529/530/531/532
+		// 已被请假/考勤/公告占用）。两页面共用同一视图，可见范围由后端 §4.6 收口。
 		// 按钮码 = 菜单 ID×10+n：5231 创建/5232 编辑/5233 删除/5234 提交
 		//（提交逻辑属 #55，码先登记，路由由 #55 落地）/5235 管理（财务/管理
 		// 可见范围，spec §4.6/§4.9 默认审批流节点 2）。
@@ -341,7 +341,7 @@ func seedMenus(db *gorm.DB) error {
 		btn(5233, 523, "报销删除", "oa:expense:delete", 3),
 		btn(5234, 523, "报销提交", "oa:expense:submit", 4),
 		btn(5235, 523, "报销管理", "oa:expense:manage", 5),
-		menu(533, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 11),
+		menu(534, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 12),
 
 		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
 		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
@@ -352,6 +352,16 @@ func seedMenus(db *gorm.DB) error {
 		menu(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 5),
 		menu(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 6),
 		menu(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 7),
+
+		// 考勤结果与校正（issue #61）：533 段（500–549 空位自取，grep 去重确认
+		// 533/5331–5332 未被占用）。533 查询码挂菜单（结果查询页入口）；5331
+		// 校正/撤销校正/手工重算共用 oa:attendance:result:correct；5332 挂 #43
+		// helper 登记的全租户可见范围码 oa:attendance:manage（super_admin "*" 直接
+		// 命中，HR 角色授予本按钮即获得全租户结果可见）。员工侧结果列表追加在
+		// 「我的考勤」531 页面，登录即可，不新增菜单。
+		menu(533, 500, "考勤结果", "attendance-result", "oa/attendance/result", "oa:attendance:result:query", "DataAnalysis", 11),
+		btn(5331, 533, "考勤校正", "oa:attendance:result:correct", 1),
+		btn(5332, 533, "全租户可见", "oa:attendance:manage", 2),
 
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
@@ -488,12 +498,15 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 1054},
 		// OA 员工侧基础菜单（issue #48，spec §7.3「内置普通角色授予公告查看」）：
 		// OA 根目录 + 我的公告（登录即可的只读页面，不含公告管理菜单 521）。
+		// 我的考勤（531，issue #61 起含打卡与考勤结果列表）同为员工自助页，
+		// 登录即可，纳入内置普通角色。
 		{RoleID: 2, MenuID: 500},
 		{RoleID: 2, MenuID: 532},
+		{RoleID: 2, MenuID: 531},
 		// 报销员工侧（issue #54，spec §7.3「内置普通角色授予…报销…的基础菜单」）：
 		// 我的报销页面 + 草稿创建/编辑/删除/提交按钮码；不含管理菜单 523 与
 		// oa:expense:manage（财务/管理员）。
-		{RoleID: 2, MenuID: 533},
+		{RoleID: 2, MenuID: 534},
 		{RoleID: 2, MenuID: 5231},
 		{RoleID: 2, MenuID: 5232},
 		{RoleID: 2, MenuID: 5233},
@@ -679,6 +692,18 @@ func seedJobs(db *gorm.DB) error {
 			RetryCount:     0,
 			Status:         inframodel.JobStatusPaused,
 			Remark:         "每天 03:00 按租户公海配置回收超期未跟进的客户（清空负责人并写历史），默认暂停：请先确认各租户回收天数配置",
+		},
+		{
+			TenantID:       1,
+			Name:           "考勤日结果生成",
+			HandlerName:    "oaAttendanceDailyResult",
+			CronExpression: "0 0 1 * * *",
+			RetryCount:     0,
+			// 默认启用（spec §4.10「infra_job 每天 01:00 生成前一日结果」）：
+			// 派生幂等且只写本租户结果，非破坏性；handler_param 可填 YYYY-MM-DD
+			// 回填指定日期。
+			Status: inframodel.JobStatusRunning,
+			Remark: "每天 01:00 生成前一日考勤结果（按启用租户迭代）；handler_param 可填 YYYY-MM-DD 回填指定日期",
 		},
 	}
 	return tenant.Skip(db).Create(&jobs).Error
