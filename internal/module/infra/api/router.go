@@ -28,4 +28,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	job.PUT("/:id/run", h.perm("infra:job:update"), h.RunJob)
 	job.DELETE("/:id", h.perm("infra:job:delete"), h.DeleteJob)
 	job.GET("/log/page", h.perm("infra:job:query"), h.PageJobLogs)
+
+	// 访问日志（issue #80，spec §5.5）：租户级 append-only 的查询/删除/清空；
+	// 跨租户业务 ID 一律 404（服务层 fail-closed 校验）。
+	apiLog := rg.Group("/infra/api-log")
+	apiLog.GET("/page", h.perm("infra:api-log:query"), h.PageAPILogs)
+	apiLog.DELETE("", h.perm("infra:api-log:delete"), h.DeleteAPILogs)
+	apiLog.DELETE("/clear", h.perm("infra:api-log:delete"), h.ClearAPILogs)
 }

@@ -49,8 +49,12 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	streams.Use(sysAPI.Auth())
 	notifyAPI.RegisterStream(streams)
 
+	// 访问日志中间件（issue #80，spec §4.6，ADR 0014）挂在 Auth 之后、
+	// OperateLog 之前：Auth 后才有用户/租户上下文；只记录受保护接口——
+	// 公开接口（登录/验证码/社交回调）与仅 Auth 的推送流不在 protected 组，
+	// 天然不记录。采集只做非阻塞入队，落库走 service.APILogWriter 异步批量。
 	protected := api.Group("")
-	protected.Use(sysAPI.Auth(), sysAPI.OperateLog())
+	protected.Use(sysAPI.Auth(), infraAPI.AccessLog(), sysAPI.OperateLog())
 	sysAPI.RegisterProtected(protected)
 	infraAPI.RegisterProtected(protected)
 	codegenAPI.RegisterProtected(protected)

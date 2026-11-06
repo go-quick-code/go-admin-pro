@@ -72,3 +72,9 @@ push:
   ticket-ttl: 30s
   # SSE 心跳间隔（注释行 : ping），保持中间层不 idle 断连。
   heartbeat: 25s
+
+# API 访问日志（issue #80，spec §4.6 / ADR 0014）：受保护接口异步批量落库。
+access-log:
+  # 保留天数：cleanAccessLogs 系统级任务每日 03:00 清理超过保留期的记录
+  #（缺省 30 天）。
+  retention-days: 30

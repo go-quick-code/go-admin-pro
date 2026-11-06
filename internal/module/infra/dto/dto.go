@@ -95,3 +95,20 @@ type JobLogVO struct {
 	Message        string     `json:"message"`
 	CreateTime     time.Time  `json:"createTime"`
 }
+
+// APILogPageReq 是访问日志分页查询条件（issue #80，spec §5.5）。
+type APILogPageReq struct {
+	PageNo   int `form:"pageNo"`
+	PageSize int `form:"pageSize"`
+	// Path 按路由模板模糊匹配。
+	Path string `form:"path"`
+	// Status 精确匹配响应状态码；不传不过滤。
+	Status *int `form:"status"`
+	// Username 按登录用户名模糊匹配（前端「用户」过滤项）。
+	Username string `form:"username"`
+	// UserID 精确匹配登录用户；0 表示不过滤。
+	UserID int64 `form:"userId"`
+	// BeginTime/EndTime 过滤请求完成时间区间（含边界）；空表示不限制。
+	BeginTime string `form:"beginTime"`
+	EndTime   string `form:"endTime"`
+}
