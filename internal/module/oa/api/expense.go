@@ -1,13 +1,13 @@
-// expense.go 是报销单的 HTTP 入口（issue #54，docs/oa-mvp-spec.md
-// §4.9/§5）：草稿创建/编辑/删除、可见范围内的列表/详情（明细 + 附件）、
-// 附件的上传/下载/删除。
+// expense.go 是报销单的 HTTP 入口（issue #54/#55，docs/oa-mvp-spec.md
+// §4.9/§5）：草稿创建/编辑/删除、提交（bpm 审批）、可见范围内的列表/详情
+// （明细 + 附件）、附件的上传/下载/删除。
 //
 // 权限模型：
 //   - 列表/详情/附件查看登录即可（服务层按 §4.6 可见范围收口，范围外 404）；
 //   - 写动作逐码：oa:expense:create（创建草稿）、oa:expense:update（编辑/附件）、
-//     oa:expense:delete（删除）；
-//   - 提交（POST /submit，oa:expense:submit）与审批回调属 #55，本工单只预留
-//     状态常量与守卫（service.ValidateExpenseAction），不注册提交路由。
+//     oa:expense:delete（删除）、oa:expense:submit（提交审批）；
+//   - 审批动作不在本组：通过/驳回/撤回统一在通用待办（/bpm/task/*、
+//     /bpm/instance/:id/withdraw）由 bpm 收口，回调写回报销单状态。
 package api
 
 import (
@@ -98,6 +98,23 @@ func (h *Handler) GetExpenseClaimDetail(c *gin.Context) {
 		return
 	}
 	detail, err := h.svc.GetExpenseClaimDetail(c.Request.Context(), id)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, detail)
+}
+
+// SubmitExpenseClaim 提交报销单（POST /oa/expense/claim/:id/submit，
+// oa:expense:submit，issue #55）：仅本人、仅草稿/已驳回（其余 409）；事务内
+// 发起 oa_expense_approval 实例并置待审（部门负责人 → oa:expense:manage）；
+// 审批人解析不到由 bpm 返回 400 且整笔回滚（单据保持草稿）。
+func (h *Handler) SubmitExpenseClaim(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	detail, err := h.svc.SubmitExpenseClaim(c.Request.Context(), id)
 	if err != nil {
 		response.Fail(c, err)
 		return

@@ -355,11 +355,11 @@ export function downloadLeaveRequestFile(url: string) {
 }
 
 
-// ---------- OA 报销（issue #54，spec #42 §4.9/§5） ----------
+// ---------- OA 报销（issue #54/#55，spec #42 §4.9/§5） ----------
 // 权限模型：列表/详情/附件查看登录即可（服务端按 §4.6 可见范围收口）；
-// 写动作逐码 oa:expense:create/update/delete；提交（oa:expense:submit）与
-// 审批回调属 #55，本工单只登记按钮码。金额一律十进制字符串（分单位由后端
-// money.Money 解析，拒绝 JSON 数字以避免浮点丢精度）。
+// 写动作逐码 oa:expense:create/update/delete/submit；审批动作统一在通用待办
+// （/bpm/task/*）完成，通过/驳回/撤回由 bpm 回调写回报销单状态。金额一律
+// 十进制字符串（分单位由后端 money.Money 解析，拒绝 JSON 数字以避免浮点丢精度）。
 
 export interface ExpenseItemPayload {
   id?: number
@@ -398,6 +398,12 @@ export function updateExpenseClaim(data: ExpenseClaimPayload) {
 // 删除草稿/已驳回单据（明细级联软删；其他状态 409）。
 export function deleteExpenseClaim(id: number) {
   return request.delete(`/oa/expense/claim/${id}`) as Promise<any>
+}
+// 提交审批（issue #55，oa:expense:submit）：仅本人、仅草稿/已驳回（其余 409）；
+// 服务端在同一事务内生成 oa_expense_approval 实例（部门负责人 → oa:expense:manage），
+// 审批人解析不到返回 400 且不改变状态。
+export function submitExpenseClaim(id: number) {
+  return request.post(`/oa/expense/claim/${id}/submit`) as Promise<any>
 }
 // 附件列表（新上传的在前）。
 export function listExpenseClaimFiles(id: number) {

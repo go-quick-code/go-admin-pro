@@ -195,10 +195,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	oaSvc.SetBPM(bpmSvc)
 	oaSvc.SetAPIPrefix(cfg.App.APIPrefix)
 	oaSvc.SetLeaveFileStore(leaveFileStore{infra: infraSvc})
-	// 报销单（issue #54）：草稿/明细闭环只做业务写，不依赖 bpm；提交与审批
-	// 回调由 #55 在同一状态机上接线。附件复用 infra_file（biz_type=oa_expense）。
+	// 报销单（issue #54/#55）：草稿/明细闭环（#54）与提交/审批回调（#55）共用
+	// 同一状态机。提交在业务事务内经 StartInstanceInTx 发起 oa_expense_approval；
+	// 报销用独立适配器注册回调（oa.Service 已注册为请假审批处理器，一个对象
+	// 不能绑定两套回调语义）。附件复用 infra_file（biz_type=oa_expense）。
 	oaSvc.SetExpenseFileStore(expenseFileStore{infra: infraSvc})
 	bpmSvc.RegisterBusinessHandler(oaservice.LeaveApprovalBusinessType, oaSvc)
+	bpmSvc.RegisterBusinessHandler(oaservice.ExpenseApprovalBusinessType, oaservice.NewExpenseApprovalHandler(oaSvc))
 
 	// 考勤日结果任务（issue #61，spec §4.10）：系统级 handler（跨租户迭代，
 	// tenant.Skip 列启用租户后逐租户派生），infra_job 种子默认行每天 01:00。
