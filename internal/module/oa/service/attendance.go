@@ -604,12 +604,3 @@ func newPunchResp(row *model.AttendancePunch, group *model.AttendanceGroup) dto.
 	}
 	return resp
 }
-
-// truncateRunes 按 rune 截断到上限（User-Agent/IP 列宽保护）。
-func truncateRunes(s string, limit int) string {
-	runes := []rune(s)
-	if len(runes) <= limit {
-		return s
-	}
-	return string(runes[:limit])
-}

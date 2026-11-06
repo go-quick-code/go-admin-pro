@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -54,9 +55,13 @@ func (f *fakeSystemGateway) ListSimpleUsers(_ context.Context) ([]systemmodel.Si
 	return nil, nil
 }
 
-// UserNicknames 返回空昵称映射（可见范围编排不消费，issue #60 仅为满足接口）。
-func (f *fakeSystemGateway) UserNicknames(_ context.Context, _ []int64) (map[int64]string, error) {
-	return map[int64]string{}, nil
+// UserNicknames 返回固定昵称映射（额度管理页 #51 与考勤组员列表 #60 展示用）。
+func (f *fakeSystemGateway) UserNicknames(_ context.Context, userIDs []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(userIDs))
+	for _, id := range userIDs {
+		out[id] = fmt.Sprintf("用户%d", id)
+	}
+	return out, nil
 }
 
 // userContext 返回带登录主体（用户 7，租户 1）的上下文。

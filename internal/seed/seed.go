@@ -282,15 +282,37 @@ func seedMenus(db *gorm.DB) error {
 		btn(5202, 520, "批量设置", "oa:workday:batch", 2),
 		btn(5203, 520, "恢复默认", "oa:workday:delete", 3),
 
+		// 请假类型与额度（issue #51）：522 段（协调台账分配，grep 去重确认
+		// 522/528 未被占用）。本工单所有管理动作（类型 CRUD/启停/删除、额度
+		// 初始化/调整/分页）共用单一管理码 oa:leave:manage（#43 helper 登记、
+		// 默认审批流 oa_leave_approval 节点 2 的 HR/管理员码，spec §7.3），
+		// 挂菜单本身，无独立按钮码；类型列表与本人余额登录即可（不经权限码）。
+		menu(522, 500, "请假类型与额度", "leave", "oa/leave/index", "oa:leave:manage", "List", 2),
+		// 我的额度（issue #51）：员工侧页面，权限码为空——登录即可（分配了
+		// 菜单的角色可见；后端 GET /oa/leave/balance/mine 同为登录即可）。
+		// 我的请假页（含额度入口）由 #52 建立（下方菜单 529）；撤回/取消与
+		// 部门可见范围由 #53 扩展。
+		menu(528, 500, "我的额度", "leave-mine", "oa/leave/mine", "", "User", 8),
+
+		// 我的请假（issue #52）：529 段（500–549 员工侧空位自取，grep 去重确认
+		// 529/5291–5294 未被占用；522 管类型与额度、528 管本人额度，勿重复建）。
+		// 页面本身登录即可（后端列表/详情按本人收口），写动作逐码：创建/编辑/
+		// 删除/提交（按钮码 = 菜单 ID×10+n）。审批动作走通用待办 512 段。
+		menu(529, 500, "我的请假", "leave-request", "oa/leave/request/index", "", "Calendar", 9),
+		btn(5291, 529, "请假申请", "oa:leave:create", 1),
+		btn(5292, 529, "请假编辑", "oa:leave:update", 2),
+		btn(5293, 529, "请假删除", "oa:leave:delete", 3),
+		btn(5294, 529, "请假提交", "oa:leave:submit", 4),
+
 		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
 		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
 		// 530/531）。权限码按 spec §5/§7.2：
 		// 班次 oa:attendance:shift:manage、考勤组 oa:attendance:group:manage
 		//（码挂在菜单上，授予菜单即授予该域全部维护动作）；我的考勤为员工自助页，
 		// 登录即可用（权限码为空，与仪表盘同款；打卡动作以登录身份收口）。
-		menu(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 2),
-		menu(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 3),
-		menu(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 4),
+		menu(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 5),
+		menu(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 6),
+		menu(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 7),
 
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。

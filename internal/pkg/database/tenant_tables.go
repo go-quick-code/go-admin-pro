@@ -54,6 +54,13 @@ var TenantTables = []string{
 	// 工作日历（issue #50，迁移 00017）：租户级日期三态显式记录，唯一键
 	// (tenant_id, date)；查询经租户插件自动限定，核心判定见 oa/service 纯函数。
 	"oa_workday_calendar",
+	// 请假（issue #51，迁移 00018）：类型/额度/申请三表；申请表本工单只建
+	// schema（写入由 #52 承接）。唯一键：类型 (tenant_id, code)/(tenant_id, name)、
+	// 额度 (tenant_id, user_id, leave_type_id, year)；额度算术见 oa/service
+	// leave_rule.go 纯函数。
+	"oa_leave_type",
+	"oa_leave_balance",
+	"oa_leave_request",
 	// 考勤基础（issue #60，迁移 00022）：班次/考勤组/组员/打卡/结果五张表
 	// 全量租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。
 	// 组员唯一键 (tenant_id, user_id)——一个用户只属于一个考勤组；
