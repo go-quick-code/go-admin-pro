@@ -24,15 +24,18 @@
 - **多租户**：GORM 插件自动追加 `tenant_id` 条件、插入自动回填；新建租户自动初始化部门 / 超级管理员角色 / `admin` 账号。
 - **数据权限**：角色维度支持「全部 / 自定义部门 / 本部门 / 本部门及以下 / 仅本人」，用户、CRM 客户/商机/合同/回款与仪表盘已接入。
 - **系统管理**：用户、角色、菜单（目录/菜单/按钮三级）、部门树、岗位、字典、租户、登录日志、操作日志。
+- **OA 套件**：公告（受众/已读）、请假（类型/额度/半天粒度）、报销（明细/审批）、考勤（班次/考勤组/Web 打卡/结果派生/月度汇总）、日程、会议室预约、文档目录与 ACL；审批统一走 bpm。
+- **bpm 与通知**：版本化线性审批链（角色/权限码候选池、部门负责人、转办/驳回/撤回）、通用待办、站内通知（待办/结果/公告/会议提醒）。
 - **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）。
 - **代码生成器**：两种入口——元信息驱动的「owner-scoped 实体全栈脚手架」（model/dto/repository/service/api + 路由注册点 + 菜单/权限码种子 + 测试骨架 + ProTable 页面，配套装配说明），以及读取 `information_schema` 按表结构生成通用 CRUD 模板 ZIP；两者生成物都是起点，接入工程需按产物内说明手工放置并注册。
 - **前端动态路由**：菜单由后端下发，前端按组件路径动态注册，按钮权限通过 `v-if` 控制。
-- **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、演示任务）。
+- **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、请假类型、默认审批流程、定时任务）。
 
 ## 相关文档
 
 - 术语表：[GLOSSARY.md](GLOSSARY.md)
 - 架构决策：[docs/adr/](docs/adr/)
+- OA MVP 规格：[docs/oa-mvp-spec.md](docs/oa-mvp-spec.md)
 - CRM 详细规格：[docs/crm-mvp-spec.md](docs/crm-mvp-spec.md)
 
 ## 技术栈
@@ -77,6 +80,9 @@ go-admin-pro
 │   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户、日志
 │   │   ├── infra/              # 文件、参数配置、定时任务
 │   │   ├── crm/                # 客户管理（CRM 第一条纵切，手写样板：model/dto/repository/service/api）
+│   │   ├── bpm/                # 流程定义、实例、任务、审批记录、通用待办
+│   │   ├── notify/             # 站内通知投递、未读数、已读状态
+│   │   ├── oa/                 # 公告、请假、报销、考勤、日程、会议室、文档
 │   │   └── codegen/            # 代码生成器
 │   └── pkg/                    # 框架能力
 │       ├── database/           # GORM 连接、迁移校验 + 多租户/审计插件
@@ -245,6 +251,83 @@ GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset
 端到端验收用例见 `internal/module/crm/e2e_http_integration_test.go`（`//go:build integration`），
 演示数据完整性/幂等用例见 `internal/seed/crm_demo_integration_test.go`。
 
+### OA 快速开始
+
+OA 与 CRM 共用同一条演示数据入口：`make run-demo` 会在基础种子与 CRM 演示
+组织之后写入 OA 演示数据（请假类型、公告、请假、报销、考勤、日程、会议室、
+文档）。只想要基础种子（默认班次与考勤组、默认审批流程、报销类别字典，无
+OA 演示业务数据）时正常 `make run` 即可。
+
+```bash
+make migrate-up            # 建表（幂等，可重复执行）
+make run-demo              # 启动后端并写入 CRM + OA 演示数据
+```
+
+演示数据按表幂等：每个域以自己的业务表为哨兵（如 `oa_announcement`、
+`oa_leave_request`、`oa_expense_claim`、`oa_attendance_punch`、
+`oa_meeting_room`、`oa_document_folder`），已有行（含软删）时整段跳过，
+重复启动不会重复插入；角色/用户/部门负责人/额度按业务键逐行补齐。
+
+演示账号（租户 1，密码均为 `123456`）：
+
+| 账号 | 视角 |
+| --- | --- |
+| `admin` | 超级管理员：全部 OA 数据、流程定义、考勤校正与全租户结果 |
+| `demo` | 内置普通角色：OA 员工侧页面（公告/请假/报销/考勤/日程/会议/文档）与考勤结果页 |
+| `sales1` / `sales2` / `manager` | CRM 演示组织；请假/报销演示单据的发起人与部门负责人 |
+
+OA 演示数据覆盖：
+
+- 公告：草稿 / 已发布（置顶）/ 已撤回各一，已发布公告带自定义受众与已读回执。
+- 请假：7 种请假类型（年假/事假/病假/调休/婚假/产假/陪产假）与演示额度；
+  一条已通过年假（带完整 bpm 通过实例、任务与审批记录、额度扣减）与一条
+  待审事假（部门负责人待办）。
+- 报销：草稿与已通过各一（含明细行，表头合计 = 明细合计）；已通过单带
+  `oa_expense_approval` 实例。
+- 考勤：默认班次/考勤组之外补演示考勤组成员、近 5 个工作日打卡与结果
+  （正常/迟到/早退/迟到且早退/缺卡），以及请假当天的「请假」结果。
+- 日程：私有 / 部门 / 公开各一；会议室与预约：2 个会议室、2 条有效预约，
+  每条预约自动生成 `source=room_booking` 的部门日程。
+- 文档：公司制度（全员 ACL）→ 人事制度（继承）与研发资料（研发部 ACL）、
+  市场部资料（市场部 ACL），2 条文件记录（文件同时落到
+  `storage.local.base-path`，默认 `./uploads`）。
+
+默认审批流程（随基础种子写入，已发布 v1，按 `tenant + key` 幂等且不覆盖
+租户自行维护的版本）：
+
+| key | 节点 1 | 节点 2 |
+| --- | --- | --- |
+| `crm_contract_approval` | 权限码 `crm:contract:approve` | — |
+| `oa_leave_approval` | 发起人所在部门负责人 | 权限码 `oa:leave:manage` |
+| `oa_expense_approval` | 发起人所在部门负责人 | 权限码 `oa:expense:manage` |
+
+内置定时任务（`infra_job`）：`oaAttendanceDailyResult` 每天 01:00 生成前一日
+考勤结果、`oaRoomBookingReminder` 每 5 分钟发送会议提醒，二者默认启用；
+`recyclePoolCustomers`（公海回收，每天 03:00）与 `demoJob` 默认暂停。
+种子在插入后显式回写 `status`，避免 GORM 对 `default:1` 零值列的省略导致
+「默认启用」被落成暂停。
+
+运维注意点：
+
+- `oa_expense_category` 字典只种租户 1；请假类型由 `seed-demo` 写入。新建租户
+  的 bootstrap 仍只有「总公司 / super_admin / admin」，需要手工补齐请假类型、
+  考勤班次与考勤组、报销类别字典、默认审批流程后才能在 OA 中建单/提交。
+- 打卡接口（`POST /oa/attendance/punch`）v1 以登录身份收口，未强制
+  `oa:attendance:punch` 权限码；无启用考勤组时返回 400。
+- 内置普通角色（`demo`）在 issue #63 补充了 529/5291–5296（我的请假与
+  撤回/取消）、528（我的额度）与 533/5331/5332（考勤结果、校正、全租户
+  可见），便于演示；生产可按需回收 5331/5332。
+- 演示文档的文件记录写入 `storage.local.base-path`；若该目录不可写，种子会
+  记录告警但保留记录，下载入口会按「文件不存在」返回 404。
+
+OA 集成测试入口：
+
+```bash
+make test-integration           # 全量（含 internal/seed 的 OA 演示数据用例）
+GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True' \
+  go test -tags=integration -p 1 ./internal/seed/ ./internal/module/oa/
+```
+
 ## 核心设计
 
 ### 版本化迁移
@@ -252,7 +335,7 @@ GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset
 表结构由 `migrations/` 下的 goose SQL 管理，迁移文件会内嵌进二进制：
 
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
-- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前基线回滚等于删掉全部 17 张表。**
+- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前全部迁移回滚等于删掉全部 57 张业务表。**
 - `make migrate-status`：查看每个版本的应用状态。
 - `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为基线版本，不执行 DDL；后续版本必须走 `migrate up`。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
@@ -378,6 +461,9 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | 用户 / 角色 / 菜单 / 部门 / 岗位 / 字典 / 租户 / 日志 | `/admin-api/system/*` |
 | 文件 / 参数 / 定时任务 | `/admin-api/infra/*` |
 | CRM（客户/联系人/跟进/商机/合同/回款/仪表盘） | `/admin-api/crm/*` |
+| OA（公告/请假/报销/考勤/日程/会议室/文档） | `/admin-api/oa/*` |
+| bpm（流程定义/待办/实例） | `/admin-api/bpm/*` |
+| 站内通知 | `/admin-api/notify/*` |
 | 代码生成 | `/admin-api/infra/codegen/*` |
 
 ## 配置说明
@@ -390,7 +476,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.cors.allowed-origins` | 跨域白名单：精确匹配 Origin，非白名单来源不返回 CORS 头；为空表示不放行任何跨域（可用 `GAP_CORS_ALLOWED_ORIGINS` 逗号分隔覆盖） |
 | `database.dsn` | MySQL DSN |
 | `database.seed` | 启动时写入种子数据 |
-| `database.seed-demo` | 是否写入 CRM 演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
+| `database.seed-demo` | 是否写入 CRM + OA 演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
 | `security.login.max-fail` / `lock-duration` | 登录失败锁定策略 |
@@ -442,6 +528,7 @@ make check        # fmt-check + build + vet + test
 make vet          # 静态检查
 make fmt          # gofmt
 make web-dev      # 启动前端开发服务器
+make web-type-check # 前端类型检查
 make web-build    # 构建前端
 make build        # 构建后端二进制
 make docker-up    # 启动 MySQL
@@ -456,7 +543,7 @@ make docker-down  # 停止容器
 - 文件存储仅实现本地磁盘，OSS / S3 可通过扩展 `infra` 模块接入。
 - 权限快照（角色码 + 权限码）使用进程内缓存（1 分钟 TTL），多实例部署时需替换为 Redis 或统一失效；字典数据未做缓存，每次直接读库。
 - 未内置 Swagger，接口约定见上文与各 handler。
-- 工作流、消息中心、支付、商城等芋道业务模块不在本次范围内，可按同样分层继续扩展。
+- bpm v1 只支持线性有序审批链：不做 BPMN 网关/并行/会签/条件表达式/可视化设计器；OA 只做公告、半天粒度请假、Web 打卡、报销审批、日程/会议室、文档 ACL，不做付款/预算/发票、Wiki/在线预览、GPS 考勤设备、外部日历同步。
 
 ## 后续计划
 

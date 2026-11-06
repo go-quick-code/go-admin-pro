@@ -12,7 +12,7 @@ GAP_TEST_DATABASE_DSN ?= root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?chars
 help:
 	@echo "go-admin-pro 常用命令："
 	@echo "  make run          启动后端（go run）"
-	@echo "  make run-demo     启动后端并写入 CRM 演示数据（GAP_SEED_DEMO=true）"
+	@echo "  make run-demo     启动后端并写入 CRM + OA 演示数据（GAP_SEED_DEMO=true）"
 	@echo "  make build        构建后端二进制到 $(BIN)"
 	@echo "  make migrate-up   执行全部待执行迁移"
 	@echo "  make migrate-down 回滚一个迁移版本"
@@ -39,7 +39,7 @@ help:
 run:
 	go run ./cmd/server -c $(CONFIG)
 
-# CRM 演示环境（#21 一条命令路径）：演示数据默认关闭，这里显式开启。
+# CRM + OA 演示环境（#21/#63 一条命令路径）：演示数据默认关闭，这里显式开启。
 run-demo:
 	GAP_SEED_DEMO=true go run ./cmd/server -c $(CONFIG)
 
