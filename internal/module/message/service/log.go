@@ -121,6 +121,32 @@ func (s *Service) DeleteLog(ctx context.Context, id int64) error {
 	return s.repo.DeleteLog(ctx, row.ID)
 }
 
+// DeleteLogs 批量删除当前租户的发送日志（spec §5.2：DELETE /message/log 按 ids）。
+// 与单条删除同口径：任一 ID 不存在或属于其他租户 → 404 且一行都不删
+// （先查后删的 all-or-nothing，避免半删状态），不删除他租户任何行。
+func (s *Service) DeleteLogs(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return xerr.BadRequest("ids 不能为空")
+	}
+	// 去重后核对可见性：跨租户/不存在的 ID 经租户插件隔离后查不到。
+	uniq := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; !dup {
+			seen[id] = struct{}{}
+			uniq = append(uniq, id)
+		}
+	}
+	rows, err := s.repo.FindLogsByIDs(ctx, uniq)
+	if err != nil {
+		return err
+	}
+	if len(rows) != len(uniq) {
+		return xerr.NotFound("发送日志不存在或不完整，已取消批量删除")
+	}
+	return s.repo.DeleteLogs(ctx, uniq)
+}
+
 // ClearLogs 清空当前租户的全部发送日志。
 func (s *Service) ClearLogs(ctx context.Context) error {
 	return s.repo.ClearLogs(ctx)

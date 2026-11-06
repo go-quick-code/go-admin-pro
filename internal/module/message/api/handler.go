@@ -254,6 +254,20 @@ func (h *Handler) DeleteLog(c *gin.Context) {
 	response.OK(c, true)
 }
 
+// DeleteLogs 批量删除发送日志（spec §5.2：DELETE /message/log 按 ids；
+// #85 审查补齐）。任一 ID 跨租户/不存在 → 404 且不删任何行。
+func (h *Handler) DeleteLogs(c *gin.Context) {
+	var req dto.LogBatchDeleteReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := h.svc.DeleteLogs(c.Request.Context(), req.IDs); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
+}
+
 func (h *Handler) ClearLogs(c *gin.Context) {
 	if err := h.svc.ClearLogs(c.Request.Context()); err != nil {
 		response.Fail(c, err)

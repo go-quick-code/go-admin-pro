@@ -133,3 +133,8 @@ type LogPageReq struct {
 	Recipient    string `form:"recipient"`
 	Status       *int8  `form:"status"`
 }
+
+// LogBatchDeleteReq 批量删除发送日志（spec §5.2：DELETE /message/log 按 ids）。
+type LogBatchDeleteReq struct {
+	IDs []int64 `json:"ids" binding:"required,gt=0"`
+}
