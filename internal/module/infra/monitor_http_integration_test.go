@@ -148,9 +148,13 @@ func TestIntegrationMonitorRequestsBuckets(t *testing.T) {
 	cur := now.Truncate(time.Hour)
 	// 可控数据：当前小时 3 条（2×200、1×500），1 小时前 1 条 404，
 	// 3 小时前 2 条 304。2 小时前刻意留空——空桶不应出现在结果里。
-	monitorInsertAPILog(t, env, 1, cur.Add(5*time.Minute), 200, 100)
-	monitorInsertAPILog(t, env, 1, cur.Add(6*time.Minute), 200, 300)
-	monitorInsertAPILog(t, env, 1, cur.Add(7*time.Minute), 500, 3000)
+	// 当前小时的 3 条取「已流逝时间的中点」：整点后前几分钟运行时
+	// 固定偏移（cur+5min…）会落到未来、被近 N 小时窗口排除
+	//（#84 用例的时钟边界缺陷，issue #82 验证中暴露）。
+	mid := cur.Add(now.Sub(cur) / 2)
+	monitorInsertAPILog(t, env, 1, mid, 200, 100)
+	monitorInsertAPILog(t, env, 1, mid.Add(time.Second), 200, 300)
+	monitorInsertAPILog(t, env, 1, mid.Add(2*time.Second), 500, 3000)
 	monitorInsertAPILog(t, env, 1, cur.Add(-1*time.Hour).Add(2*time.Minute), 404, 50)
 	monitorInsertAPILog(t, env, 1, cur.Add(-3*time.Hour).Add(2*time.Minute), 304, 20)
 	monitorInsertAPILog(t, env, 1, cur.Add(-3*time.Hour).Add(3*time.Minute), 304, 40)
