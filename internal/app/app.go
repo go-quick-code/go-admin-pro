@@ -152,8 +152,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
 	// 判定复用 system 的权限/部门解析（oa/service.SystemGateway 直接受
 	// *systemservice.Service 满足）；其余领域路由由后续 OA 工单按
-	// docs/oa-mvp-spec.md §2 落地。
+	// docs/oa-mvp-spec.md §2 落地。考勤打卡日期按业务时区取当天（issue #60，
+	// ADR 0006：只经 cfg.Location() 获取）。
 	oaSvc := oaservice.New(sysSvc, repository.New(db))
+	oaSvc.SetLocation(cfg.Location())
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。

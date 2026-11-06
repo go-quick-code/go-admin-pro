@@ -54,6 +54,15 @@ var TenantTables = []string{
 	// 工作日历（issue #50，迁移 00017）：租户级日期三态显式记录，唯一键
 	// (tenant_id, date)；查询经租户插件自动限定，核心判定见 oa/service 纯函数。
 	"oa_workday_calendar",
+	// 考勤基础（issue #60，迁移 00022）：班次/考勤组/组员/打卡/结果五张表
+	// 全量租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。
+	// 组员唯一键 (tenant_id, user_id)——一个用户只属于一个考勤组；
+	// 结果唯一键 (tenant_id, user_id, work_date)——一人一天一条结果（#61 写入）。
+	"oa_attendance_shift",
+	"oa_attendance_group",
+	"oa_attendance_group_user",
+	"oa_attendance_punch",
+	"oa_attendance_result",
 	// bpm 内核（issue #44）：定义/实例/任务/审批记录全量租户隔离（spec §4.6：
 	// 跨租户业务 ID 一律 404，不泄露存在性）。
 	"bpm_process_definition",

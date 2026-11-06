@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	systemmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -46,6 +47,16 @@ func (f *fakeSystemGateway) ListUserIDsByDeptIDs(_ context.Context, deptIDs []in
 		}
 	}
 	return ids, nil
+}
+
+// ListSimpleUsers 返回空启用用户集（可见范围编排不消费，issue #60 仅为满足接口）。
+func (f *fakeSystemGateway) ListSimpleUsers(_ context.Context) ([]systemmodel.SimpleUser, error) {
+	return nil, nil
+}
+
+// UserNicknames 返回空昵称映射（可见范围编排不消费，issue #60 仅为满足接口）。
+func (f *fakeSystemGateway) UserNicknames(_ context.Context, _ []int64) (map[int64]string, error) {
+	return map[int64]string{}, nil
 }
 
 // userContext 返回带登录主体（用户 7，租户 1）的上下文。

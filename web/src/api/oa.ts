@@ -27,3 +27,73 @@ export function batchWorkday(data: {
 export function clearWorkday(date: string) {
   return request.delete(`/oa/workday/${date}`) as Promise<any>
 }
+
+// ---------- OA 考勤基础（issue #60，spec #42 §3.9/§4.10/§5） ----------
+// 权限码 oa:attendance:shift:manage（菜单 527 班次管理）、
+// oa:attendance:group:manage（菜单 530 考勤组管理）；员工打卡接口以登录身份
+// 收口（菜单 531 我的考勤，无权限码），无启用考勤组时打卡返回 400。
+
+// 班次：分页/新增/修改/删除/启停（time-of-day HH:MM，不支持跨天）。
+export function pageShifts(params: any) {
+  return request.get('/oa/attendance/shift', { params }) as Promise<any>
+}
+export function createShift(data: any) {
+  return request.post('/oa/attendance/shift', data) as Promise<any>
+}
+export function updateShift(data: any) {
+  const { id, ...rest } = data || {}
+  return request.put(`/oa/attendance/shift/${id}`, rest) as Promise<any>
+}
+export function deleteShift(id: number) {
+  return request.delete(`/oa/attendance/shift/${id}`) as Promise<any>
+}
+export function setShiftStatus(id: number, status: number) {
+  return request.put(`/oa/attendance/shift/${id}/status`, { status }) as Promise<any>
+}
+
+// 考勤组：分页/详情（含组员）/新增/修改/删除（有组员 409）/启停。
+export function pageGroups(params: any) {
+  return request.get('/oa/attendance/group', { params }) as Promise<any>
+}
+export function getGroup(id: number) {
+  return request.get(`/oa/attendance/group/${id}`) as Promise<any>
+}
+export function createGroup(data: any) {
+  return request.post('/oa/attendance/group', data) as Promise<any>
+}
+export function updateGroup(data: any) {
+  const { id, ...rest } = data || {}
+  return request.put(`/oa/attendance/group/${id}`, rest) as Promise<any>
+}
+export function deleteGroup(id: number) {
+  return request.delete(`/oa/attendance/group/${id}`) as Promise<any>
+}
+export function setGroupStatus(id: number, status: number) {
+  return request.put(`/oa/attendance/group/${id}/status`, { status }) as Promise<any>
+}
+
+// 组员物化：按用户批量添加（已在其他组会改绑，一个用户只属于一个组）、
+// 按部门批量导入（取部门当前成员，后续不自动同步）、移出单个组员。
+export function addGroupMembers(id: number, userIds: number[]) {
+  return request.post(`/oa/attendance/group/${id}/members`, { userIds }) as Promise<any>
+}
+export function addGroupMembersByDept(id: number, deptIds: number[]) {
+  return request.post(`/oa/attendance/group/${id}/members/by-dept`, { deptIds }) as Promise<any>
+}
+export function removeGroupMember(id: number, userId: number) {
+  return request.delete(`/oa/attendance/group/${id}/members/${userId}`) as Promise<any>
+}
+
+// Web 打卡与我的考勤（登录即可用；同一天多次打卡均保留）。
+export function punchIn() {
+  return request.post('/oa/attendance/punch/in') as Promise<any>
+}
+export function punchOut() {
+  return request.post('/oa/attendance/punch/out') as Promise<any>
+}
+export function getPunchToday() {
+  return request.get('/oa/attendance/punch/today') as Promise<any>
+}
+export function pageMyPunches(params: any) {
+  return request.get('/oa/attendance/punch/page', { params }) as Promise<any>
+}

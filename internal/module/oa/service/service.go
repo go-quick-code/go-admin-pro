@@ -5,8 +5,10 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
+	systemmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -23,12 +25,20 @@ type SystemGateway interface {
 	DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error)
 	// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合（租户内）。
 	ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error)
+	// ListSimpleUsers 返回本租户启用用户的精简列表（考勤组员物化的合法性
+	// 校验用，issue #60）。
+	ListSimpleUsers(ctx context.Context) ([]systemmodel.SimpleUser, error)
+	// UserNicknames 批量返回用户昵称（组员列表展示用，缺失的 ID 不在返回集）。
+	UserNicknames(ctx context.Context, userIDs []int64) (map[int64]string, error)
 }
 
 // Service 汇聚 oa 模块的业务能力。
 type Service struct {
 	sys  SystemGateway
 	repo *repository.Repository
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
+	// 考勤打卡日期按它取当天（issue #60）。nil 时退回 time.Local。
+	location *time.Location
 }
 
 // New 创建 oa Service。repo 是 OA 实体表仓储（issue #50 起引入，工作日历
