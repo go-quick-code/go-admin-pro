@@ -5,6 +5,7 @@ import (
 
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -36,6 +37,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
 		&inframodel.Config{}, &inframodel.Job{},
 		&crmmodel.PoolConfig{},
+		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
 	); err != nil {
 		t.Fatalf("建表: %v", err)
 	}
@@ -57,6 +59,17 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	assertCount(t, db, &inframodel.Job{}, 2, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
+	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
+	// 默认考勤组（绑定默认班次）。
+	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
+	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组")
+	var defaultShift oamodel.AttendanceShift
+	if err := tenant.Skip(db).First(&defaultShift, 1).Error; err != nil {
+		t.Fatalf("读取默认班次: %v", err)
+	}
+	if defaultShift.StartTime != "09:00" || defaultShift.EndTime != "18:00" || defaultShift.GraceMinutes != 5 {
+		t.Fatalf("默认班次应为 09:00–18:00/宽限 5，实际 %+v", defaultShift)
+	}
 
 	var admin sysmodel.User
 	if err := tenant.Skip(db).First(&admin, 1).Error; err != nil {
@@ -71,6 +84,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
+	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
+	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 }
 
 func assertCount(t *testing.T, db *gorm.DB, model any, want int64, label string) {

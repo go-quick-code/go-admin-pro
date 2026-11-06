@@ -5,10 +5,12 @@ package service
 
 import (
 	"context"
+	"time"
 
 	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	notifyservice "github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
+	systemmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"gorm.io/gorm"
@@ -26,7 +28,11 @@ type SystemGateway interface {
 	DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error)
 	// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合（租户内）。
 	ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error)
-	// UserNicknames 返回用户 ID 集合的昵称映射（额度管理页展示员工姓名，issue #51）。
+	// ListSimpleUsers 返回本租户启用用户的精简列表（考勤组员物化的合法性
+	// 校验用，issue #60）。
+	ListSimpleUsers(ctx context.Context) ([]systemmodel.SimpleUser, error)
+	// UserNicknames 批量返回用户昵称（额度管理页展示员工姓名，issue #51；
+	// 考勤组员列表同样使用，缺失的 ID 不在返回集）。
 	UserNicknames(ctx context.Context, userIDs []int64) (map[int64]string, error)
 	// UserDeptID 返回用户所属部门（公告受众判定：查看者祖先部门链起点，issue #48）。
 	UserDeptID(ctx context.Context, userID int64) (int64, bool, error)
@@ -58,6 +64,9 @@ type Service struct {
 	repo *repository.Repository
 	// notify 是公告发布的站内通知 seam（issue #48，spec §4.13）。
 	notify NotifyGateway
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
+	// 考勤打卡日期按它取当天（issue #60）。nil 时退回 time.Local。
+	location *time.Location
 	// bpm 是审批引擎（issue #52 请假提交/回调的接点）：OA → bpm 单向依赖，
 	// bpm 不反向依赖业务模块（ADR 0008/0009）。装配前为 nil，相关入口显式报错。
 	bpm *bpmservice.Service

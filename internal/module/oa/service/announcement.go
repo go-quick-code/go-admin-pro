@@ -364,7 +364,7 @@ func buildAnnouncementNotifies(row *oamodel.Announcement, userIDs []int64) []not
 			Content:     content,
 			BizType:     AnnouncementFileBizType,
 			BizID:       row.ID,
-			Route:       "/oa/announcement-mine", // 菜单 530 的员工侧路由（OA 根 /oa + announcement-mine）
+			Route:       "/oa/announcement-mine", // 菜单 532 的员工侧路由（OA 根 /oa + announcement-mine）
 			RouteParams: routeParams,
 		})
 	}

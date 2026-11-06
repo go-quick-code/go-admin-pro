@@ -50,6 +50,41 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	workday.POST("/batch", h.requirePermission("oa:workday:batch"), h.BatchWorkday)
 	workday.DELETE("/:date", h.requirePermission("oa:workday:delete"), h.ClearWorkday)
 
+	// 考勤管理（issue #60，菜单种子 527/530 段，spec §5/§7.2）：班次与考勤组
+	// 分别挂 oa:attendance:shift:manage / oa:attendance:group:manage（码在对应
+	// 菜单上，授予菜单即授予该域全部维护动作）。
+	shift := oa.Group("/attendance/shift", h.requirePermission("oa:attendance:shift:manage"))
+	shift.GET("", h.PageShifts)
+	shift.GET("/:id", h.GetShift)
+	shift.POST("", h.CreateShift)
+	shift.PUT("/:id", h.UpdateShift)
+	shift.PUT("/:id/status", h.SetShiftStatus)
+	shift.DELETE("/:id", h.DeleteShift)
+
+	group := oa.Group("/attendance/group", h.requirePermission("oa:attendance:group:manage"))
+	group.GET("", h.PageGroups)
+	group.GET("/:id", h.GetGroup)
+	group.POST("", h.CreateGroup)
+	group.PUT("/:id", h.UpdateGroup)
+	group.PUT("/:id/status", h.SetGroupStatus)
+	group.DELETE("/:id", h.DeleteGroup)
+	// 组员：按用户批量添加、按部门批量导入（取当前成员物化，后续不自动同步）、
+	// 移出单个组员；详情接口已携带组员列表。
+	group.POST("/:id/members", h.AddGroupMembers)
+	group.POST("/:id/members/by-dept", h.AddGroupMembersByDept)
+	group.DELETE("/:id/members/:userId", h.RemoveGroupMember)
+
+	// 员工打卡（issue #60，菜单种子 531 我的考勤）：以登录身份收口（无权限码
+	// 门槛，spec §4.10）；无启用考勤组打卡 400；同日多次打卡均保留。
+	// 统一入口 POST /attendance/punch（body.type 0/1，spec §5）与 /punch/in、
+	// /punch/out 两个动作路径等价。
+	punch := oa.Group("/attendance/punch")
+	punch.POST("", h.Punch)
+	punch.POST("/in", h.PunchIn)
+	punch.POST("/out", h.PunchOut)
+	punch.GET("/today", h.GetMyPunchToday)
+	punch.GET("/page", h.PageMyPunches)
+
 	// 请假类型与额度（issue #51，菜单种子 522 段）：类型列表与本人余额
 	// 登录即可（员工发起请假/查看余额的前置）；类型与额度的全部管理动作
 	// 挂 oa:leave:manage（默认审批流节点 2 的 HR/管理员码，spec §7.3）。

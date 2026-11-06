@@ -161,6 +161,8 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 注入（issue #48：通知与发布同事务，spec §4.13）；附件复用 infra_file
 	// （biz_type=oa_announcement，经 AnnouncementFileStore 适配器装配）。
 	oaSvc := oaservice.New(sysSvc, repository.New(db), notifySvc)
+	// 考勤打卡日期按业务时区取当天（issue #60，ADR 0006：只经 cfg.Location() 获取）。
+	oaSvc.SetLocation(cfg.Location())
 	oaSvc.SetAnnouncementFileStore(announcementFileStore{infra: infraSvc})
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 

@@ -73,7 +73,7 @@ import { saveBlobAs } from '@/utils/download'
 import { formatTime } from '@/utils/format'
 import { downloadAnnouncementFile, getAnnouncement, listAnnouncementFiles, pageMyAnnouncements } from '@/api/oa'
 
-// 我的公告（issue #48，菜单 530）：登录即可；只展示已发布且命中受众的公告，
+// 我的公告（issue #48，菜单 532）：登录即可；只展示已发布且命中受众的公告，
 // 置顶在前。打开详情走 GET /oa/announcement/:id（#49 将在该接口写已读记录），
 // 已撤回公告仍可从站内通知跳转查看「已撤回」。
 interface AnnouncementRow {
