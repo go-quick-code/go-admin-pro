@@ -144,6 +144,29 @@ export function deleteTenant(id: number) {
   return request.delete(`/system/tenant/${id}`) as Promise<any>
 }
 
+// ---------- 租户套餐 ----------
+export function pageTenantPackages(params: any) {
+  return request.get('/system/tenant-package/page', { params }) as Promise<any>
+}
+export function listSimpleTenantPackages() {
+  return request.get('/system/tenant-package/simple-list') as Promise<any>
+}
+export function getTenantPackage(id: number) {
+  return request.get(`/system/tenant-package/${id}`) as Promise<any>
+}
+export function createTenantPackage(data: any) {
+  return request.post('/system/tenant-package', data) as Promise<any>
+}
+export function updateTenantPackage(data: any) {
+  return request.put('/system/tenant-package', data) as Promise<any>
+}
+export function updateTenantPackageStatus(data: { id: number; status: number }) {
+  return request.put('/system/tenant-package/status', data) as Promise<any>
+}
+export function deleteTenantPackage(id: number) {
+  return request.delete(`/system/tenant-package/${id}`) as Promise<any>
+}
+
 // ---------- 日志 ----------
 export function pageLoginLogs(params: any) {
   return request.get('/system/login-log/page', { params }) as Promise<any>

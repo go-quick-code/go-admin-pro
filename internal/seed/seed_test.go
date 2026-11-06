@@ -36,6 +36,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.Tenant{}, &sysmodel.Menu{}, &sysmodel.Dept{}, &sysmodel.Role{},
 		&sysmodel.RoleMenu{}, &sysmodel.Post{}, &sysmodel.User{}, &sysmodel.UserRole{},
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
+		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
@@ -65,6 +66,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.DictType{}, 4, "字典类型")
 	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。
 	assertCount(t, db, &sysmodel.DictData{}, 16, "字典数据")
+	// 默认「标准版」套餐（issue #69）：全部启用目录/菜单，配额不限。
+	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
 	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
@@ -106,6 +109,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义（幂等）")
+	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐（幂等）")
 	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
