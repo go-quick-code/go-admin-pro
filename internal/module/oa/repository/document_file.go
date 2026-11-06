@@ -64,6 +64,19 @@ func (r *Repository) FindDocumentFile(ctx context.Context, folderID, id int64) (
 	return &row, nil
 }
 
+// FindDocumentFileByFileID 按 (folder_id, file_id) 读取未软删的归属行：
+// infra 通用删除入口（PR #66 安全审计 finding 1）用它把 infra_file ID 映射
+// 回 oa_document_file 行，缺失/跨租户返回 nil。
+func (r *Repository) FindDocumentFileByFileID(ctx context.Context, folderID, fileID int64) (*model.DocumentFile, error) {
+	var row model.DocumentFile
+	if err := r.db.WithContext(ctx).
+		Where("`folder_id` = ? AND `file_id` = ?", folderID, fileID).
+		First(&row).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
 // SoftDeleteDocumentFile 软删目录内的文件归属行（仅置 deleted_at，不物理
 // 删除 infra_file 本体）；返回是否删到行（并发重复删除时 false）。
 func (r *Repository) SoftDeleteDocumentFile(ctx context.Context, folderID, id int64) (bool, error) {

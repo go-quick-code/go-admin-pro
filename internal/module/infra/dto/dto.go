@@ -7,6 +7,11 @@ type FilePageReq struct {
 	PageSize int    `form:"pageSize"`
 	Name     string `form:"name"`
 	Type     string `form:"type"`
+	// BizType 显式指定时按业务类型过滤（需要该类型授权器放行，类型级管理
+	// 视角）；留空只返回 biz_type='' 的通用文件（PR #66 安全审计）。
+	BizType string `form:"bizType"`
+	// BizID 可与 BizType 一起给出以收窄到单个业务对象；0 表示该类型全部。
+	BizID int64 `form:"bizId"`
 }
 
 type ConfigPageReq struct {

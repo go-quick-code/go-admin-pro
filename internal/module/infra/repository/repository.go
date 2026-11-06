@@ -27,6 +27,11 @@ func notFound(err error) error {
 type FileFilter struct {
 	Name string
 	Type string
+	// GenericOnly 只返回 biz_type='' 的通用文件（默认分页口径）。
+	GenericOnly bool
+	// BizType/BizID 显式按业务归属过滤（服务层已做业务授权）。
+	BizType string
+	BizID   int64
 }
 
 func (r *Repository) CreateFile(ctx context.Context, f *model.File) error {
@@ -40,6 +45,15 @@ func (r *Repository) ListFiles(ctx context.Context, f FileFilter, offset, limit 
 	}
 	if f.Type != "" {
 		q = q.Where("type LIKE ?", "%"+f.Type+"%")
+	}
+	if f.GenericOnly {
+		q = q.Where("biz_type = ''")
+	}
+	if f.BizType != "" {
+		q = q.Where("biz_type = ?", f.BizType)
+		if f.BizID > 0 {
+			q = q.Where("biz_id = ?", f.BizID)
+		}
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

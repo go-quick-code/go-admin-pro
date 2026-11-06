@@ -181,6 +181,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 文档文件（issue #59）：归属行 oa_document_file + 文件本体 infra_file
 	//（biz_type=oa_document、biz_id=目录 ID）；下载经 OA 鉴权端点，不走公开直链。
 	oaSvc.SetDocumentFileStore(newDocumentFileStore(infraSvc))
+	// 通用 infra 文件端点（下载/删除/分页）的业务授权（PR #66 安全审计
+	// finding 1）：infra 只保留注册表，OA 四类附件在此按 biz_type 接线；
+	// 未注册的业务类型（如 CRM 合同附件）在通用端点上一律 404（fail-closed）。
+	registerOAFileAuthorizers(infraSvc, oaSvc)
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// 字典项引用检查（issue #64 review，spec §4.14）：system 只提供按
