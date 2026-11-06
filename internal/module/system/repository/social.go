@@ -80,6 +80,17 @@ func (r *Repository) CreateSocialClient(ctx context.Context, client *model.Socia
 	return r.db.WithContext(ctx).Create(client).Error
 }
 
+// ListEnabledSocialClients 列出全部启用客户端（登录页可用平台列表用，
+// issue #77；平台级资源，无租户维度）。
+func (r *Repository) ListEnabledSocialClients(ctx context.Context) ([]model.SocialClient, error) {
+	var list []model.SocialClient
+	err := r.db.WithContext(ctx).
+		Where("status = ?", model.StatusEnable).
+		Order("id ASC").
+		Find(&list).Error
+	return list, err
+}
+
 func (r *Repository) SaveSocialClient(ctx context.Context, client *model.SocialClient) error {
 	return r.db.WithContext(ctx).Save(client).Error
 }

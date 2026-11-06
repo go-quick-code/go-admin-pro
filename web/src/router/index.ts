@@ -12,6 +12,13 @@ export const constantRoutes = [
     meta: { title: '登录' },
   },
   {
+    // 社交登录回调页（issue #77）：三方 redirect_uri 指向这里，公开访问。
+    path: '/social/callback',
+    name: 'SocialCallback',
+    component: () => import('@/views/social/callback.vue'),
+    meta: { title: '社交登录回调', public: true },
+  },
+  {
     path: '/',
     name: 'Layout',
     component: Layout,
@@ -42,6 +49,10 @@ router.beforeEach(async (to) => {
   const store = useUserStore()
   if (to.path === '/login') {
     return store.token ? '/' : true
+  }
+  // 社交登录回调页等公开路由：未登录也要可达（issue #77）。
+  if (to.meta?.public) {
+    return true
   }
   if (!store.token) {
     return { path: '/login', query: { redirect: to.fullPath } }

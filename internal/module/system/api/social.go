@@ -82,6 +82,41 @@ func (h *Handler) DeleteSocialUser(c *gin.Context) {
 	response.OK(c, true)
 }
 
+// ListSocialProviders 登录页可用社交平台（公开，issue #77）：
+// 仅返回启用客户端且 provider 已注册的平台。
+func (h *Handler) ListSocialProviders(c *gin.Context) {
+	list, err := h.social.ListEnabledSocialProviders(c.Request.Context())
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, list)
+}
+
+// ListMySocialBindings 我的社交绑定列表（登录即可，个人中心 tab，issue #77）。
+func (h *Handler) ListMySocialBindings(c *gin.Context) {
+	list, total, err := h.social.ListMySocialUsers(c.Request.Context(), c.GetInt64(ContextUserID))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.Page(c, list, total)
+}
+
+// UnbindMySocialBinding 解绑本人绑定（登录即可，个人中心，issue #77）：
+// 非本人/不存在一律 404（spec §4.4.7：只能解绑本人）。
+func (h *Handler) UnbindMySocialBinding(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	if err := h.social.UnbindMySocialUser(c.Request.Context(), id, c.GetInt64(ContextUserID)); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
+}
+
 // PageSocialClients 客户端分页（平台级，密钥脱敏）。
 func (h *Handler) PageSocialClients(c *gin.Context) {
 	var req dto.SocialClientPageReq
