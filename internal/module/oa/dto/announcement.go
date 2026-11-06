@@ -62,12 +62,16 @@ type AnnouncementTargetResp struct {
 }
 
 // AnnouncementItemResp 是公告列表行（管理列表与我的公告共用；不含正文）。
+// Read 是当前查看者是否已读（打开详情即写入，issue #49）；Unread 是列表
+// 未读标记，只有「已发布 + 无已读记录」为 true（草稿/已撤回恒 false）。
 type AnnouncementItemResp struct {
 	ID           int64      `json:"id"`
 	Title        string     `json:"title"`
 	Status       int8       `json:"status"`
 	AudienceType int8       `json:"audienceType"`
 	Pinned       bool       `json:"pinned"`
+	Read         bool       `json:"read"`
+	Unread       bool       `json:"unread"`
 	PublishedAt  *time.Time `json:"publishedAt"`
 	WithdrawnAt  *time.Time `json:"withdrawnAt"`
 	CreateTime   time.Time  `json:"createTime"`
@@ -99,4 +103,28 @@ type AnnouncementFileContent struct {
 	ContentType string
 	Size        int64
 	Reader      io.ReadCloser
+}
+
+// ---------- 公告已读统计（issue #49，docs/oa-mvp-spec.md §4.7）----------
+
+// AnnouncementReadStatsReq 是已读名单分页请求
+// （GET /oa/announcement/{id}/read-stats，oa:announcement:read-stats）。
+type AnnouncementReadStatsReq struct {
+	web.PageQuery
+}
+
+// AnnouncementReadUserResp 是已读名单的一行：员工 ID、昵称与首次已读时间。
+type AnnouncementReadUserResp struct {
+	UserID   int64     `json:"userId"`
+	Nickname string    `json:"nickname"`
+	ReadAt   time.Time `json:"readAt"`
+}
+
+// AnnouncementReadStatsResp 是已读统计响应：readCount 与 total 同口径，
+// 都是按 user_id 去重后的已读人数（唯一键保证至多一行/人）；list 为当前页
+// 名单，按首次已读时间升序。
+type AnnouncementReadStatsResp struct {
+	ReadCount int64                      `json:"readCount"`
+	Total     int64                      `json:"total"`
+	List      []AnnouncementReadUserResp `json:"list"`
 }

@@ -1,13 +1,15 @@
-// announcement.go 承载公告域的编排（issue #48，docs/oa-mvp-spec.md
+// announcement.go 承载公告域的编排（issue #48/#49，docs/oa-mvp-spec.md
 // §3.4/§4.7/§4.14/§5）：公告 CRUD、受众维护、发布/撤回状态流转、员工侧
-// 我的公告与详情、附件（infra_file 按 biz_type='oa_announcement' 归属）。
-// 判定语义全部在纯函数（announcement_rule.go）：受众可见性、发布收件人
-// 展开、状态机决策；本文件只做参数校验、取数与落库编排。
+// 我的公告与详情、附件（infra_file 按 biz_type='oa_announcement' 归属）、
+// 打开详情幂等写已读与已读统计（issue #49）。
+// 判定语义全部在纯函数（announcement_rule.go / announcement_read_rule.go）：
+// 受众可见性、发布收件人展开、状态机决策、未读标记与统计口径；本文件只做
+// 参数校验、取数与落库编排。
 //
 // 发布在**一个事务**内完成「公告置发布 + 为受众批量写 announcement 通知」
 // （spec §4.7/§4.13：通知与源操作同生共死，notify 写失败则发布回滚）。
 // 富文本入库前统一经 bluemonday 白名单清洗（spec §4.7），返回时仍是清洗后
-// 的 HTML。已读记录与统计由 #49 承接（表已在本工单建好）。
+// 的 HTML。已读记录是追加型数据：撤回/重新发布不删除也不重置。
 package service
 
 import (
@@ -40,6 +42,9 @@ const (
 	AnnouncementPermissionQuery = "oa:announcement:query"
 	// AnnouncementPermissionUpdate 是公告编辑与附件维护的权限码。
 	AnnouncementPermissionUpdate = "oa:announcement:update"
+	// AnnouncementPermissionReadStats 是已读统计（人数/名单）的权限码
+	// （按钮 5215，issue #49）。
+	AnnouncementPermissionReadStats = "oa:announcement:read-stats"
 )
 
 // defaultAPIPrefix 是未注入 HTTP 前缀时的兜底（与 configs/config.yaml 默认值一致）。
@@ -75,6 +80,7 @@ func (s *Service) SetAnnouncementFileStore(store AnnouncementFileStore) {
 // ---------- 管理端列表/详情 ----------
 
 // PageAnnouncements 管理端分页（oa:announcement:query）：全部状态，置顶在前。
+// 列表行携带当前管理员对每条公告的已读状态（与员工列表/详情同口径）。
 func (s *Service) PageAnnouncements(ctx context.Context, req *dto.AnnouncementPageReq) ([]dto.AnnouncementItemResp, int64, error) {
 	req.Normalize()
 	if req.Status != nil && !oamodel.ValidAnnouncementStatus(*req.Status) {
@@ -88,19 +94,20 @@ func (s *Service) PageAnnouncements(ctx context.Context, req *dto.AnnouncementPa
 		AudienceType: req.AudienceType,
 		Pinned:       req.Pinned,
 		Keyword:      strings.TrimSpace(req.Keyword),
-	}, req.Offset(), req.PageSize)
+	}, CurrentUserID(ctx), req.Offset(), req.PageSize)
 	if err != nil {
 		return nil, 0, err
 	}
 	items := make([]dto.AnnouncementItemResp, 0, len(rows))
 	for i := range rows {
-		items = append(items, announcementItemOf(&rows[i]))
+		items = append(items, announcementItemOf(&rows[i].Announcement, rows[i].Read))
 	}
 	return items, total, nil
 }
 
 // PageMyAnnouncements 员工「我的公告」：只返回已发布且命中受众的公告；
 // 受众判定走仓储单一 EXISTS 谓词（与纯函数 Audience.Permits 同语义）。
+// 列表行携带当前用户的已读状态（issue #49 未读标记）。
 func (s *Service) PageMyAnnouncements(ctx context.Context, req *dto.AnnouncementMyPageReq) ([]dto.AnnouncementItemResp, int64, error) {
 	req.Normalize()
 	viewer, err := s.audienceViewerOf(ctx)
@@ -113,26 +120,75 @@ func (s *Service) PageMyAnnouncements(ctx context.Context, req *dto.Announcement
 	}
 	items := make([]dto.AnnouncementItemResp, 0, len(rows))
 	for i := range rows {
-		items = append(items, announcementItemOf(&rows[i]))
+		items = append(items, announcementItemOf(&rows[i].Announcement, rows[i].Read))
 	}
 	return items, total, nil
 }
 
-// GetAnnouncement 公告详情（打开即已读由 #49 接入本方法）：
+// GetAnnouncement 公告详情（打开即已读，issue #49）：
 // 已发布公告对命中受众的登录用户可见；已撤回公告仍对命中受众可见（spec §4.7：
 // 撤回不删除已写通知，用户打开详情看到「已撤回」），但不再出现在列表；
 // 草稿仅 oa:announcement:query 持有者可预览。都不可见时按 404 处理，
-// 不泄露存在性。
+// 不泄露存在性。通过可见性判定后幂等写入已读记录（唯一键保证重复打开
+// 不产生重复行、保留首次 read_at）。
 func (s *Service) GetAnnouncement(ctx context.Context, id int64) (*dto.AnnouncementDetailResp, error) {
 	row, _, err := s.findAccessibleAnnouncement(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.MarkAnnouncementRead(ctx, id, CurrentUserID(ctx), s.businessNow()); err != nil {
 		return nil, err
 	}
 	targets, err := s.repo.ListAnnouncementTargets(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.announcementDetailOf(ctx, row, targets)
+	return s.announcementDetailOf(ctx, row, targets, true)
+}
+
+// PageAnnouncementReadStats 已读统计（oa:announcement:read-stats，issue #49）：
+// 返回去重后的已读人数与分页名单（昵称经 system 网关补齐）。统计口径只认
+// oa_announcement_read 的记录本身：撤回保留历史已读，重新发布不重置；
+// 跨租户/不存在的公告按 404 处理（FindAnnouncement 已带租户条件）。
+func (s *Service) PageAnnouncementReadStats(ctx context.Context, id int64, req *dto.AnnouncementReadStatsReq) (*dto.AnnouncementReadStatsResp, error) {
+	req.Normalize()
+	row, err := s.repo.FindAnnouncement(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, xerr.NotFound("公告不存在")
+	}
+	rows, total, err := s.repo.PageAnnouncementReads(ctx, id, req.Offset(), req.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	readUsers := make([]AnnouncementReadUser, 0, len(rows))
+	for i := range rows {
+		readUsers = append(readUsers, AnnouncementReadUser{UserID: rows[i].UserID, ReadAt: rows[i].ReadAt})
+	}
+	readUsers = AggregateAnnouncementReadUsers(readUsers)
+	userIDs := make([]int64, 0, len(readUsers))
+	for _, user := range readUsers {
+		userIDs = append(userIDs, user.UserID)
+	}
+	nicknames, err := s.sys.UserNicknames(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]dto.AnnouncementReadUserResp, 0, len(readUsers))
+	for _, user := range readUsers {
+		list = append(list, dto.AnnouncementReadUserResp{
+			UserID:   user.UserID,
+			Nickname: nicknames[user.UserID],
+			ReadAt:   user.ReadAt,
+		})
+	}
+	return &dto.AnnouncementReadStatsResp{
+		ReadCount: total,
+		Total:     total,
+		List:      list,
+	}, nil
 }
 
 // ---------- 创建/编辑/删除 ----------
@@ -167,7 +223,7 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req *dto.AnnouncementC
 	if err != nil {
 		return nil, err
 	}
-	return s.announcementDetailOf(ctx, row, targets)
+	return s.announcementDetailOf(ctx, row, targets, false)
 }
 
 // UpdateAnnouncement 编辑公告（仅草稿）：受众目标整体替换；发布后不可编辑
@@ -213,7 +269,11 @@ func (s *Service) UpdateAnnouncement(ctx context.Context, req *dto.AnnouncementU
 	if err != nil {
 		return nil, err
 	}
-	return s.announcementDetailOf(ctx, row, targets)
+	read, err := s.announcementReadStateOf(ctx, row.ID)
+	if err != nil {
+		return nil, err
+	}
+	return s.announcementDetailOf(ctx, row, targets, read)
 }
 
 // DeleteAnnouncement 删除公告（仅草稿）：发布后不能删除，只能撤回
@@ -534,10 +594,11 @@ func (s *Service) audienceViewerOf(ctx context.Context) (repository.AudienceView
 	return repository.AudienceViewer{UserID: userID, DeptIDs: deptIDs, RoleIDs: roleIDs}, nil
 }
 
-// announcementDetailOf 组装详情（受众目标附部门/角色名称）。
-func (s *Service) announcementDetailOf(ctx context.Context, row *oamodel.Announcement, targets []oamodel.AnnouncementTarget) (*dto.AnnouncementDetailResp, error) {
+// announcementDetailOf 组装详情（受众目标附部门/角色名称）；read 是当前
+// 查看者对公告的已读状态（详情打开即写已读，issue #49）。
+func (s *Service) announcementDetailOf(ctx context.Context, row *oamodel.Announcement, targets []oamodel.AnnouncementTarget, read bool) (*dto.AnnouncementDetailResp, error) {
 	resp := &dto.AnnouncementDetailResp{
-		AnnouncementItemResp: announcementItemOf(row),
+		AnnouncementItemResp: announcementItemOf(row, read),
 		Content:              row.Content,
 		Targets:              make([]dto.AnnouncementTargetResp, 0, len(targets)),
 	}
@@ -578,19 +639,32 @@ func (s *Service) announcementDetailOf(ctx context.Context, row *oamodel.Announc
 	return resp, nil
 }
 
-// announcementItemOf 把模型映射成列表行视图。
-func announcementItemOf(row *oamodel.Announcement) dto.AnnouncementItemResp {
+// announcementItemOf 把模型映射成列表行视图；read 是当前查看者的已读状态，
+// 未读标记由纯函数 AnnouncementUnread 统一判定（issue #49）。
+func announcementItemOf(row *oamodel.Announcement, read bool) dto.AnnouncementItemResp {
 	return dto.AnnouncementItemResp{
 		ID:           row.ID,
 		Title:        row.Title,
 		Status:       row.Status,
 		AudienceType: row.AudienceType,
 		Pinned:       row.Pinned,
+		Read:         read,
+		Unread:       AnnouncementUnread(row.Status, read),
 		PublishedAt:  row.PublishedAt,
 		WithdrawnAt:  row.WithdrawnAt,
 		CreateTime:   row.CreatedAt,
 		UpdateTime:   row.UpdatedAt,
 	}
+}
+
+// announcementReadStateOf 读取当前用户对公告的已读状态（创建/编辑响应回显
+// 与详情状态保持一致；无登录主体时返回 false）。
+func (s *Service) announcementReadStateOf(ctx context.Context, announcementID int64) (bool, error) {
+	userID := CurrentUserID(ctx)
+	if userID <= 0 {
+		return false, nil
+	}
+	return s.repo.HasAnnouncementRead(ctx, announcementID, userID)
 }
 
 // audienceOfTargets 把受众行还原为纯函数入参（全员时忽略目标）。

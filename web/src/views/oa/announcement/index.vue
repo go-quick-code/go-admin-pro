@@ -44,7 +44,7 @@
         <el-table-column label="更新时间" width="170">
           <template #default="{ row }">{{ formatTime(row.updateTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openPreview(row)">查看</el-button>
             <el-button v-if="row.status === 0 && canUpdate" link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -52,6 +52,7 @@
               {{ row.status === 2 ? '重新发布' : '发布' }}
             </el-button>
             <el-button v-if="row.status === 1 && canPublish" link type="warning" @click="doWithdraw(row)">撤回</el-button>
+            <el-button v-if="row.status !== 0 && canReadStats" link type="primary" @click="openReadStats(row)">已读统计</el-button>
             <el-button v-if="row.status === 0 && canDelete" link type="danger" @click="doDelete(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -188,6 +189,34 @@
         <el-button @click="preview.visible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 已读统计抽屉（issue #49，按钮 5215 oa:announcement:read-stats）：
+         去重后的已读人数 + 分页名单；撤回公告保留历史已读，重新发布不重置。 -->
+    <el-drawer v-model="stats.visible" :title="`已读统计 · ${stats.title}`" size="520px" append-to-body>
+      <div class="stats-summary">
+        <span class="stats-count">已读人数：{{ stats.readCount }}</span>
+        <span class="field-hint">同一用户重复打开只计一次；撤回不删除历史已读。</span>
+      </div>
+      <el-table v-loading="stats.loading" :data="stats.rows" size="small" border>
+        <el-table-column type="index" label="#" width="55" />
+        <el-table-column label="员工" min-width="160">
+          <template #default="{ row }">{{ row.nickname || `用户 ${row.userId}` }}</template>
+        </el-table-column>
+        <el-table-column label="已读时间" width="180">
+          <template #default="{ row }">{{ formatTime(row.readAt) }}</template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!stats.loading && !stats.rows.length" description="还没有人阅读" :image-size="70" />
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="stats.pageNo"
+          :page-size="stats.pageSize"
+          :total="stats.total"
+          layout="total, prev, pager, next"
+          @current-change="loadReadStats"
+        />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -205,6 +234,7 @@ import {
   deleteAnnouncementFile,
   downloadAnnouncementFile,
   getAnnouncement,
+  getAnnouncementReadStats,
   listAnnouncementFiles,
   pageAnnouncements,
   publishAnnouncement,
@@ -213,9 +243,9 @@ import {
   withdrawAnnouncement,
 } from '@/api/oa'
 
-// 公告管理页（issue #48，菜单 521）：列表、富文本编辑、受众选择、附件、置顶、
-// 发布/撤回。富文本用轻量 contenteditable 编辑器（不新增依赖），服务端
-// bluemonday 白名单清洗后入库并在详情以清洗后的 HTML 返回。
+// 公告管理页（issue #48/#49，菜单 521）：列表、富文本编辑、受众选择、附件、
+// 置顶、发布/撤回、已读统计。富文本用轻量 contenteditable 编辑器（不新增
+// 依赖），服务端 bluemonday 白名单清洗后入库并在详情以清洗后的 HTML 返回。
 
 interface AnnouncementRow {
   id: number
@@ -248,6 +278,7 @@ const canCreate = computed(() => userStore.hasPerm('oa:announcement:create'))
 const canUpdate = computed(() => userStore.hasPerm('oa:announcement:update'))
 const canDelete = computed(() => userStore.hasPerm('oa:announcement:delete'))
 const canPublish = computed(() => userStore.hasPerm('oa:announcement:publish'))
+const canReadStats = computed(() => userStore.hasPerm('oa:announcement:read-stats'))
 
 const loading = ref(false)
 const rows = ref<AnnouncementRow[]>([])
@@ -493,6 +524,57 @@ async function openPreview(row: AnnouncementRow) {
   previewFiles.value = (await listAnnouncementFiles(row.id)) || []
 }
 
+// ---- 已读统计（issue #49，按钮 5215）----
+// 读数为服务端按 user_id 去重后的人数；名单分页按首次已读时间升序。
+interface AnnouncementReadUserRow {
+  userId: number
+  nickname: string
+  readAt: string
+}
+
+const stats = ref({
+  visible: false,
+  loading: false,
+  announcementId: 0,
+  title: '',
+  readCount: 0,
+  total: 0,
+  pageNo: 1,
+  pageSize: 10,
+  rows: [] as AnnouncementReadUserRow[],
+})
+
+function openReadStats(row: AnnouncementRow) {
+  stats.value = {
+    visible: true,
+    loading: false,
+    announcementId: row.id,
+    title: row.title,
+    readCount: 0,
+    total: 0,
+    pageNo: 1,
+    pageSize: 10,
+    rows: [],
+  }
+  loadReadStats()
+}
+
+async function loadReadStats() {
+  if (!stats.value.announcementId) return
+  stats.value.loading = true
+  try {
+    const data = await getAnnouncementReadStats(stats.value.announcementId, {
+      pageNo: stats.value.pageNo,
+      pageSize: stats.value.pageSize,
+    })
+    stats.value.rows = data.list || []
+    stats.value.readCount = data.readCount || 0
+    stats.value.total = data.total || 0
+  } finally {
+    stats.value.loading = false
+  }
+}
+
 onMounted(async () => {
   await loadOptions()
   await loadAnnouncements()
@@ -588,6 +670,15 @@ onMounted(async () => {
 }
 .withdrawn {
   color: var(--el-color-warning);
+  font-weight: 600;
+}
+.stats-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.stats-count {
   font-weight: 600;
 }
 </style>
