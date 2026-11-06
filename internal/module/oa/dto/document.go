@@ -12,8 +12,6 @@
 package dto
 
 import (
-	"io"
-
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
 
@@ -116,13 +114,4 @@ type DocumentFileItem struct {
 	UploaderName string `json:"uploaderName"`
 	CreateTime   string `json:"createTime"`
 	URL          string `json:"url"`
-}
-
-// DocumentFileContent 是文件下载内容（已通过目录读权限与文件归属校验）。
-// Reader 由调用方负责关闭（API 层流式写出后关闭）。
-type DocumentFileContent struct {
-	Name        string
-	ContentType string
-	Size        int64
-	Reader      io.ReadCloser
 }

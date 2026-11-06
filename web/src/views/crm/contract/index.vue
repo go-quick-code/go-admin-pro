@@ -225,15 +225,15 @@
             <span class="line-total">合计：{{ detail.totalAmount ?? '0.00' }} 元</span>
           </div>
         </el-tab-pane>
-        <!-- 审批记录（issue #47）：合同详情展示 bpm 时间线与当前待办入口；
+        <!-- 审批记录（issue #47/#64）：历次实例分组时间线与当前待办入口；
              审批动作统一在待办中心完成，合同页不再内嵌审批按钮。 -->
         <el-tab-pane label="审批记录" name="approval">
-          <template v-if="detail.approval">
+          <template v-if="currentApproval">
             <div class="approval-head">
               <span>
-                流程状态：
-                <el-tag :type="instanceStatusTag(detail.approval.instance.status)" size="small">
-                  {{ instanceStatusText(detail.approval.instance.status) }}
+                当前流程状态：
+                <el-tag :type="instanceStatusTag(currentApproval.instance.status)" size="small">
+                  {{ instanceStatusText(currentApproval.instance.status) }}
                 </el-tag>
               </span>
               <el-button
@@ -260,23 +260,8 @@
               </el-table>
             </div>
             <div class="approval-section">
-              <h4 class="approval-title">审批时间线</h4>
-              <el-timeline v-if="detail.approval.records.length">
-                <el-timeline-item
-                  v-for="rec in detail.approval.records"
-                  :key="rec.id"
-                  :timestamp="formatTime(rec.createTime)"
-                  :type="recordTag(rec.action) === 'success' ? 'success' : recordTag(rec.action) === 'danger' ? 'danger' : 'primary'"
-                >
-                  <div>
-                    <el-tag :type="recordTag(rec.action)" size="small">{{ recordText(rec.action) }}</el-tag>
-                    <span class="timeline-operator">{{ rec.operatorName || `用户#${rec.operatorId}` }}</span>
-                  </div>
-                  <div class="timeline-node">{{ rec.nodeName || '（实例级动作）' }}</div>
-                  <div v-if="rec.comment" class="timeline-comment">{{ rec.comment }}</div>
-                </el-timeline-item>
-              </el-timeline>
-              <el-empty v-else description="暂无审批记录（等待首个审批动作）" :image-size="60" />
+              <h4 class="approval-title">审批时间线（{{ approvalInstances.length }} 次）</h4>
+              <BpmApprovalHistory :approvals="approvalInstances" />
             </div>
           </template>
           <el-empty v-else description="尚未发起审批" :image-size="60" />
@@ -398,6 +383,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
+import BpmApprovalHistory from '@/components/BpmApprovalHistory.vue'
+import { approvalInstancesOf, currentApprovalOf } from '@/utils/bpm-record'
 import {
   formatTime,
   formatSize,
@@ -652,9 +639,12 @@ async function removeContractFile(row: any) {
   await loadContractFiles(detail.value.id)
 }
 
-// ---------- 审批记录 tab（issue #47）：bpm 时间线与当前待办入口 ----------
+// ---------- 审批记录 tab（issue #47/#64）：历次实例时间线与当前待办入口 ----------
+const approvalInstances = computed(() => approvalInstancesOf(detail.value))
+const currentApproval = computed(() => currentApprovalOf(detail.value))
+
 const pendingApprovalTasks = computed(() =>
-  ((detail.value?.approval?.tasks || []) as any[]).filter((task) => task.status === 0),
+  ((currentApproval.value?.tasks || []) as any[]).filter((task) => task.status === 0),
 )
 
 function instanceStatusText(status: number): string {
@@ -664,14 +654,6 @@ function instanceStatusTag(status: number): string {
   if (status === 1) return 'success'
   if (status === 2 || status === 3) return 'danger'
   return 'primary'
-}
-function recordText(action: number): string {
-  return ['通过', '驳回', '撤回', '转办'][action - 1] ?? `未知(${action})`
-}
-function recordTag(action: number): string {
-  if (action === 1) return 'success'
-  if (action === 2) return 'danger'
-  return 'warning'
 }
 
 const router = useRouter()
@@ -800,21 +782,5 @@ onMounted(async () => {
 }
 .approval-title {
   margin: 0 0 8px;
-}
-.timeline-operator {
-  margin-left: 8px;
-  font-weight: 600;
-}
-.timeline-node {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 2px;
-}
-.timeline-comment {
-  margin-top: 4px;
-  padding: 6px 8px;
-  background: #f5f7fa;
-  border-radius: 4px;
-  font-size: 13px;
 }
 </style>

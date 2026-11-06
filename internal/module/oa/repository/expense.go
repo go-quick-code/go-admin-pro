@@ -84,6 +84,17 @@ func (r *Repository) PageExpenseClaimsByScope(ctx context.Context, userIDs []int
 	return rows, total, nil
 }
 
+// CountExpenseItemsByCategory 统计当前租户某费用类别下未软删的明细行数
+// （租户条件由插件追加）。字典项删除引用检查用（issue #64 review，
+// spec §4.14：报销类别被引用时只能停用不能删除）。
+func (r *Repository) CountExpenseItemsByCategory(ctx context.Context, category string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.ExpenseItem{}).
+		Where("`category` = ?", category).
+		Count(&n).Error
+	return n, err
+}
+
 // ListExpenseItemsByClaim 读一张报销单的明细（sort ASC, id ASC）。
 func (r *Repository) ListExpenseItemsByClaim(ctx context.Context, claimID int64) ([]model.ExpenseItem, error) {
 	var rows []model.ExpenseItem

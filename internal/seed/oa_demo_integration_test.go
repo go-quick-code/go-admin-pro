@@ -129,8 +129,13 @@ func TestIntegrationOADemoSeed(t *testing.T) {
 	assertPageTotal(t, env, demo, "/oa/leave/request/page", 1, "demo 我的请假")
 	assertPageTotal(t, env, demo, "/oa/expense/claim/page", 1, "demo 我的报销")
 	assertPageTotal(t, env, demo, "/oa/attendance/result/mine", 5, "demo 我的考勤结果")
-	// 内置普通角色在 issue #63 授予 533/5331/5332：有 manage 码时看全租户结果。
-	assertPageTotal(t, env, demo, "/oa/attendance/result/page", 21, "demo 全租户考勤结果（oa:attendance:manage）")
+	// issue #64 review：内置普通角色不再持有考勤管理面（533/5331/5332），
+	// 全租户结果改由 seed-demo 的 hr 角色承载。
+	if status, _ := env.Request(t, http.MethodGet, "/oa/attendance/result/page", demo, nil); status != http.StatusForbidden {
+		t.Fatalf("demo 无 oa:attendance:result:query 读全租户结果应 403，实际 %d", status)
+	}
+	hr := env.Login(t, "hr", "123456")
+	assertPageTotal(t, env, hr, "/oa/attendance/result/page", 21, "hr 全租户考勤结果（oa:attendance:manage）")
 	assertPageTotal(t, env, demo, "/oa/room/booking/list", 1, "demo 我的会议")
 	assertPageTotal(t, env, admin, "/oa/leave/request/page", 2, "admin 全租户请假")
 	assertPageTotal(t, env, admin, "/oa/expense/claim/page", 2, "admin 全租户报销")

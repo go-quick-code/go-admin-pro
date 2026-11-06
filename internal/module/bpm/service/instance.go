@@ -875,6 +875,28 @@ func (s *Service) GetLatestInstanceDetailForBusiness(ctx context.Context, busine
 	return s.instanceDetailOf(ctx, inst)
 }
 
+// ListInstanceDetailsForBusiness 读业务记录的全部实例详情（spec §4.3：
+// 同一业务记录保留全部历史实例，详情页按时间倒序展示历次审批尝试）。
+// 访问判定由调用方按自己的业务数据权限完成后调用（与
+// GetInstanceDetailForBusiness 同款约定，不得直接暴露为 HTTP 接口）。
+// 无任何实例时返回空切片。Current 标记由业务模块回填（approval_instance_id
+// 或最新实例）。
+func (s *Service) ListInstanceDetailsForBusiness(ctx context.Context, businessType string, businessID int64) ([]dto.InstanceDetail, error) {
+	instances, err := s.repo.ListInstancesByBusiness(ctx, businessType, businessID)
+	if err != nil {
+		return nil, err
+	}
+	details := make([]dto.InstanceDetail, 0, len(instances))
+	for i := range instances {
+		detail, err := s.instanceDetailOf(ctx, &instances[i])
+		if err != nil {
+			return nil, err
+		}
+		details = append(details, *detail)
+	}
+	return details, nil
+}
+
 // FindRunningInstanceByBusinessInTx 在调用方事务内查业务记录运行中实例（issue #47）：
 // 存量 backfill 幂等判据与业务作废时终止实例的定位。无运行中实例返回 (nil, nil)。
 func (s *Service) FindRunningInstanceByBusinessInTx(ctx context.Context, tx *gorm.DB, businessType string, businessID int64) (*model.ProcessInstance, error) {

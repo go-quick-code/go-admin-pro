@@ -26,6 +26,7 @@ import (
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
@@ -525,8 +526,8 @@ func buildRoomReminderNotifies(booking *oamodel.RoomBooking, room *oamodel.Meeti
 			roomName += "（" + room.Location + "）"
 		}
 	}
-	title := truncateRunes("会议提醒："+booking.Title, 128)
-	content := truncateRunes(fmt.Sprintf("%s，时间 %s - %s",
+	title := text.TruncateRunes("会议提醒："+booking.Title, 128)
+	content := text.TruncateRunes(fmt.Sprintf("%s，时间 %s - %s",
 		roomName,
 		booking.StartTime.In(loc).Format(CalendarTimeLayout),
 		booking.EndTime.In(loc).Format(CalendarTimeLayout)), 500)

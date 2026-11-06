@@ -78,14 +78,6 @@ func (s *bpmApprovalService) Submit(ctx context.Context, tx *repository.Reposito
 	return nil
 }
 
-// unavailableApprovalService 是未装配审批引擎时的缺省实现：提交入口显式报错，
-// 不静默降级成直通审批（issue #47 移除直通路径）。
-type unavailableApprovalService struct{}
-
-func (unavailableApprovalService) Submit(context.Context, *repository.Repository, *model.Contract) error {
-	return xerr.Internal(errors.New("crm: 审批引擎未装配"))
-}
-
 // startContractApproval 在调用方事务内启动 crm_contract_approval 实例。
 // 标题/摘要快照只包含展示所需的最小业务信息（合同号/名称/客户/金额，ADR 0008）；
 // 发起人取 ctx 中的当前登录主体（存量 backfill 由调用方以合同负责人身份构造）。
@@ -140,14 +132,4 @@ func publishedContractDefinitionID(ctx context.Context, bpm *bpmservice.Service)
 		))
 	}
 	return rows[0].ID, nil
-}
-
-// SetApprovalService 注入审批依赖面实现（测试替身或自定义装配用；
-// 生产装配由 SetBPM 统一接线，见 customer.go/New 与 internal/app）。
-func (s *Service) SetApprovalService(a ApprovalService) {
-	if a == nil {
-		s.approvals = unavailableApprovalService{}
-		return
-	}
-	s.approvals = a
 }

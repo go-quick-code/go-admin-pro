@@ -24,6 +24,12 @@ type Service struct {
 
 	permCache sync.Map // map[int64]permSnapshot
 	failCache sync.Map // map[string]*loginFailState
+
+	// dictUsageMu 保护 dictUsageCheckers：字典项引用检查扩展点
+	//（issue #64 review，spec §4.14「被引用时只能停用」）。system 不反向依赖
+	// 业务模块，由业务模块在 internal/app 装配期按 dictType 注册计数函数。
+	dictUsageMu       sync.RWMutex
+	dictUsageCheckers map[string]func(ctx context.Context, code string) (int64, error)
 }
 
 func New(repo *repository.Repository, jwtManager *jwt.Manager, cfg *config.Config) *Service {

@@ -49,10 +49,10 @@ func newExpenseApprovalEnv(t *testing.T) *expenseApprovalEnv {
 	admin := env.Login(t, "admin", "123456")
 
 	employeeID, employee := createUserWithMenus(t, env, admin, "exp_emp", 101, []int64{
-		expenseMineMenuID, expenseCreate, expenseUpdate, expenseDelete, expenseSubmit,
+		expenseMineMenuID, expenseQuery, expenseCreate, expenseUpdate, expenseDelete, expenseSubmit,
 	})
 	leaderID, leader := createUserWithMenus(t, env, admin, "exp_leader", 101, []int64{
-		bpmTaskMenuID, bpmTaskHandleButton,
+		bpmTaskMenuID, bpmTaskHandleButton, expenseQuery,
 	})
 	_, manager := createUserWithMenus(t, env, admin, "exp_manager", 102, []int64{
 		bpmTaskMenuID, bpmTaskHandleButton, expenseMenuID, expenseManage,
@@ -355,6 +355,31 @@ func TestIntegrationExpenseRejectAndResubmit(t *testing.T) {
 	if task := findExpenseTodoTask(t, env, exp.leader, claimID, true); int64(task["id"].(float64)) <= 0 {
 		t.Fatalf("重提后应重新生成部门负责人待办：%+v", task)
 	}
+
+	// spec §4.3（issue #64 review）：详情返回全部历史实例，按 id 倒序，
+	// current 标记新实例；旧实例的驳回记录仍可追溯。
+	resubmittedDetail := mustExpenseDetail(t, env, exp.employee, claimID)
+	approvals, _ := resubmittedDetail["approvals"].([]any)
+	if len(approvals) != 2 {
+		t.Fatalf("重提后详情应有 2 条历史实例，实际 %d：%+v", len(approvals), approvals)
+	}
+	latest := approvals[0].(map[string]any)
+	latestInst := latest["instance"].(map[string]any)
+	if int64(latestInst["id"].(float64)) != secondInstance || latest["current"] != true {
+		t.Fatalf("首位应为当前新实例（id=%d, current=true）：%+v", secondInstance, latest)
+	}
+	history := approvals[1].(map[string]any)
+	historyInst := history["instance"].(map[string]any)
+	if int64(historyInst["id"].(float64)) != firstInstance || historyInst["status"].(float64) != 2 {
+		t.Fatalf("次位应为已驳回的旧实例（id=%d, status=2）：%+v", firstInstance, history)
+	}
+	if history["current"] != nil {
+		t.Fatalf("历史实例不应标记 current：%+v", history)
+	}
+	// 兼容字段 approval 仍指向当前实例。
+	if legacy := resubmittedDetail["approval"].(map[string]any); int64(legacy["instance"].(map[string]any)["id"].(float64)) != secondInstance {
+		t.Fatalf("approval 应指向当前实例 %d：%+v", secondInstance, legacy)
+	}
 }
 
 // summaryOf 取实例摘要文本。
@@ -443,7 +468,7 @@ func TestIntegrationExpenseVisibilityAndTenant(t *testing.T) {
 	mustSubmitExpenseClaim(t, env, exp.employee, employeeClaim)
 
 	outsiderID, outsider := createUserWithMenus(t, env, exp.admin, "exp_outsider", 103, []int64{
-		expenseMineMenuID, expenseCreate, expenseUpdate, expenseDelete, expenseSubmit,
+		expenseMineMenuID, expenseQuery, expenseCreate, expenseUpdate, expenseDelete, expenseSubmit,
 	})
 	outsiderClaim := createExpenseClaim(t, env, outsider, "局外人报销")
 	_ = outsiderID
@@ -536,7 +561,7 @@ func TestIntegrationExpenseSubmitWithoutDeptLeader(t *testing.T) {
 	env := exp.env
 	// 财务部（103）与总公司（100）均无负责人（用例只设置了 101）。
 	_, orphan := createUserWithMenus(t, env, exp.admin, "exp_orphan", 103, []int64{
-		expenseMineMenuID, expenseCreate, expenseSubmit,
+		expenseMineMenuID, expenseQuery, expenseCreate, expenseSubmit,
 	})
 	claimID := createExpenseClaim(t, env, orphan, "无负责人报销")
 

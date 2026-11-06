@@ -74,7 +74,6 @@
       :title="editor.id ? '编辑公告' : '新增公告'"
       width="860px"
       append-to-body
-      @opened="syncEditorContent"
     >
       <el-form label-width="90px">
         <el-form-item label="标题">
@@ -82,17 +81,21 @@
         </el-form-item>
         <el-form-item label="正文">
           <div class="rich-editor-wrap">
-            <div class="rich-toolbar">
-              <el-button size="small" @mousedown.prevent="execCommand('bold')"><b>B</b></el-button>
-              <el-button size="small" @mousedown.prevent="execCommand('italic')"><i>I</i></el-button>
-              <el-button size="small" @mousedown.prevent="execCommand('underline')"><u>U</u></el-button>
-              <el-button size="small" @mousedown.prevent="execCommand('insertUnorderedList')">• 列表</el-button>
-              <el-button size="small" @mousedown.prevent="execCommand('insertOrderedList')">1. 列表</el-button>
-              <el-button size="small" @mousedown.prevent="execCommand('formatBlock', 'h3')">小标题</el-button>
-              <el-button size="small" @mousedown.prevent="execCommand('formatBlock', 'p')">正文段</el-button>
-              <el-button size="small" @mousedown.prevent="insertLink">链接</el-button>
-            </div>
-            <div ref="editorRef" class="rich-editor" contenteditable="true" />
+            <!-- spec §6：富文本使用 wangEditor（Vue 3）；服务端 bluemonday 清洗
+                 仍是最终边界（脚本/事件等写入后会被移除）。 -->
+            <Toolbar
+              class="rich-toolbar"
+              :editor="editorIns"
+              :default-config="toolbarConfig"
+              mode="default"
+            />
+            <Editor
+              v-model="editorHtml"
+              class="rich-editor"
+              :default-config="editorConfig"
+              mode="default"
+              @onCreated="handleEditorCreated"
+            />
             <div class="field-hint">服务端会用 bluemonday 白名单清洗 HTML（脚本/事件等会被移除）。</div>
           </div>
         </el-form-item>
@@ -221,9 +224,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import '@wangeditor/editor/dist/css/style.css'
+import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import type { IDomEditor, IEditorConfig, IToolbarConfig } from '@wangeditor/editor'
 import { useUserStore } from '@/stores/user'
 import { listSimpleRoles, treeDepts } from '@/api/system'
 import { saveBlobAs } from '@/utils/download'
@@ -244,8 +250,8 @@ import {
 } from '@/api/oa'
 
 // 公告管理页（issue #48/#49，菜单 521）：列表、富文本编辑、受众选择、附件、
-// 置顶、发布/撤回、已读统计。富文本用轻量 contenteditable 编辑器（不新增
-// 依赖），服务端 bluemonday 白名单清洗后入库并在详情以清洗后的 HTML 返回。
+// 置顶、发布/撤回、已读统计。富文本使用 wangEditor（spec §6，Vue 3 组件），
+// 服务端 bluemonday 白名单清洗后入库并在详情以清洗后的 HTML 返回。
 
 interface AnnouncementRow {
   id: number
@@ -329,7 +335,24 @@ async function loadOptions() {
 }
 
 // ---- 编辑弹窗 ----
-const editorRef = ref<HTMLElement>()
+// wangEditor 实例（shallowRef：编辑器是复杂的非响应式对象，深层代理会破坏
+// 内部状态）与绑定 HTML。toolbar 排除图片/视频上传与全屏（服务端清洗不含
+// 内嵌媒体；全屏在弹窗内体验差）。
+const editorIns = shallowRef<IDomEditor>()
+const editorHtml = ref('')
+const toolbarConfig: Partial<IToolbarConfig> = {
+  excludeKeys: ['group-image', 'group-video', 'fullScreen'],
+}
+const editorConfig: Partial<IEditorConfig> = {
+  placeholder: '请输入公告正文…',
+}
+function handleEditorCreated(editor: IDomEditor) {
+  editorIns.value = editor
+}
+onBeforeUnmount(() => {
+  editorIns.value?.destroy()
+})
+
 const editor = ref({
   visible: false,
   saving: false,
@@ -343,13 +366,6 @@ const editor = ref({
   pinned: false,
 })
 const editorFiles = ref<Attachment[]>([])
-// pendingEditorContent 暂存待写入 contenteditable 的 HTML：弹窗渲染完成
-// （@opened）后再赋值，避免 nextTick 早于 teleport/过渡挂载导致内容丢失。
-const pendingEditorContent = ref('')
-
-function syncEditorContent() {
-  if (editorRef.value) editorRef.value.innerHTML = pendingEditorContent.value
-}
 
 function resetEditor() {
   editor.value = {
@@ -365,8 +381,7 @@ function resetEditor() {
     pinned: false,
   }
   editorFiles.value = []
-  pendingEditorContent.value = ''
-  nextTick(syncEditorContent)
+  editorHtml.value = ''
 }
 
 function openCreate() {
@@ -388,8 +403,7 @@ async function openEdit(row: AnnouncementRow) {
     roleIds: (detail.targets || []).filter((t: AnnouncementTarget) => t.targetType === 2).map((t: AnnouncementTarget) => t.targetId),
     pinned: detail.pinned,
   }
-  pendingEditorContent.value = detail.content || ''
-  nextTick(syncEditorContent)
+  editorHtml.value = detail.content || ''
   await loadEditorFiles(detail.id)
 }
 
@@ -397,20 +411,8 @@ async function loadEditorFiles(id: number) {
   editorFiles.value = (await listAnnouncementFiles(id)) || []
 }
 
-function execCommand(command: string, value?: string) {
-  document.execCommand(command, false, value)
-  editorRef.value?.focus()
-}
-
-function insertLink() {
-  const url = window.prompt('请输入链接地址（https://…）')
-  if (!url) return
-  document.execCommand('createLink', false, url)
-  editorRef.value?.focus()
-}
-
 async function saveAnnouncement() {
-  const content = editorRef.value?.innerHTML || ''
+  const content = editorHtml.value || ''
   if (!editor.value.title.trim()) {
     ElMessage.warning('请填写公告标题')
     return
@@ -606,18 +608,15 @@ onMounted(async () => {
   width: 100%;
 }
 .rich-toolbar {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-bottom: 6px;
+  border: 1px solid var(--el-border-color);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
 }
 .rich-editor {
-  min-height: 160px;
-  max-height: 360px;
-  overflow: auto;
+  height: 260px !important;
+  overflow-y: auto;
   border: 1px solid var(--el-border-color);
-  border-radius: 4px;
-  padding: 8px 10px;
+  border-radius: 0 0 4px 4px;
   line-height: 1.6;
 }
 .field-hint {

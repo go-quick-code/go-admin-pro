@@ -83,6 +83,11 @@ func seedOADemo(db *gorm.DB) error {
 		if err := oaDemoEnsureDeptLeaders(tx, users); err != nil {
 			return err
 		}
+		// HR 演示角色（issue #64 review）：内置普通角色只授员工基础菜单，
+		// 考勤结果/校正/全租户（533/5331/5332）改由 seed-demo 的 hr 角色承载。
+		if err := oaDemoSeedHRRole(tx); err != nil {
+			return err
+		}
 		if err := oaDemoSeedAnnouncements(tx, users); err != nil {
 			return err
 		}
@@ -189,6 +194,54 @@ func oaDemoEnsureDeptLeaders(tx *gorm.DB, users oaDemoOrg) error {
 			Update("leader_user_id", item.userID).Error; err != nil {
 			return fmt.Errorf("设置演示部门负责人 dept=%d: %w", item.deptID, err)
 		}
+	}
+	return nil
+}
+
+// oaDemoHRRoleCode / oaDemoHRUsername 是 seed-demo 创建的 HR 视角角色与账号。
+// 内置普通角色只授员工基础菜单（issue #64 review，spec §7.3），考勤管理面改由
+// 该角色承载；仅 `make run-demo` / GAP_SEED_DEMO=true 时写入。
+const (
+	oaDemoHRRoleCode = "hr"
+	oaDemoHRUsername = "hr"
+)
+
+// oaDemoSeedHRRole 幂等创建 HR 演示角色与账号，并补齐角色菜单：
+// OA 根目录、通用待办（含通知查询）、请假类型/额度（默认流程节点 2 的
+// oa:leave:manage）、班次/考勤组、考勤结果查询/校正/全租户、月度汇总。
+// 已有角色/账号时只补缺失的关联行，不覆盖管理员修改。
+func oaDemoSeedHRRole(tx *gorm.DB) error {
+	menus := []int64{500, 512, 5121, 5123, 522, 527, 530, 533, 5331, 5332, 534}
+	var role sysmodel.Role
+	err := tenant.Skip(tx).
+		Where("tenant_id = ? AND code = ?", oaDemoTenantID, oaDemoHRRoleCode).
+		First(&role).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		role = sysmodel.Role{
+			TenantID: oaDemoTenantID, Name: "HR 演示角色", Code: oaDemoHRRoleCode, Sort: 5,
+			DataScope: sysmodel.DataScopeAll, Status: sysmodel.StatusEnable, Type: 2,
+			Remark: "OA 演示：考勤结果/校正/全租户与月度汇总（seed-demo 创建）",
+		}
+		if err := tenant.Skip(tx).Create(&role).Error; err != nil {
+			return fmt.Errorf("创建 HR 演示角色: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("读取 HR 演示角色: %w", err)
+	}
+	for _, menuID := range menus {
+		row := sysmodel.RoleMenu{RoleID: role.ID, MenuID: menuID, TenantID: oaDemoTenantID}
+		if err := tenant.Skip(tx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+			return fmt.Errorf("绑定 HR 演示角色菜单 %d: %w", menuID, err)
+		}
+	}
+	user, err := oaDemoEnsureUser(tx, oaDemoHRUsername, "HR 演示", 100, "13800000014")
+	if err != nil {
+		return err
+	}
+	userRole := sysmodel.UserRole{UserID: user.ID, RoleID: role.ID, TenantID: oaDemoTenantID}
+	if err := tenant.Skip(tx).Clauses(clause.OnConflict{DoNothing: true}).Create(&userRole).Error; err != nil {
+		return fmt.Errorf("绑定 HR 演示账号角色: %w", err)
 	}
 	return nil
 }

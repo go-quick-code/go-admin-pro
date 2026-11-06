@@ -31,6 +31,7 @@ const (
 	leaveRequestSubmit   = int64(5294)
 	leaveRequestWithdraw = int64(5295)
 	leaveRequestCancel   = int64(5296)
+	leaveRequestQuery    = int64(5297)
 	bpmTaskMenuID        = int64(512)
 	bpmTaskHandleButton  = int64(5121)
 	leaveManageMenuID    = int64(522)
@@ -112,14 +113,14 @@ func newLeaveRequestEnv(t *testing.T) *leaveRequestEnv {
 	}
 
 	employeeID, employee := createUserWithMenus(t, env, admin, "leave_emp", 101, []int64{
-		leaveRequestMenuID, leaveRequestCreate, leaveRequestUpdate, leaveRequestDelete, leaveRequestSubmit,
+		leaveRequestMenuID, leaveRequestQuery, leaveRequestCreate, leaveRequestUpdate, leaveRequestDelete, leaveRequestSubmit,
 		leaveRequestWithdraw, leaveRequestCancel, leaveMineMenuID,
 	})
 	leaderID, leader := createUserWithMenus(t, env, admin, "leave_leader", 101, []int64{
-		bpmTaskMenuID, bpmTaskHandleButton, leaveRequestWithdraw, leaveRequestCancel,
+		bpmTaskMenuID, bpmTaskHandleButton, leaveRequestWithdraw, leaveRequestCancel, leaveRequestQuery,
 	})
 	_, manager := createUserWithMenus(t, env, admin, "leave_manager", 102, []int64{
-		bpmTaskMenuID, bpmTaskHandleButton, leaveManageMenuID,
+		bpmTaskMenuID, bpmTaskHandleButton, leaveManageMenuID, leaveRequestQuery,
 	})
 	setDeptLeader(t, env, admin, 101, leaderID)
 
@@ -424,6 +425,36 @@ func TestIntegrationLeaveRequestApprovalFlow(t *testing.T) {
 	if err := json.Unmarshal(api.Data, &page); err != nil || page.Total != 1 {
 		t.Fatalf("status=3 过滤应 1 条: %v（data=%s）", err, string(api.Data))
 	}
+
+	// 8) spec §4.3（issue #64 review）：驳回后重提创建新实例，详情保留全部
+	// 历史实例（倒序）且 current 指向新实例。放在列表断言之后，避免改变
+	// 第 7 步的状态过滤预期。
+	firstInstance := int64(rejected["approvalInstanceId"].(float64))
+	status, resubmitted, msg := submitLeave(t, env, le.employee, rejectID)
+	if status != http.StatusOK || msg != "" {
+		t.Fatalf("驳回后重提：HTTP %d msg %q", status, msg)
+	}
+	secondInstance := int64(resubmitted["approvalInstanceId"].(float64))
+	if secondInstance == firstInstance {
+		t.Fatalf("重提应生成新实例（旧 %d）", firstInstance)
+	}
+	historyDetail := mustLeaveDetail(t, env, le.employee, rejectID)
+	approvals, _ := historyDetail["approvals"].([]any)
+	if len(approvals) != 2 {
+		t.Fatalf("重提后详情应有 2 条历史实例，实际 %d：%+v", len(approvals), approvals)
+	}
+	latest := approvals[0].(map[string]any)
+	if int64(latest["instance"].(map[string]any)["id"].(float64)) != secondInstance || latest["current"] != true {
+		t.Fatalf("首位应为当前新实例（id=%d, current=true）：%+v", secondInstance, latest)
+	}
+	old := approvals[1].(map[string]any)
+	oldInst := old["instance"].(map[string]any)
+	if int64(oldInst["id"].(float64)) != firstInstance || oldInst["status"].(float64) != 2 {
+		t.Fatalf("次位应为已驳回的旧实例（id=%d, status=2）：%+v", firstInstance, old)
+	}
+	if old["current"] != nil {
+		t.Fatalf("历史实例不应标记 current：%+v", old)
+	}
 }
 
 // TestIntegrationLeaveRequestValidation 校验拒绝：半天方向、跨年、零工作日、
@@ -516,11 +547,15 @@ func TestIntegrationLeaveRequestPermissionAndTenant(t *testing.T) {
 		t.Fatalf("提交权限用例申请：HTTP %d msg %q", status, msg)
 	}
 
-	// 无码用户：查询登录即可，写动作全 403。
+	// 无码用户：列表/详情挂 oa:leave:query（spec §5，issue #64 review 补齐），
+	// 无码 403；写动作同样全 403。
 	noPermRole := createRoleWithMenus(t, env, le.admin, "leave_no_perm", []int64{1})
 	noPerm := oaLoginNewUser(t, env, le.admin, "leave_no_perm_u", noPermRole)
-	if status, _ := env.Request(t, http.MethodGet, "/oa/leave/request/page", noPerm, nil); status != http.StatusOK {
-		t.Fatalf("无码用户本人列表应 200，实际 HTTP %d", status)
+	if status, _ := env.Request(t, http.MethodGet, "/oa/leave/request/page", noPerm, nil); status != http.StatusForbidden {
+		t.Fatalf("无 oa:leave:query 读列表应 403，实际 HTTP %d", status)
+	}
+	if status, _ := getLeaveDetail(t, env, noPerm, requestID); status != http.StatusForbidden {
+		t.Fatalf("无 oa:leave:query 读详情应 403，实际 HTTP %d", status)
 	}
 	status, _ := env.Request(t, http.MethodPost, "/oa/leave/request", noPerm, map[string]any{
 		"leaveTypeId": le.annualTypeID, "startDate": "2026-11-13", "endDate": "2026-11-13", "reason": "x",
@@ -543,8 +578,8 @@ func TestIntegrationLeaveRequestPermissionAndTenant(t *testing.T) {
 	if status, _ := env.Request(t, http.MethodGet, fmt.Sprintf("/oa/leave/request/%d/files", requestID), le.manager, nil); status != http.StatusOK {
 		t.Fatalf("持 oa:leave:manage 的 HR 读附件应 200，实际 HTTP %d", status)
 	}
-	if status, _ := getLeaveDetail(t, env, noPerm, requestID); status != http.StatusNotFound {
-		t.Fatalf("范围外普通用户读详情应 404，实际 HTTP %d", status)
+	if status, _ := getLeaveDetail(t, env, noPerm, requestID); status != http.StatusForbidden {
+		t.Fatalf("无查询码读详情应 403，实际 HTTP %d", status)
 	}
 	if status, _ := env.Request(t, http.MethodGet, fmt.Sprintf("/oa/leave/request/%d/files", requestID), noPerm, nil); status != http.StatusNotFound {
 		t.Fatalf("范围外普通用户读附件应 404，实际 HTTP %d", status)

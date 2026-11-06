@@ -22,6 +22,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"gorm.io/gorm"
 )
@@ -33,8 +34,8 @@ func contractApprovalSnapshot(contractNo, contractName, customerName string, amo
 	if strings.TrimSpace(customerName) == "" {
 		customerName = "-"
 	}
-	title = truncateRunes(fmt.Sprintf("合同审批: %s", contractNo), bpmservice.MaxInstanceTitleLen)
-	summary = truncateRunes(
+	title = text.TruncateRunes(fmt.Sprintf("合同审批: %s", contractNo), bpmservice.MaxInstanceTitleLen)
+	summary = text.TruncateRunes(
 		fmt.Sprintf("客户：%s；合同：%s；金额：%s 元", customerName, contractName, amount.String()),
 		bpmservice.MaxInstanceSummaryLen,
 	)
@@ -43,16 +44,7 @@ func contractApprovalSnapshot(contractNo, contractName, customerName string, amo
 
 // truncateContractRejectReason 按列宽截断驳回原因（varchar(500)）。
 func truncateContractRejectReason(reason string) string {
-	return truncateRunes(strings.TrimSpace(reason), MaxContractRejectReasonLen)
-}
-
-// truncateRunes 按字符截断到 max 个字符（列宽按字符计，避免切坏多字节字符）。
-func truncateRunes(value string, max int) string {
-	runes := []rune(value)
-	if len(runes) <= max {
-		return value
-	}
-	return string(runes[:max])
+	return text.TruncateRunes(strings.TrimSpace(reason), MaxContractRejectReasonLen)
 }
 
 // ---------- bpm 回调（spec §4.4/§4.5）----------

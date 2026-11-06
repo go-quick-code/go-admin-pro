@@ -49,10 +49,12 @@ func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc) *
 // 统一前缀 /oa（docs/oa-mvp-spec.md §5）。
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	oa := rg.Group("/oa")
-	// 可见范围探测：返回当前用户在某类 OA 业务记录上的可见范围
-	//（spec §4.6：manage → 全租户；部门负责人 → 子树用户 ∪ 本人；否则仅本人）。
-	// 任何登录用户都可探知自己的可见范围（与 system 仪表盘/部门树同级的
-	// 登录即可用接口）；resource 未登记返回 400。
+	// 可见范围探测（issue #43 交付的 helper 调试面，issue #64 review 保留）：
+	// 返回当前用户在某类 OA 业务记录上的可见范围（spec §4.6：manage → 全租户；
+	// 部门负责人 → 子树用户 ∪ 本人；否则仅本人）。任何登录用户都可探知自己的
+	// 可见范围（与 system 仪表盘/部门树同级的登录即可用接口）；resource 未登记
+	// 返回 400。集成测试用它在各工单里断言可见范围口径，不承担业务数据读写，
+	// 因此不挂权限码、也不删除。
 	oa.GET("/visibility-scope", h.GetVisibilityScope)
 
 	// 工作日历（issue #50，菜单种子 520 段）：管理端按月查看与维护；
@@ -156,14 +158,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	announcement.POST("/:id/files", h.requirePermission(announcementUpdate), h.UploadAnnouncementFile)
 	announcement.DELETE("/:id/files/:fileId", h.requirePermission(announcementUpdate), h.DeleteAnnouncementFile)
 
-	// 请假申请（issue #52/#53，菜单种子 529 段）：列表/详情/附件查看登录即可
-	//（服务层按 §4.6 可见范围收口：manage → 全租户、部门负责人 → 子树、
-	// 否则本人；范围外/跨租户 404）；写动作逐码——创建/编辑/删除/提交/
+	// 请假申请（issue #52/#53，菜单种子 529 段；查询码 5297 为 issue #64
+	// review 补齐）：列表/详情挂 oa:leave:query（spec §5），服务层再按 §4.6
+	// 可见范围收口（manage → 全租户、部门负责人 → 子树、否则本人；范围外/
+	// 跨租户 404）；附件查看登录即可。写动作逐码——创建/编辑/删除/提交/
 	// 撤回/取消，附件上传与删除跟随编辑码（oa:leave:update）。审批走通用
 	// 待办（/bpm/task/*），本组不提供审批接口（spec §5：审批人的动作由 bpm 收口）。
 	request := leave.Group("/request")
-	request.GET("/page", h.PageLeaveRequests)
-	request.GET("/:id", h.GetLeaveRequestDetail)
+	request.GET("/page", h.requirePermission("oa:leave:query"), h.PageLeaveRequests)
+	request.GET("/:id", h.requirePermission("oa:leave:query"), h.GetLeaveRequestDetail)
 	request.POST("", h.requirePermission("oa:leave:create"), h.CreateLeaveRequest)
 	request.PUT("", h.requirePermission("oa:leave:update"), h.UpdateLeaveRequest)
 	request.DELETE("/:id", h.requirePermission("oa:leave:delete"), h.DeleteLeaveRequest)
@@ -175,14 +178,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	request.POST("/:id/files", h.requirePermission("oa:leave:update"), h.UploadLeaveRequestFile)
 	request.DELETE("/:id/files/:fileId", h.requirePermission("oa:leave:update"), h.DeleteLeaveRequestFile)
 
-	// 报销单（issue #54/#55，菜单种子 523/535 段）：列表/详情/附件查看登录即可
-	//（服务层按 §4.6 可见范围收口：manage → 全租户、部门负责人 → 子树、
-	// 否则本人；范围外/跨租户 404）；写动作逐码——创建/编辑/删除/提交，附件
-	// 上传与删除跟随编辑码（oa:expense:update）。审批动作走通用待办
-	//（/bpm/task/*、/bpm/instance/:id/withdraw），本组不提供审批接口。
+	// 报销单（issue #54/#55，菜单种子 523/535 段；查询码 5236 为 issue #64
+	// review 补齐）：列表/详情挂 oa:expense:query（spec §5），服务层再按
+	// §4.6 可见范围收口（manage → 全租户、部门负责人 → 子树、否则本人；
+	// 范围外/跨租户 404）；附件查看登录即可。写动作逐码——创建/编辑/删除/
+	// 提交，附件上传与删除跟随编辑码（oa:expense:update）。审批动作走通用
+	// 待办（/bpm/task/*、/bpm/instance/:id/withdraw），本组不提供审批接口。
 	claim := oa.Group("/expense/claim")
-	claim.GET("/page", h.PageExpenseClaims)
-	claim.GET("/:id", h.GetExpenseClaimDetail)
+	claim.GET("/page", h.requirePermission("oa:expense:query"), h.PageExpenseClaims)
+	claim.GET("/:id", h.requirePermission("oa:expense:query"), h.GetExpenseClaimDetail)
 	claim.POST("", h.requirePermission("oa:expense:create"), h.CreateExpenseClaim)
 	claim.PUT("", h.requirePermission("oa:expense:update"), h.UpdateExpenseClaim)
 	claim.DELETE("/:id", h.requirePermission("oa:expense:delete"), h.DeleteExpenseClaim)

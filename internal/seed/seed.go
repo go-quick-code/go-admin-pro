@@ -342,6 +342,9 @@ func seedMenus(db *gorm.DB) error {
 		btn(5294, 529, "请假提交", "oa:leave:submit", 4),
 		btn(5295, 529, "请假撤回", "oa:leave:withdraw", 5),
 		btn(5296, 529, "请假取消", "oa:leave:cancel", 6),
+		// 请假查询码（issue #64 review，spec §5）：列表/详情接口的查询门槛；
+		// 菜单本身无权限码，员工侧页面必须显式授予本按钮才可读列表/详情。
+		btn(5297, 529, "请假查询", "oa:leave:query", 7),
 
 		// 报销（issue #54）：523 报销（管理/财务入口，查询码挂菜单；spec §7.2 的
 		// 504 段在本仓库协调台账改为 523 段）+ 535 我的报销（员工侧空位自取：
@@ -357,6 +360,10 @@ func seedMenus(db *gorm.DB) error {
 		btn(5233, 523, "报销删除", "oa:expense:delete", 3),
 		btn(5234, 523, "报销提交", "oa:expense:submit", 4),
 		btn(5235, 523, "报销管理", "oa:expense:manage", 5),
+		// 报销查询码（issue #64 review，spec §5）：员工侧 535 菜单无权限码，
+		// 列表/详情接口挂 oa:expense:query，需显式授予本按钮（管理菜单 523
+		// 本身也携带该码，供财务/管理员使用）。
+		btn(5236, 523, "报销查询", "oa:expense:query", 6),
 		menu(535, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 13),
 
 		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
@@ -573,13 +580,15 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 532},
 		{RoleID: 2, MenuID: 531},
 		// 报销员工侧（issue #54，spec §7.3「内置普通角色授予…报销…的基础菜单」）：
-		// 我的报销页面 + 草稿创建/编辑/删除/提交按钮码；不含管理菜单 523 与
-		// oa:expense:manage（财务/管理员）。
+		// 我的报销页面 + 草稿创建/编辑/删除/提交按钮码 + 查询码 5236
+		//（issue #64 review：列表/详情接口挂 oa:expense:query，535 菜单本身
+		// 无权限码）；不含管理菜单 523 与 oa:expense:manage（财务/管理员）。
 		{RoleID: 2, MenuID: 535},
 		{RoleID: 2, MenuID: 5231},
 		{RoleID: 2, MenuID: 5232},
 		{RoleID: 2, MenuID: 5233},
 		{RoleID: 2, MenuID: 5234},
+		{RoleID: 2, MenuID: 5236},
 		// 日程员工侧（issue #56，spec §7.3「内置普通角色授予…日程…的基础
 		// 菜单」）：我的日程页面（536，携带 oa:calendar:query）+ 创建/编辑/
 		// 取消按钮码；不含 524 管理菜单与 5244 公开日程码（公开日程需要
@@ -599,8 +608,8 @@ func seedRoles(db *gorm.DB) error {
 		//（顶层目录创建与全租户管理由管理员另行授予）。
 		{RoleID: 2, MenuID: 537},
 		// 请假员工侧（issue #63 收口）：我的额度（528）与我的请假（529）+
-		// 创建/编辑/删除/提交/撤回/取消按钮码。此前 #52/#53 只登记了菜单与
-		// 按钮，未并入内置普通角色，演示账号见不到「请假」「撤回」「取消」。
+		// 创建/编辑/删除/提交/撤回/取消按钮码 + 查询码 5297（issue #64
+		// review：列表/详情接口挂 oa:leave:query）。
 		{RoleID: 2, MenuID: 528},
 		{RoleID: 2, MenuID: 529},
 		{RoleID: 2, MenuID: 5291},
@@ -609,12 +618,14 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 5294},
 		{RoleID: 2, MenuID: 5295},
 		{RoleID: 2, MenuID: 5296},
-		// 考勤结果页与校正/全租户按钮（issue #63 演示要求）：内置普通角色在
-		// 演示环境需要能看到考勤结果、校正与全租户结果；生产如不需要，可在
-		// 「角色管理」中回收 5331/5332。员工自助页 531（含本月汇总）此前已授予。
-		{RoleID: 2, MenuID: 533},
-		{RoleID: 2, MenuID: 5331},
-		{RoleID: 2, MenuID: 5332},
+		{RoleID: 2, MenuID: 5297},
+		// 顶栏通知铃铛（issue #64 review）：notify:message:query 挂在 5123
+		// 按钮，此前未授予普通角色，NotifyBell 轮询 403；普通角色需要读本人通知。
+		{RoleID: 2, MenuID: 5123},
+		// 注意（issue #64 review，spec §7.3「普通角色只授基础菜单」）：
+		// 考勤结果页 533 与校正/全租户 5331/5332 是管理面，不再授予内置普通角色；
+		// 员工自助页 531（含本人结果与本月汇总）已在上方授予。演示环境需要 HR
+		// 视角时使用 seed-demo 创建的内置 hr 角色（见 internal/seed/oa_demo.go）。
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }

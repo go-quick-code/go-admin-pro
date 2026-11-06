@@ -13,6 +13,7 @@ import (
 
 	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 )
 
 // expenseClaimNo 返回报销单展示单号（BX-000123）：6 位定宽，超宽自然增长。
@@ -29,9 +30,9 @@ func expenseApprovalSnapshot(claimNo, title, deptName string, amount money.Money
 	if strings.TrimSpace(deptName) == "" {
 		deptName = "未知部门"
 	}
-	titleSnap := truncateRunes(fmt.Sprintf("报销审批：%s %s", claimNo, strings.TrimSpace(title)),
+	titleSnap := text.TruncateRunes(fmt.Sprintf("报销审批：%s %s", claimNo, strings.TrimSpace(title)),
 		bpmservice.MaxInstanceTitleLen)
-	summarySnap := truncateRunes(
+	summarySnap := text.TruncateRunes(
 		fmt.Sprintf("单号：%s；部门：%s；金额：%s 元；事由：%s",
 			claimNo, deptName, amount.String(), strings.TrimSpace(reason)),
 		bpmservice.MaxInstanceSummaryLen,

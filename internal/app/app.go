@@ -93,7 +93,8 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	sysSvc := systemservice.New(sysRepo, jwtManager, cfg)
 
 	infraRepo := infrarepo.New(db)
-	scheduler := infraservice.NewJobScheduler(infraRepo)
+	// 定时任务按应用时区解释 cron 表达式（spec §4.10：每日 01:00 应用时区）。
+	scheduler := infraservice.NewJobScheduler(infraRepo, cfg.Location())
 	infraSvc := infraservice.New(infraRepo, cfg, scheduler)
 
 	// 注册日志清理任务，可在“定时任务”中把 handlerName 配置为 cleanLogs。
@@ -173,11 +174,22 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 业务时区（ADR 0006）：考勤打卡日期（issue #60）与请假取消窗口
 	// （issue #53）都按 app.timezone 取「今天」。
 	oaSvc.SetLocation(cfg.Location())
-	oaSvc.SetAnnouncementFileStore(announcementFileStore{infra: infraSvc})
+	// 附件适配器（issue #64 review 去重）：公告/请假/报销共用 bizFileStore，
+	// 文档文件用固定归属键（oa_document + 目录 ID）的薄封装。
+	fileStore := bizFileStore{infra: infraSvc}
+	oaSvc.SetAnnouncementFileStore(fileStore)
 	// 文档文件（issue #59）：归属行 oa_document_file + 文件本体 infra_file
 	//（biz_type=oa_document、biz_id=目录 ID）；下载经 OA 鉴权端点，不走公开直链。
-	oaSvc.SetDocumentFileStore(documentFileStore{infra: infraSvc})
+	oaSvc.SetDocumentFileStore(newDocumentFileStore(infraSvc))
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
+
+	// 字典项引用检查（issue #64 review，spec §4.14）：system 只提供按
+	// dictType 的扩展点，OA 在此登记报销类别的引用计数（oa_expense_item
+	// 明细行）。被引用的字典项删除返回 409，提示改为停用；检查用租户插件
+	// 过滤当前租户，不会把别家租户的引用算进来。
+	sysSvc.RegisterDictUsageChecker(oaservice.ExpenseCategoryDictType, func(ctx context.Context, code string) (int64, error) {
+		return repository.New(db).CountExpenseItemsByCategory(ctx, code)
+	})
 
 	// bpm 模块（issue #44 定义管理，#46 运行引擎）：BusinessHandler 注册表在
 	// 装配期建立；spec §4.4：未注册 business_type 的定义不允许发布/发起。
@@ -200,12 +212,12 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 附件复用 infra_file（biz_type=oa_leave）。
 	oaSvc.SetBPM(bpmSvc)
 	oaSvc.SetAPIPrefix(cfg.App.APIPrefix)
-	oaSvc.SetLeaveFileStore(leaveFileStore{infra: infraSvc})
+	oaSvc.SetLeaveFileStore(fileStore)
 	// 报销单（issue #54/#55）：草稿/明细闭环（#54）与提交/审批回调（#55）共用
 	// 同一状态机。提交在业务事务内经 StartInstanceInTx 发起 oa_expense_approval；
 	// 报销用独立适配器注册回调（oa.Service 已注册为请假审批处理器，一个对象
 	// 不能绑定两套回调语义）。附件复用 infra_file（biz_type=oa_expense）。
-	oaSvc.SetExpenseFileStore(expenseFileStore{infra: infraSvc})
+	oaSvc.SetExpenseFileStore(fileStore)
 	bpmSvc.RegisterBusinessHandler(oaservice.LeaveApprovalBusinessType, oaSvc)
 	bpmSvc.RegisterBusinessHandler(oaservice.ExpenseApprovalBusinessType, oaservice.NewExpenseApprovalHandler(oaSvc))
 

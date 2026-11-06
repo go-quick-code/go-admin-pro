@@ -25,6 +25,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/dto"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -413,8 +414,8 @@ func (s *Service) resolveAudienceRecipients(ctx context.Context, tx *repository.
 // （spec §4.7：发布时在事务内为受众批量写通知；通知标题列 128 字截断）。
 func buildAnnouncementNotifies(row *oamodel.Announcement, userIDs []int64) []notifyservice.Input {
 	inputs := make([]notifyservice.Input, 0, len(userIDs))
-	title := truncateRunes("新公告："+row.Title, announcementNotifyTitleLen)
-	content := truncateRunes(row.Title, 500)
+	title := text.TruncateRunes("新公告："+row.Title, announcementNotifyTitleLen)
+	content := text.TruncateRunes(row.Title, 500)
 	routeParams := fmt.Sprintf(`{"id":%d}`, row.ID)
 	for _, userID := range userIDs {
 		inputs = append(inputs, notifyservice.Input{
