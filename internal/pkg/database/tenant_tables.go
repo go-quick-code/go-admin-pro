@@ -112,4 +112,9 @@ var TenantTables = []string{
 	// append-only，租户只能看自己的日志，跨租户 ID 一律 404。
 	// 渠道/模板是平台级表，刻意不登记（系统级读取显式 tenant.Skip）。
 	"message_log",
+
+	// 社交账号绑定（issue #76，迁移 00025，spec §3.6/§4.4）：绑定关系按租户
+	// 隔离——不同租户可绑定同一 openid 的不同本地用户，跨租户绑定 ID 一律
+	// 404。system_social_client 是平台级表，刻意不登记。
+	"system_social_user",
 }

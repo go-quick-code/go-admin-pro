@@ -19,12 +19,13 @@ import (
 
 // Handler 是 system 模块的 HTTP 入口。
 type Handler struct {
-	svc *service.Service
-	cfg *config.Config
+	svc    *service.Service
+	social *service.SocialService // 社交登录（issue #76），New 注入
+	cfg    *config.Config
 }
 
-func New(svc *service.Service, cfg *config.Config) *Handler {
-	return &Handler{svc: svc, cfg: cfg}
+func New(svc *service.Service, social *service.SocialService, cfg *config.Config) *Handler {
+	return &Handler{svc: svc, social: social, cfg: cfg}
 }
 
 // ---------- 中间件 ----------
