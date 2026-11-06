@@ -389,6 +389,21 @@ func seedMenus(db *gorm.DB) error {
 		btn(5244, 524, "公开日程", "oa:calendar:public", 4),
 		menu(536, 500, "我的日程", "calendar-mine", "oa/calendar/index", "oa:calendar:query", "Calendar", 15),
 
+		// 会议室与预约（issue #57）：525 段（协调台账分配；grep 去重确认
+		// 525/5251–5252 未被占用）。会议室查询/详情与预约列表挂
+		// oa:room:query；会议室 CRUD/启停/删除挂 oa:room:manage（按钮 5251，
+		// 有未来有效预约时删除返回 409，只能停用）；创建预约挂
+		// oa:room:booking（按钮 5252）。管理端预约视图 538 与员工入口
+		// 「我的会议」539 从 500–549 空位自取（523/524/526/529–537 已占用，
+		// 其中 537 是 #58 我的文档；grep 去重取 538/539）；两页复用同一
+		// oa/room/booking 组件——无 oa:room:manage 的查看者由后端强制只看
+		// 本人预约。普通角色授予 539 + 5252 即可预约并查看自己的会议。
+		menu(525, 500, "会议室管理", "room", "oa/room/index", "oa:room:query", "OfficeBuilding", 18),
+		btn(5251, 525, "会议室维护", "oa:room:manage", 1),
+		btn(5252, 525, "预约会议", "oa:room:booking", 2),
+		menu(538, 500, "会议室预约", "room-booking", "oa/room/booking", "oa:room:query", "Calendar", 19),
+		menu(539, 500, "我的会议", "room-mine", "oa/room/booking", "oa:room:query", "Clock", 20),
+
 		// 文档目录与 ACL（issue #58，spec §3.8/§4.12）：526 段（协调台账分配；
 		// grep 去重确认 525/526/5261–5263/537 未被占用）。查询码挂菜单（目录树
 		// 入口）；5261 创建目录（顶层必须带显式 ACL）；5262 是管理旁路码
@@ -396,7 +411,8 @@ func seedMenus(db *gorm.DB) error {
 		// 码预留给 #59（本工单只建 file 表 schema）。员工侧「我的文档」537 复用
 		// 同一页面（500–549 空位自取：523 报销/524 日程/529 我的请假/530 考勤组/
 		// 531 我的考勤/532 我的公告/533 考勤结果/534 考勤汇总/535 我的报销/
-		// 536 我的日程已占用，grep 去重取 537），只挂查询码，可见目录按 ACL 过滤。
+		// 536 我的日程/538 会议室预约/539 我的会议已占用，grep 去重取 537），
+		// 只挂查询码，可见目录按 ACL 过滤。
 		menu(526, 500, "文档", "document", "oa/document/index", "oa:document:query", "FolderOpened", 16),
 		btn(5261, 526, "目录创建", "oa:document:create", 1),
 		btn(5262, 526, "目录管理", "oa:document:manage", 2),
@@ -559,6 +575,11 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 5241},
 		{RoleID: 2, MenuID: 5242},
 		{RoleID: 2, MenuID: 5243},
+		// 会议室员工侧（issue #57）：我的会议页面（539，携带 oa:room:query）
+		// + 预约按钮码 5252（oa:room:booking）；不含 525 管理菜单与
+		// oa:room:manage（会议室维护与全租户预约查看）。
+		{RoleID: 2, MenuID: 539},
+		{RoleID: 2, MenuID: 5252},
 		// 文档员工侧（issue #58，spec §7.3「内置普通角色授予…文档…的基础
 		// 菜单」）：我的文档页面（537，携带 oa:document:query），可见目录由
 		// 目录 ACL 过滤；不含 526 管理菜单、5261 创建与 5262 管理码
@@ -758,8 +779,27 @@ func seedJobs(db *gorm.DB) error {
 			Status: inframodel.JobStatusRunning,
 			Remark: "每天 01:00 生成前一日考勤结果（按启用租户迭代）；handler_param 可填 YYYY-MM-DD 回填指定日期",
 		},
+		// 会议提醒（issue #57，spec §4.11）：每 5 分钟扫描 (now, now+15m]
+		// 内开始的有效预约，向预约人写 meeting_reminder 通知；reminded_at
+		// 条件更新保证只发一次。默认启用（非破坏性）。
+		{
+			TenantID:       1,
+			Name:           "会议提醒",
+			HandlerName:    "oaRoomBookingReminder",
+			CronExpression: "0 */5 * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每 5 分钟扫描 15 分钟内开始的会议室预约，向预约人发送 meeting_reminder 通知（reminded_at 保证只发一次）；handler_param 可填 YYYY-MM-DD HH:mm:ss 固定现在",
+		},
 	}
-	return tenant.Skip(db).Create(&jobs).Error
+	if err := tenant.Skip(db).Create(&jobs).Error; err != nil {
+		return err
+	}
+	// GORM 对带 `default:1` 标签的零值 Status 会落库默认值 1（暂停），显式
+	// 把会议提醒任务改回启用（0），保证「infra_job 种子默认启用」（#57）。
+	return tenant.Skip(db).Model(&inframodel.Job{}).
+		Where("`handler_name` = ?", "oaRoomBookingReminder").
+		Update("`status`", inframodel.JobStatusRunning).Error
 }
 
 // seedPoolConfigs 写入租户 1 的公海配置默认行（issue #14）：
