@@ -43,9 +43,12 @@ type App struct {
 	Engine    *gin.Engine
 	Scheduler *infraservice.JobScheduler
 	// BPM 是 bpm 模块的 Service（issue #44）：BusinessHandler 注册接缝——
-	// spec §4.4 要求业务回调由 internal/app 装配时注册（#46/#47 落地真实
-	// handler 后在此接线）；集成测试经该字段注册测试替身。
+	// spec §4.4 要求业务回调由 internal/app 装配时注册（#47 起合同审批在此
+	// 接线）；集成测试经该字段注册测试替身。
 	BPM *bpmservice.Service
+	// CRM 是 crm 模块的 Service（issue #47）：存量合同审批 backfill 命令与
+	// 集成测试经该字段调用业务服务。
+	CRM *crmservice.Service
 }
 
 // New 初始化数据库、模块与 HTTP 引擎。
@@ -177,6 +180,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	bpmSvc := bpmservice.New(bpmrepo.New(db), bpmSystemGateway{sys: sysSvc}, notifySvc)
 	bpmAPI := bpmapi.New(bpmSvc, sysAPI.RequirePermission)
 
+	// 合同审批（issue #47，spec §4.5）：CRM → bpm 单向依赖——提交在合同事务内
+	// 经 StartInstanceInTx 发起 crm_contract_approval，bpm 在通过/驳回/撤回的
+	// 同一事务回调 crmSvc（OnApproved/OnRejected/OnWithdrawn）。合同状态端点
+	// 只保留提交/作废，审批统一在待办中心完成。
+	crmSvc.SetBPM(bpmSvc)
+	bpmSvc.RegisterBusinessHandler(crmservice.ContractApprovalBusinessType, crmSvc)
+
 	// 请假申请（issue #52/#53）：OA → bpm 单向依赖——提交在业务事务内经
 	// StartInstanceInTx 发起审批，bpm 在通过/驳回/撤回的同一事务回调 oaSvc
 	// （OnApproved/OnRejected/OnWithdrawn）。撤回复用 bpm 撤回入口；
@@ -207,7 +217,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc}, nil
 }
 
 // Close 释放资源。

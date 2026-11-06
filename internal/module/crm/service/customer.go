@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
@@ -46,9 +47,12 @@ type Service struct {
 	// contracts 是公海回收的合同排除依赖面（#14 接点，#16 落地后由 app 装配处
 	// SetContractChecker 注入真实实现，缺省 NoopContractChecker 恒「无合同」）。
 	contracts ContractChecker
-	// approvals 是合同审批依赖面（#16，v1 直通实现，bpm 上线后 SetApprovalService
-	// 替换，见 approval.go 文件头注释）。
+	// approvals 是合同审批依赖面（#16 接缝；#47 起由 SetBPM 装配 bpm 实现，
+	// 未装配时提交入口显式报错，不再有直通审批，见 approval.go）。
 	approvals ApprovalService
+	// bpm 是审批引擎（issue #47）：提交/详情与 BusinessHandler 回调的接点。
+	// CRM → bpm 单向依赖，bpm 不反向依赖业务模块（ADR 0008/0009）。
+	bpm *bpmservice.Service
 	// voidGuard 是作废/删除合同的守卫扩展点（#16 预留，#18 接
 	// 「有回款记录禁止作废/删除」，见 contract_guard.go）。
 	voidGuard VoidContractGuard
@@ -72,19 +76,27 @@ type Service struct {
 	productImports  *excel.ImportGuard[dto.ProductImportRow]
 }
 
-// New 创建 crm Service。合同回收排除缺省空实现（真实实现由 app 装配处注入）；
-// 审批缺省 v1 直通实现；作废守卫缺省空实现；导入 guard 使用固定限额与默认并发。
+// New 创建 crm Service。合同审批缺省「未装配」实现（internal/app 装配时
+// SetBPM 注入 bpm 引擎）；合同回收排除缺省空实现（真实实现由 app 装配处注入）；
+// 作废守卫缺省空实现；导入 guard 使用固定限额与默认并发。
 func New(repo *repository.Repository, sys SystemGateway) *Service {
 	return &Service{
 		repo:            repo,
 		sys:             sys,
 		clock:           time.Now,
 		contracts:       NoopContractChecker{},
-		approvals:       NewPassthroughApprovalService(sys),
+		approvals:       unavailableApprovalService{},
 		customerImports: excel.NewImportGuard[dto.CustomerImportRow](excel.GuardDefaultConcurrent),
 		contactImports:  excel.NewImportGuard[dto.ContactImportRow](excel.GuardDefaultConcurrent),
 		productImports:  excel.NewImportGuard[dto.ProductImportRow](excel.GuardDefaultConcurrent),
 	}
+}
+
+// SetBPM 注入审批引擎（internal/app 装配处调用）：提交走 bpm 实例，审批结果
+// 经注册的 BusinessHandler 同事务回写合同（issue #47）。同时替换审批依赖面。
+func (s *Service) SetBPM(engine *bpmservice.Service) {
+	s.bpm = engine
+	s.approvals = NewBPMApprovalService(engine)
 }
 
 // ListCustomers 分页查询客户，按数据范围谓词过滤（行级权限引擎，见 internal/pkg/datascope）：

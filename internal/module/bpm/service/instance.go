@@ -860,6 +860,102 @@ func (s *Service) GetInstanceDetailForBusiness(ctx context.Context, id int64) (*
 	return s.instanceDetailOf(ctx, inst)
 }
 
+// GetLatestInstanceDetailForBusiness 读业务记录最近一次实例的详情（issue #47）：
+// 业务详情页展示审批时间线与当前待办。访问判定由调用方按自己的业务数据权限
+// 完成后调用（与 GetInstanceDetailForBusiness 同款约定，不得直接暴露为 HTTP 接口）。
+// 业务记录从未发起过审批时返回 (nil, nil)。
+func (s *Service) GetLatestInstanceDetailForBusiness(ctx context.Context, businessType string, businessID int64) (*dto.InstanceDetail, error) {
+	inst, err := s.repo.FindLatestInstanceByBusiness(ctx, businessType, businessID)
+	if err != nil {
+		return nil, err
+	}
+	if inst == nil {
+		return nil, nil
+	}
+	return s.instanceDetailOf(ctx, inst)
+}
+
+// FindRunningInstanceByBusinessInTx 在调用方事务内查业务记录运行中实例（issue #47）：
+// 存量 backfill 幂等判据与业务作废时终止实例的定位。无运行中实例返回 (nil, nil)。
+func (s *Service) FindRunningInstanceByBusinessInTx(ctx context.Context, tx *gorm.DB, businessType string, businessID int64) (*model.ProcessInstance, error) {
+	if tx == nil {
+		return nil, xerr.Internal(errors.New("bpm: FindRunningInstanceByBusinessInTx 需要事务句柄"))
+	}
+	return repository.New(tx).FindRunningInstanceByBusiness(ctx, businessType, businessID)
+}
+
+// CancelInstanceInTx 业务侧终止运行中实例（issue #47：合同作废时审批流程自动
+// 终止）：跳过「仅发起人可撤回」判定（业务单据的生命周期由业务模块负责），
+// 记录一条撤回动作、取消全部待办、实例置撤回，并在同一事务内回调 OnWithdrawn，
+// 与业务状态同生共死。无运行中实例返回 (false, nil)；已结束实例不再变更。
+func (s *Service) CancelInstanceInTx(ctx context.Context, tx *gorm.DB, instanceID int64, comment string) (bool, error) {
+	if tx == nil {
+		return false, xerr.Internal(errors.New("bpm: CancelInstanceInTx 需要调用方事务句柄"))
+	}
+	operator, err := requireOperator(ctx)
+	if err != nil {
+		return false, err
+	}
+	if err := validateComment(comment, false); err != nil {
+		return false, err
+	}
+	comment = strings.TrimSpace(comment)
+
+	repo := repository.New(tx)
+	inst, err := repo.FindInstanceByIDForUpdate(ctx, instanceID)
+	if err != nil {
+		return false, err
+	}
+	if inst == nil {
+		return false, xerr.NotFound("流程实例不存在")
+	}
+	if inst.Status != model.InstanceStatusRunning {
+		return false, nil
+	}
+	handler, ok := s.handlerFor(inst.BusinessType)
+	if !ok {
+		return false, xerr.Internal(fmt.Errorf("bpm: 业务类型 %s 未注册处理器", inst.BusinessType))
+	}
+
+	// 取消后查不到待办，先收集（按办理人分组消化 bpm_todo 通知）。
+	todos, err := repo.ListInstanceTodoTasks(ctx, inst.ID)
+	if err != nil {
+		return false, err
+	}
+
+	now := time.Now()
+	if err := repo.CreateRecord(ctx, &model.ApprovalRecord{
+		InstanceID: inst.ID,
+		TaskID:     0,
+		NodeIndex:  0,
+		NodeName:   "",
+		OperatorID: operator,
+		Action:     model.RecordActionWithdraw,
+		Comment:    comment,
+		CreatedAt:  now,
+	}); err != nil {
+		return false, err
+	}
+	if _, err := repo.CancelInstanceTodoTasks(ctx, inst.ID, 0); err != nil {
+		return false, err
+	}
+	if err := repo.FinishInstance(ctx, inst.ID, model.InstanceStatusWithdrawn, now); err != nil {
+		return false, err
+	}
+	inst.Status = model.InstanceStatusWithdrawn
+	inst.EndedAt = &now
+	if err := handler.OnWithdrawn(ctx, inst, tx); err != nil {
+		return false, err
+	}
+	if err := s.notifyResult(ctx, tx, inst, "您发起的审批已终止"); err != nil {
+		return false, err
+	}
+	if err := s.resolveTodoNotifies(ctx, tx, todos); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // instanceDetailOf 组装实例详情（调用方已完成访问/业务可见性判定）。
 func (s *Service) instanceDetailOf(ctx context.Context, inst *model.ProcessInstance) (*dto.InstanceDetail, error) {
 	records, err := s.repo.ListRecordsByInstance(ctx, inst.ID)

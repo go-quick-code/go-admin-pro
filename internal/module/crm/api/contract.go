@@ -20,7 +20,7 @@ func (h *Handler) PageContracts(c *gin.Context) {
 	response.Page(c, list, total)
 }
 
-// GetContract 合同详情（含行项目与合计；数据范围外 404）。
+// GetContract 合同详情（含行项目、合计与最近一次审批时间线；数据范围外 404）。
 func (h *Handler) GetContract(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
@@ -61,9 +61,9 @@ func (h *Handler) UpdateContract(c *gin.Context) {
 	response.OK(c, true)
 }
 
-// ChangeContractStatus 状态流转（唯一状态入口：提交/审批通过/驳回/作废；
-// 审批动作的 crm:contract:approve 校验在 ApprovalService 内做，范围外 404，
-// 非法流转 400，并发冲突 409）。
+// ChangeContractStatus 状态流转（用户唯一状态入口：提交审批/作废；审批通过
+// 与驳回统一在 bpm 待办中心办理，issue #47）。范围外 404，非法流转 400，
+// 并发冲突 409。
 func (h *Handler) ChangeContractStatus(c *gin.Context) {
 	var req dto.ContractStatusReq
 	if !bindJSON(c, &req) {

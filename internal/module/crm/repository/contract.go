@@ -151,6 +151,17 @@ func (r *Repository) TransitionContractStatus(ctx context.Context, id int64, fro
 	return res.RowsAffected, nil
 }
 
+// ListPendingContractIDs 列出当前租户全部待审合同 ID（升序）。
+// issue #47 存量 backfill 的扫描入口：是否已有运行中实例由 bpm 侧判定。
+func (r *Repository) ListPendingContractIDs(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.Contract{}).
+		Where("status = ?", model.ContractStatusPending).
+		Order("id ASC").
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
 // ReplaceContractProducts 全量替换合同行项目（先删后插，必须在合同保存的
 // 同一事务里调用，行项目变更随合同整体保存）。items 由 service 层校验并算好金额；
 // 归属合同 ID 以本入参为准回填（创建路径合同 ID 落库后才产生）。

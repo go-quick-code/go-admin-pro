@@ -18,9 +18,11 @@ import (
 // 数据范围谓词，列表按谓词过滤、范围外详情/修改/删除/状态流转一律 404
 //（看不见的即不存在，不泄露存在性）。
 //
-// 状态机口径（spec §4.4）：状态变更唯一入口是 PUT /crm/contract/status（条件更新
-// 防并发覆盖，0 行报 409）；非法流转 400。审批/驳回走 ApprovalService（v1 直通，
-// 见 approval.go 文件头），作废走 VoidContractGuard 守卫（#18 接回款约束）。
+// 状态机口径（spec §4.4/§4.5）：状态变更用户入口是 PUT /crm/contract/status
+//（条件更新防并发，0 行报 409）；非法流转 400。提交走 ApprovalService（bpm
+// 实例与合同状态同事务，issue #47）；审批通过/驳回由 bpm 待办动作回调
+// BusinessHandler 回写（见 contract_approval.go）；作废走 VoidContractGuard
+// 守卫（#18 接回款约束），待审作废时同事务终止运行中实例。
 //
 // 编辑口径（决策，见提交说明）：草稿/待审可全量编辑（行项目随单整体替换，金额按
 // 不变量重算）；已签合同只放行元数据修改（名称/签订/起止日期/备注）——金额与
@@ -70,8 +72,9 @@ func (s *Service) contractFilter(ctx context.Context, req *dto.ContractPageReq) 
 	return filter, nil
 }
 
-// GetContract 查询合同详情（含行项目与合计）。数据范围外一律 404。
-func (s *Service) GetContract(ctx context.Context, id int64) (*model.Contract, error) {
+// GetContract 查询合同详情（含行项目、合计与最近一次审批时间线）。
+// 数据范围外一律 404；审批时间线随合同可见性收口（业务读接口）。
+func (s *Service) GetContract(ctx context.Context, id int64) (*dto.ContractDetail, error) {
 	c, err := s.findVisibleContract(ctx, id)
 	if err != nil {
 		return nil, err
@@ -79,7 +82,15 @@ func (s *Service) GetContract(ctx context.Context, id int64) (*model.Contract, e
 	if err := s.loadContractExtras(ctx, c); err != nil {
 		return nil, err
 	}
-	return c, nil
+	detail := &dto.ContractDetail{Contract: *c}
+	if s.bpm != nil {
+		approval, err := s.bpm.GetLatestInstanceDetailForBusiness(ctx, ContractApprovalBusinessType, c.ID)
+		if err != nil {
+			return nil, err
+		}
+		detail.Approval = approval
+	}
+	return detail, nil
 }
 
 // CreateContract 创建合同：编号、合同行与行项目同事务（失败回滚、不消耗序号）。
@@ -242,14 +253,18 @@ func (s *Service) UpdateContract(ctx context.Context, req *dto.ContractUpdateReq
 	})
 }
 
-// ChangeContractStatus 状态流转（唯一状态入口）：先做纯函数校验（非法流转 400），
-// 再按目标动作分派——提交/审批/驳回走 ApprovalService（v1 直通，含审批权限校验），
-// 作废先过 VoidContractGuard 守卫（#18 接回款约束）再条件更新。
+// ChangeContractStatus 状态流转（用户唯一入口）：先做纯函数校验（非法流转 400），
+// 再按目标动作分派——提交走 ApprovalService（同事务启动 bpm 实例），作废先过
+// VoidContractGuard 守卫（#18 接回款约束）再条件更新；待审作废时同事务终止
+// 运行中的审批实例，避免遗留待办与业务状态分叉（issue #47）。
+//
+// 审批通过与驳回不在本方法：它们由 bpm 待办动作触发 BusinessHandler 回写
+// 合同状态（见 contract_approval.go），状态端点不再提供直通审批。
 //
 // 并发保护（PR #39 审查 P1）：整个「锁定 → 复核最新状态 → 流转/守卫计数 →
 // 更新」在同一事务内完成，合同行是最先也唯一被锁的行（锁序：合同 → 计划）。
 // 条件更新仍是第二道保险：状态被非本路径并发变更时 0 行报 409。
-func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractStatusReq) (*model.Contract, error) {
+func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractStatusReq) (*dto.ContractDetail, error) {
 	if err := ValidateContractStatus(req.Status); err != nil {
 		return nil, err
 	}
@@ -277,11 +292,21 @@ func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractSta
 		switch req.Status {
 		case model.ContractStatusPending:
 			err = s.approvals.Submit(ctx, tx, c)
-		case model.ContractStatusSigned:
-			err = s.approvals.Approve(ctx, tx, c)
-		case model.ContractStatusDraft:
-			err = s.approvals.Reject(ctx, tx, c, req.Reason)
 		case model.ContractStatusVoid:
+			// 待审合同作废：先在同一事务内终止运行中的审批实例（实例 → 合同
+			// 锁序与 bpm 回调一致；回调把合同置草稿），再按最新状态落作废。
+			if c.Status == model.ContractStatusPending {
+				if err = s.cancelRunningContractApproval(ctx, tx, c.ID); err != nil {
+					return err
+				}
+				latest, err := tx.LockContractByID(ctx, c.ID)
+				if err != nil {
+					return err
+				}
+				if latest != nil {
+					c.Status = latest.Status
+				}
+			}
 			// 守卫在同一事务、合同行锁内计数回款记录：并发登记回款会在
 			// LockContractByID 上排队，作废提交后读到作废态被拒绝，反之
 			// 守卫看到已提交的记录而拒绝作废。
@@ -293,6 +318,11 @@ func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractSta
 			if err == nil && rows == 0 {
 				err = xerr.Conflict("合同状态已被其他操作变更，请刷新后重试")
 			}
+		default:
+			err = xerr.BadRequest(fmt.Sprintf(
+				"合同当前为「%s」状态，不能变更为「%s」",
+				ContractStatusNames[c.Status], ContractStatusNames[req.Status],
+			))
 		}
 		id = c.ID
 		return err
@@ -300,8 +330,26 @@ func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractSta
 	if err != nil {
 		return nil, err
 	}
-	// 状态/驳回原因已在库上变更，重读返回最新态（含名称补齐）。
+	// 状态/驳回原因已在库上变更，重读返回最新态（含名称与审批时间线）。
 	return s.GetContract(ctx, id)
+}
+
+// cancelRunningContractApproval 在调用方事务内终止合同的运行中审批实例；
+// 无运行中实例（如历史直通审批或测试替身）时静默跳过。bpm 未装配同样跳过
+// （状态机本身不依赖审批实现，非 HTTP 装配的单元测试仍可作废待审合同）。
+func (s *Service) cancelRunningContractApproval(ctx context.Context, tx *repository.Repository, contractID int64) error {
+	if s.bpm == nil {
+		return nil
+	}
+	inst, err := s.bpm.FindRunningInstanceByBusinessInTx(ctx, tx.DB(), ContractApprovalBusinessType, contractID)
+	if err != nil {
+		return err
+	}
+	if inst == nil {
+		return nil
+	}
+	_, err = s.bpm.CancelInstanceInTx(ctx, tx.DB(), inst.ID, "合同作废，审批流程自动终止")
+	return err
 }
 
 // DeleteContract 软删除合同（数据范围外 404）。删除口径见文件头注释：
