@@ -640,3 +640,48 @@ func TestIntegrationMessageProviderFailureAndResend(t *testing.T) {
 		t.Fatalf("清空后 total=%d，期望 0", total)
 	}
 }
+
+// TestIntegrationMessageSendBodyLimit 发送端点请求体收口（#85 安全审计 NV3）：
+// 超过 MaxBytesReader（128KB）→ 400；params 值超 dto 上限（4096 字符）→ 400；
+// 正常大小（合法模板参数）不受影响。短信/邮件共用 SendReq，两路都覆盖。
+func TestIntegrationMessageSendBodyLimit(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	// 200KB 参数值 → 请求体硬上限 400（文案提示上限）。
+	status, api := sendMessage(t, env, admin, "/message/mail/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "user@example.com",
+		"params": map[string]string{"name": strings.Repeat("大", 200<<10)},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("200KB 参数：HTTP %d msg %q，期望 400", status, api.Msg)
+	}
+	if !strings.Contains(api.Msg, "请求体过大") {
+		t.Fatalf("超限文案应提示请求体过大：%q", api.Msg)
+	}
+
+	// 参数值 5000 字符（< 128KB 但超 dto 值上限 4096）→ 400。
+	status, api = sendMessage(t, env, admin, "/message/mail/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "user@example.com",
+		"params": map[string]string{"name": strings.Repeat("长", 5000)},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("5000 字符参数值：HTTP %d msg %q，期望 400", status, api.Msg)
+	}
+
+	// 短信同口径：200KB 参数 → 400。
+	status, _ = sendMessage(t, env, admin, "/message/sms/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "13800000000",
+		"params": map[string]string{"name": strings.Repeat("大", 200<<10)},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("短信 200KB 参数：HTTP %d，期望 400", status)
+	}
+
+	// 正常大小不受影响：邮件发送照常成功写日志。
+	status, api = sendMessage(t, env, admin, "/message/mail/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "user@example.com",
+		"params": map[string]string{"name": "收口后正常"},
+	})
+	mustOK(t, "收口后正常邮件发送", status, api)
+}

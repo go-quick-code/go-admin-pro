@@ -12,6 +12,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/ratelimit"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
@@ -25,10 +26,20 @@ type Handler struct {
 	// 敏感词端点（不经过这些端点的用例无感）。
 	sensitive *service.SensitiveWordService
 	cfg       *config.Config
+	// publicLimiter 是公开端点的进程内限速器（#85 安全审计 NV1）：
+	// authorize-url 按客户端 IP 限速，随 Handler 实例创建（集成测试每用例
+	// 独立 env 即独立计数，互不串扰）；多实例部署由反代层另配。
+	publicLimiter *ratelimit.Limiter
 }
 
 func New(svc *service.Service, social *service.SocialService, sensitive *service.SensitiveWordService, cfg *config.Config) *Handler {
-	return &Handler{svc: svc, social: social, sensitive: sensitive, cfg: cfg}
+	return &Handler{
+		svc:           svc,
+		social:        social,
+		sensitive:     sensitive,
+		cfg:           cfg,
+		publicLimiter: ratelimit.New(publicIPLimit, time.Minute),
+	}
 }
 
 // ---------- 中间件 ----------
@@ -86,6 +97,22 @@ func (h *Handler) RequirePlatformTenant() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if tenant.ID(c.Request.Context()) != PlatformTenantID {
 			response.Abort(c, xerr.Forbidden("仅平台租户可管理租户"))
+			return
+		}
+		c.Next()
+	}
+}
+
+// publicIPLimit 是公开端点按客户端 IP 的限速阈值：每分钟 60 次
+// （#85 安全审计 NV1）。正常登录页点击不会触达；进程内单实例语义，
+// 多实例部署或更细粒度策略由反代层（nginx limit_req）另配。
+const publicIPLimit = 60
+
+// LimitIP 按客户端 IP 的固定窗口限速（公开端点加固）：超限 429。
+func (h *Handler) LimitIP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if h.publicLimiter != nil && !h.publicLimiter.Allow(c.ClientIP()) {
+			response.Abort(c, xerr.TooManyRequests("请求过于频繁，请稍后重试"))
 			return
 		}
 		c.Next()

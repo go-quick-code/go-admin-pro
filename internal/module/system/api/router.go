@@ -10,9 +10,10 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 
 	// 社交登录（issue #76，spec §4.4/§5.3）：授权地址签发与三方回调均为
 	// 公开端点；安全靠服务端一次性 state（10 分钟 TTL）校验，回调失败
-	// 一律 400/409，不泄露内部错误（spec §4.11.3）。
+	// 一律 400/409，不泄露内部错误（spec §4.11.3）。authorize-url 每次调用
+	// 都写一条进程内 state，挂按 IP 限速（#85 安全审计 NV1；反代层可另配）。
 	social := rg.Group("/system/social")
-	social.GET("/authorize-url", h.SocialAuthorizeURL)
+	social.GET("/authorize-url", h.LimitIP(), h.SocialAuthorizeURL)
 	social.GET("/callback", h.SocialCallback)
 	// 登录页可用平台列表（issue #77）：按启用客户端 + 已注册 provider 过滤。
 	social.GET("/providers", h.ListSocialProviders)

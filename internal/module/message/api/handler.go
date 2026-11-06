@@ -2,12 +2,21 @@
 package api
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-quick-code/go-admin-pro/internal/module/message/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/message/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
+
+// sendMaxBodyBytes 是发送端点（短信/邮件共用 SendReq）的请求体字节硬上限
+// （#85 安全审计 NV3）：params 值上限合计 ≤100KB + JSON 信封余量；超限 400。
+// 之前 params 无界且 smtp 投递时全量 base64 复制，超界请求会放大内存占用。
+const sendMaxBodyBytes = 128 << 10
 
 // PermissionMiddleware 由 system 模块提供权限中间件。
 type PermissionMiddleware func(code string) gin.HandlerFunc
@@ -25,6 +34,23 @@ func New(svc *service.Service, perm PermissionMiddleware) *Handler {
 
 func bindJSON(c *gin.Context, v interface{}) bool {
 	if err := c.ShouldBindJSON(v); err != nil {
+		response.BadRequest(c, "请求参数错误："+err.Error())
+		return false
+	}
+	return true
+}
+
+// bindJSONLimit 在 bindJSON 之上用 MaxBytesReader 给请求体加字节上限
+// （#85 安全审计 NV3，参照 infra 模块上传接口的既有惯例）：超限一律 400
+// 并提示上限。
+func bindJSONLimit(c *gin.Context, v interface{}, maxBytes int64, what string) bool {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	if err := c.ShouldBindJSON(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			response.BadRequest(c, fmt.Sprintf("%s请求体过大，上限 %dKB", what, maxBytes>>10))
+			return false
+		}
 		response.BadRequest(c, "请求参数错误："+err.Error())
 		return false
 	}
@@ -191,7 +217,8 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 
 func (h *Handler) SendSMS(c *gin.Context) {
 	var req dto.SendReq
-	if !bindJSON(c, &req) {
+	// 请求体收口（#85 安全审计 NV3）：params 与邮件共用 SendReq，同口径限界。
+	if !bindJSONLimit(c, &req, sendMaxBodyBytes, "短信发送") {
 		return
 	}
 	result, err := h.svc.SendSMS(c.Request.Context(), &req)
@@ -204,7 +231,9 @@ func (h *Handler) SendSMS(c *gin.Context) {
 
 func (h *Handler) SendMail(c *gin.Context) {
 	var req dto.SendReq
-	if !bindJSON(c, &req) {
+	// 请求体收口（#85 安全审计 NV3）：params 无界会经 smtp 全量 base64 复制
+	// 放大内存占用，字节硬上限 + dto 值上限双层收口。
+	if !bindJSONLimit(c, &req, sendMaxBodyBytes, "邮件发送") {
 		return
 	}
 	result, err := h.svc.SendMail(c.Request.Context(), &req)

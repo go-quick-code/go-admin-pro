@@ -70,6 +70,16 @@ onMounted(async () => {
   const redirect = recallSocialRedirect()
   clearSocialFlow()
 
+  // 审查加固（#85 安全审计 C7，RFC 9700 §4.1.3）：读完立即从地址栏清掉
+  // code/state（成功跳转与失败停留都不残留），避免授权码滞留在浏览器
+  // 历史、后续跳转的 Referer 与反代访问日志里；其余 query 原样保留。
+  if (route.query.code !== undefined || route.query.state !== undefined) {
+    const rest = { ...route.query }
+    delete rest.code
+    delete rest.state
+    router.replace({ query: rest }).catch(() => {})
+  }
+
   if (!code || !state || !provider) {
     phase.value = 'error'
     errorMsg.value = '回调参数缺失或已过期，请重新发起社交登录'

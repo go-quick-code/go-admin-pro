@@ -9,6 +9,12 @@ import (
 // 后续事件丢弃并计数，绝不阻塞发布方（spec §4.5.1）。
 const subscriberBuffer = 64
 
+// MaxConnsPerStream 是单个 (tenant, user) 的连接数上限（#85 安全审计 NV2）：
+// 容忍同账号多标签页（建议值 8），超过即拒绝新连接——没有上限时换票重连
+// 可以无限堆积连接耗尽内存。检查与登记在同一把锁内完成（原子），并发建连
+// 不会越过上限。
+const MaxConnsPerStream = 8
+
 // streamKey 是 hub 的订阅维度：(tenant_id, user_id)。跨租户/跨用户互不可见。
 type streamKey struct {
 	tenantID int64
@@ -29,9 +35,11 @@ func NewHub() *Hub {
 	return &Hub{subs: make(map[streamKey]map[*Subscriber]struct{})}
 }
 
-// Subscribe 注册一条连接并返回订阅句柄。调用方（传输层 handler）负责在
-// 断开时 Unsubscribe（断开清理，spec §4.5.3）。
-func (h *Hub) Subscribe(tenantID, userID int64) *Subscriber {
+// Subscribe 注册一条连接并返回订阅句柄；该 (tenant, user) 在线连接数已达
+// MaxConnsPerStream 时返回 (nil, false)，调用方（传输层 handler）应拒绝
+// 建流（SSE 429 / WS 关闭，#85 安全审计 NV2）。调用方负责在断开时
+// Unsubscribe（断开清理，spec §4.5.3）。
+func (h *Hub) Subscribe(tenantID, userID int64) (*Subscriber, bool) {
 	s := &Subscriber{
 		id:     h.nextID.Add(1),
 		tenant: tenantID,
@@ -49,8 +57,11 @@ func (h *Hub) Subscribe(tenantID, userID int64) *Subscriber {
 		m = make(map[*Subscriber]struct{})
 		h.subs[k] = m
 	}
+	if len(m) >= MaxConnsPerStream {
+		return nil, false
+	}
 	m[s] = struct{}{}
-	return s
+	return s, true
 }
 
 // Unsubscribe 移除连接并关闭其 Done 通道（幂等，可安全 defer 重复调用）。
