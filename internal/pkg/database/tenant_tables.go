@@ -61,6 +61,15 @@ var TenantTables = []string{
 	"oa_leave_type",
 	"oa_leave_balance",
 	"oa_leave_request",
+	// 考勤基础（issue #60，迁移 00022）：班次/考勤组/组员/打卡/结果五张表
+	// 全量租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。
+	// 组员唯一键 (tenant_id, user_id)——一个用户只属于一个考勤组；
+	// 结果唯一键 (tenant_id, user_id, work_date)——一人一天一条结果（#61 写入）。
+	"oa_attendance_shift",
+	"oa_attendance_group",
+	"oa_attendance_group_user",
+	"oa_attendance_punch",
+	"oa_attendance_result",
 	// bpm 内核（issue #44）：定义/实例/任务/审批记录全量租户隔离（spec §4.6：
 	// 跨租户业务 ID 一律 404，不泄露存在性）。
 	"bpm_process_definition",
