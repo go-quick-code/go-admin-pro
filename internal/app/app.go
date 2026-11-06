@@ -162,15 +162,22 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// （biz_type=oa_announcement，经 AnnouncementFileStore 适配器装配）。
 	oaSvc := oaservice.New(sysSvc, repository.New(db), notifySvc)
 	oaSvc.SetAnnouncementFileStore(announcementFileStore{infra: infraSvc})
-	oaSvc.SetAPIPrefix(cfg.App.APIPrefix)
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// bpm 模块（issue #44 定义管理，#46 运行引擎）：BusinessHandler 注册表在
-	// 装配期建立，暂无真实实现——spec §4.4：未注册 business_type 的定义不允许
-	// 发布/发起，真实回调由 #47（CRM 合同）/#52（请假）/#55（报销）接线
-	//（app.BPM 暴露注册入口）。通知与审批同事务：notifySvc 作为 NotifyGateway 注入。
+	// 装配期建立；spec §4.4：未注册 business_type 的定义不允许发布/发起。
+	// #52 在此接线请假回调（oa_leave_approval），#47（CRM 合同）/#55（报销）
+	// 后续按同一接缝注册。通知与审批同事务：notifySvc 作为 NotifyGateway 注入。
 	bpmSvc := bpmservice.New(bpmrepo.New(db), bpmSystemGateway{sys: sysSvc}, notifySvc)
 	bpmAPI := bpmapi.New(bpmSvc, sysAPI.RequirePermission)
+
+	// 请假申请（issue #52）：OA → bpm 单向依赖——提交在业务事务内经
+	// StartInstanceInTx 发起审批，bpm 在通过/驳回/撤回的同一事务回调 oaSvc
+	// （OnApproved/OnRejected/OnWithdrawn）。附件复用 infra_file（biz_type=oa_leave）。
+	oaSvc.SetBPM(bpmSvc)
+	oaSvc.SetAPIPrefix(cfg.App.APIPrefix)
+	oaSvc.SetLeaveFileStore(leaveFileStore{infra: infraSvc})
+	bpmSvc.RegisterBusinessHandler(oaservice.LeaveApprovalBusinessType, oaSvc)
 
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)

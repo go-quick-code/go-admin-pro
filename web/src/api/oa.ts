@@ -93,7 +93,7 @@ export function getMyLeaveBalances(year?: number) {
 
 // ---------- OA 公告（issue #48，spec #42 §3.4/§4.7/§5） ----------
 // 权限模型：管理列表/草稿预览挂 oa:announcement:query（菜单 521），创建/编辑/
-// 删除/发布撤回逐码（5211–5214）；员工侧「我的公告」（菜单 529）与已发布详情
+// 删除/发布撤回逐码（5211–5214）；员工侧「我的公告」（菜单 530）与已发布详情
 // 登录即可，可见性由受众判定收口。
 
 export interface AnnouncementTargetPayload {
@@ -167,3 +167,62 @@ export function deleteAnnouncementFile(id: number, fileId: number) {
 export function downloadAnnouncementFile(url: string) {
   return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
+// ---------- OA 请假申请（issue #52，spec #42 §4.8/§5） ----------
+// 权限模型：本人列表/详情/附件查看登录即可（服务端按本人收口）；
+// 写动作逐码 oa:leave:create/update/delete/submit；审批走通用待办 /bpm/task/*。
+
+export interface LeaveRequestPayload {
+  id?: number
+  leaveTypeId: number
+  startDate: string
+  startHalf: number
+  endDate: string
+  endHalf: number
+  reason: string
+}
+
+// 本人请假分页：status 精确过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回/5 已取消）。
+export function pageMyLeaveRequests(params?: { pageNo?: number; pageSize?: number; status?: number }) {
+  return request.get('/oa/leave/request/page', { params }) as Promise<any>
+}
+// 本人请假详情：申请行 + 附件 + bpm 审批时间线（草稿 approval 为空）。
+export function getMyLeaveRequest(id: number) {
+  return request.get(`/oa/leave/request/${id}`) as Promise<any>
+}
+// 创建草稿（时长由服务端按工作日历计算，非工作日不计）。
+export function createLeaveRequest(data: LeaveRequestPayload) {
+  return request.post('/oa/leave/request', data) as Promise<any>
+}
+// 更新草稿/已驳回申请。
+export function updateLeaveRequest(data: LeaveRequestPayload) {
+  return request.put('/oa/leave/request', data) as Promise<any>
+}
+// 删除草稿/已驳回申请（其他状态 409）。
+export function deleteLeaveRequest(id: number) {
+  return request.delete(`/oa/leave/request/${id}`) as Promise<any>
+}
+// 提交审批：事务内创建 oa_leave_approval 实例并置待审。
+export function submitLeaveRequest(id: number) {
+  return request.post(`/oa/leave/request/${id}/submit`) as Promise<any>
+}
+// 附件列表（新上传的在前）。
+export function listLeaveRequestFiles(id: number) {
+  return request.get(`/oa/leave/request/${id}/files`) as Promise<any>
+}
+// 上传附件（multipart 字段名 file；仅草稿/已驳回）。
+export function uploadLeaveRequestFile(id: number, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/oa/leave/request/${id}/files`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+// 删除附件（仅草稿/已驳回）。
+export function deleteLeaveRequestFile(id: number, fileId: number) {
+  return request.delete(`/oa/leave/request/${id}/files/${fileId}`) as Promise<any>
+}
+// 鉴权下载（后端返回的 url 已含 /admin-api 前缀，baseURL: '' 原样请求）。
+export function downloadLeaveRequestFile(url: string) {
+  return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
+}
+

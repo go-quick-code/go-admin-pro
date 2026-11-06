@@ -21,14 +21,14 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
-// 菜单/按钮 ID（seed.go 521 段与 529 员工侧、5123 通知查询）。
+// 菜单/按钮 ID（seed.go 521 段与 530 员工侧、5123 通知查询）。
 const (
 	announcementMenuID        = int64(521)
 	announcementBtnCreate     = int64(5211)
 	announcementBtnUpdate     = int64(5212)
 	announcementBtnDelete     = int64(5213)
 	announcementBtnPublish    = int64(5214)
-	announcementMineMenuID    = int64(529)
+	announcementMineMenuID    = int64(530)
 	notifyQueryMenuID         = int64(5123)
 	announcementPageSizeQuery = "?pageNo=1&pageSize=100"
 )

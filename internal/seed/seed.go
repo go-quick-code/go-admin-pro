@@ -281,9 +281,9 @@ func seedMenus(db *gorm.DB) error {
 		btn(5215, 521, "已读统计", "oa:announcement:read-stats", 5),
 		// 我的公告（issue #48）：员工侧页面，权限码为空——登录即可（分配了
 		// 菜单的角色可见；后端 GET /oa/announcement/my/page 与已发布详情同为
-		// 登录即可，可见性由受众判定收口）。529 在 500–549 空位自取，
-		// grep 去重确认未被占用。
-		menu(529, 500, "我的公告", "announcement-mine", "oa/announcement/mine", "", "Bell", 9),
+		// 登录即可，可见性由受众判定收口）。530 在 500–549 空位自取（#52 已占
+		// 529 我的请假），grep 去重确认 530 未被占用。
+		menu(530, 500, "我的公告", "announcement-mine", "oa/announcement/mine", "", "Bell", 10),
 
 		// 工作日历（issue #50）：520 段（协调台账分配），按钮段 5201+（菜单ID×10+n，
 		// grep 去重确认 520/5201–5203 未被占用）。查询码挂菜单（月视图入口），
@@ -301,8 +301,19 @@ func seedMenus(db *gorm.DB) error {
 		menu(522, 500, "请假类型与额度", "leave", "oa/leave/index", "oa:leave:manage", "List", 2),
 		// 我的额度（issue #51）：员工侧页面，权限码为空——登录即可（分配了
 		// 菜单的角色可见；后端 GET /oa/leave/balance/mine 同为登录即可）。
-		// 我的请假申请页（含额度入口）由 #52/#53 在 500–549 空位自取。
+		// 我的请假页（含额度入口）由 #52 建立（下方菜单 529）；撤回/取消与
+		// 部门可见范围由 #53 扩展。
 		menu(528, 500, "我的额度", "leave-mine", "oa/leave/mine", "", "User", 8),
+
+		// 我的请假（issue #52）：529 段（500–549 员工侧空位自取，grep 去重确认
+		// 529/5291–5294 未被占用；522 管类型与额度、528 管本人额度，勿重复建）。
+		// 页面本身登录即可（后端列表/详情按本人收口），写动作逐码：创建/编辑/
+		// 删除/提交（按钮码 = 菜单 ID×10+n）。审批动作走通用待办 512 段。
+		menu(529, 500, "我的请假", "leave-request", "oa/leave/request/index", "", "Calendar", 9),
+		btn(5291, 529, "请假申请", "oa:leave:create", 1),
+		btn(5292, 529, "请假编辑", "oa:leave:update", 2),
+		btn(5293, 529, "请假删除", "oa:leave:delete", 3),
+		btn(5294, 529, "请假提交", "oa:leave:submit", 4),
 
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
@@ -398,7 +409,7 @@ func seedRoles(db *gorm.DB) error {
 		// OA 员工侧基础菜单（issue #48，spec §7.3「内置普通角色授予公告查看」）：
 		// OA 根目录 + 我的公告（登录即可的只读页面，不含公告管理菜单 521）。
 		{RoleID: 2, MenuID: 500},
-		{RoleID: 2, MenuID: 529},
+		{RoleID: 2, MenuID: 530},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }

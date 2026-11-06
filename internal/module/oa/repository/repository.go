@@ -22,11 +22,6 @@ type Repository struct {
 // New 创建 oa Repository。
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
-// DB 返回底层句柄（事务内即事务句柄）：公告发布需要把 tx 传给 notify 的
-// CreateInTx seam（spec §4.13：通知与源操作同一事务），业务仓储操作仍走本
-// 仓储方法（与 bpm repository 同款约定）。
-func (r *Repository) DB() *gorm.DB { return r.db }
-
 func notFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil

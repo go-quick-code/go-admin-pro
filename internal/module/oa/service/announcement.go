@@ -67,15 +67,9 @@ type AnnouncementFileStore interface {
 }
 
 // SetAnnouncementFileStore 注入公告附件存储实现（app 装配处调用）。
+// SetAPIPrefix 是共享注入点（与请假附件同款，见 leave_request.go）。
 func (s *Service) SetAnnouncementFileStore(store AnnouncementFileStore) {
-	s.files = store
-}
-
-// SetAPIPrefix 注入 HTTP API 前缀，附件 URL 使用该前缀拼装鉴权下载地址。
-func (s *Service) SetAPIPrefix(prefix string) {
-	if prefix != "" {
-		s.apiPrefix = prefix
-	}
+	s.announcementFiles = store
 }
 
 // ---------- 管理端列表/详情 ----------
@@ -370,7 +364,7 @@ func buildAnnouncementNotifies(row *oamodel.Announcement, userIDs []int64) []not
 			Content:     content,
 			BizType:     AnnouncementFileBizType,
 			BizID:       row.ID,
-			Route:       "/oa/announcement-mine", // 菜单 529 的员工侧路由（OA 根 /oa + announcement-mine）
+			Route:       "/oa/announcement-mine", // 菜单 530 的员工侧路由（OA 根 /oa + announcement-mine）
 			RouteParams: routeParams,
 		})
 	}
@@ -676,10 +670,10 @@ func buildAnnouncementTargets(announcementID int64, audienceType int8, reqs []dt
 
 // announcementFileStore 返回已装配的附件存储；未装配时显式报错。
 func (s *Service) announcementFileStore() (AnnouncementFileStore, error) {
-	if s.files == nil {
+	if s.announcementFiles == nil {
 		return nil, xerr.Internal(errors.New("公告附件存储未装配"))
 	}
-	return s.files, nil
+	return s.announcementFiles, nil
 }
 
 // announcementFileURL 返回公告附件的鉴权下载地址（GET）：不暴露 /files/ 公共直链。
@@ -690,17 +684,4 @@ func (s *Service) announcementFileURL(announcementID, fileID int64) string {
 	}
 	return fmt.Sprintf("%s/oa/announcement/%d/files/%d/download",
 		strings.TrimRight(prefix, "/"), announcementID, fileID)
-}
-
-// truncateRunes 按字符数截断（通知列宽按 utf8mb4 字符计），超长追加省略号
-// 只在不越界时进行。
-func truncateRunes(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	if max <= 0 {
-		return ""
-	}
-	return string(runes[:max])
 }

@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 
+	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	notifyservice "github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
@@ -53,11 +54,19 @@ type NotifyGateway interface {
 
 // Service 汇聚 oa 模块的业务能力。
 type Service struct {
-	sys    SystemGateway
-	repo   *repository.Repository
+	sys  SystemGateway
+	repo *repository.Repository
+	// notify 是公告发布的站内通知 seam（issue #48，spec §4.13）。
 	notify NotifyGateway
-	files  AnnouncementFileStore
-	// apiPrefix 是附件鉴权下载地址前缀（config.App.APIPrefix，issue #48）。
+	// bpm 是审批引擎（issue #52 请假提交/回调的接点）：OA → bpm 单向依赖，
+	// bpm 不反向依赖业务模块（ADR 0008/0009）。装配前为 nil，相关入口显式报错。
+	bpm *bpmservice.Service
+	// files 是请假附件的存储依赖面（由 internal/app 装配 infra 适配器，issue #52）。
+	files LeaveFileStore
+	// announcementFiles 是公告附件的存储依赖面（由 internal/app 装配 infra
+	// 适配器，issue #48）；与请假附件字段分开，避免同一工单合并时互相覆盖。
+	announcementFiles AnnouncementFileStore
+	// apiPrefix 是附件鉴权下载地址前缀（config.App.APIPrefix）。
 	apiPrefix string
 }
 
