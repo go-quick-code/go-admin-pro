@@ -91,16 +91,17 @@ type DatabaseConfig struct {
 	MaxIdleConns int    `mapstructure:"max-idle-conns"`
 	MaxOpenConns int    `mapstructure:"max-open-conns"`
 	Seed         bool   `mapstructure:"seed"`
-	// SeedDemo 控制是否写入 CRM + OA 演示数据（客户/商机/合同/回款、公告/
-	// 请假/报销/考勤/日程/会议室/文档等）。
+	// SeedDemo 控制是否写入 CRM + OA + 平台演示数据（客户/商机/合同/回款、
+	// 公告/请假/报销/考勤/日程/会议室/文档，消息渠道/模板、敏感词示例、
+	// 停用的社交客户端、演示消息日志等）。
 	// 指针是为了区分「未配置」与显式 false：未配置视为关闭（演示数据只在
 	// 显式开启时写入，避免生产环境被演示账号/示例数据污染，PR #39 审查 P2）；
 	// 集成测试基座显式关闭，保证用例数据可控。
 	SeedDemo *bool `mapstructure:"seed-demo"`
 }
 
-// SeedDemoEnabled 报告是否写入 CRM + OA 演示数据：配置缺省（nil）视为关闭，
-// 只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
+// SeedDemoEnabled 报告是否写入 CRM + OA + 平台演示数据：配置缺省（nil）视为
+// 关闭，只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
 func (c *Config) SeedDemoEnabled() bool {
 	return c.Database.SeedDemo != nil && *c.Database.SeedDemo
 }

@@ -84,6 +84,14 @@ func Run(db *gorm.DB, withDemo bool) error {
 				return err
 			}
 		}
+		// 平台能力演示数据（issue #85，spec §7.3/§9）：渠道/模板/套餐/敏感词/
+		// 社交客户端（停用）/演示消息日志，配置与密钥全部占位符。不依赖 CRM/OA
+		// 演示组织，顺序无关，放最后。
+		if seedPlatformDemoFunc != nil {
+			if err := seedPlatformDemoFunc(db); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -98,6 +106,10 @@ var seedCRMDemoFunc func(*gorm.DB) error
 // OA 演示数据依赖 CRM 演示组织（sales1/sales2/manager）与基础种子（默认
 // 班次/考勤组、默认审批流程、报销类别字典），因此固定排在 CRM 演示数据之后。
 var seedOADemoFunc func(*gorm.DB) error
+
+// seedPlatformDemoFunc 是平台能力演示数据的写入入口，由 platform_demo.go 的
+// init 注册。不依赖 CRM/OA 演示数据（自带渠道/模板/套餐兜底），顺序无关。
+var seedPlatformDemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64
@@ -577,6 +589,14 @@ func seedMenus(db *gorm.DB) error {
 // seedTenantPackages 写入默认「标准版」套餐（issue #69）：全部启用目录/菜单、
 // 配额不限。仅当套餐表为空时写入；管理员改名/删除后重复启动不复活。
 func seedTenantPackages(db *gorm.DB) error {
+	return ensureStandardTenantPackage(db)
+}
+
+// ensureStandardTenantPackage 保证存在默认「标准版」套餐（issue #69，spec §7.3）：
+// 套餐表为空时写入一条全部启用目录/菜单、配额不限的套餐。基础种子与平台演示
+// 种子（platform_demo.go）共用该兜底，幂等——表非空（含只剩管理端自建套餐）
+// 即跳过，不覆盖已有数据。
+func ensureStandardTenantPackage(db *gorm.DB) error {
 	var count int64
 	if err := tenant.Skip(db).Model(&sysmodel.TenantPackage{}).Count(&count).Error; err != nil {
 		return err
