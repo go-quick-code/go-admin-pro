@@ -131,3 +131,50 @@ func TestSocialStateUnknown(t *testing.T) {
 		return err
 	}())
 }
+
+// TestSocialStateCapacityEvictsOldest 容量护栏（#85 安全审计 NV1）：
+// 签发达到容量上限后清最旧的未消费 state，最新 state 不受影响，
+// 存储条目数不超上限（进程内内存有界）。
+func TestSocialStateCapacityEvictsOldest(t *testing.T) {
+	store := newSocialStateStore(time.Minute)
+	store.capacity = 3
+
+	first, _, err := store.issue("mock", 1, 0)
+	if err != nil {
+		t.Fatalf("签发第 1 条: %v", err)
+	}
+	if _, _, err := store.issue("mock", 1, 0); err != nil {
+		t.Fatalf("签发第 2 条: %v", err)
+	}
+	if _, _, err := store.issue("mock", 1, 0); err != nil {
+		t.Fatalf("签发第 3 条: %v", err)
+	}
+
+	// 第 4 条挤掉最旧的第 1 条。
+	fourth, _, err := store.issue("mock", 1, 0)
+	if err != nil {
+		t.Fatalf("达上限后签发: %v", err)
+	}
+	if len(store.states) != 3 {
+		t.Fatalf("容量护栏后条目数 = %d, want 3", len(store.states))
+	}
+	wantStateBadRequest(t, "最旧 state 被清", func() error {
+		_, err := store.consume(first, "mock")
+		return err
+	}())
+	if _, err := store.consume(fourth, "mock"); err != nil {
+		t.Fatalf("最新 state 应可用: %v", err)
+	}
+
+	// 未配置容量（<=0）不淘汰：条目继续增长（与旧行为兼容）。
+	store2 := newSocialStateStore(time.Minute)
+	store2.capacity = 0
+	for i := 0; i < 5; i++ {
+		if _, _, err := store2.issue("mock", 1, 0); err != nil {
+			t.Fatalf("未配置容量签发: %v", err)
+		}
+	}
+	if len(store2.states) != 5 {
+		t.Fatalf("未配置容量不应淘汰：条目数 = %d, want 5", len(store2.states))
+	}
+}

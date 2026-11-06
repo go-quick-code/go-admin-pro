@@ -110,11 +110,14 @@ type TemplateVO struct {
 
 // SendReq 是短信/邮件发送请求。channelCode 为空时使用该类型第一个启用的渠道；
 // params 的键必须与模板声明的参数完全一致（缺失或多余都返回 400）。
+// params 限界（#85 安全审计 NV3）：至多 16 项、键 ≤64 字符、值 ≤4096 字符
+// ——模板参数是占位值（姓名/单号等），正常用量远低于此；合计字节总量由
+// 发送端点的 MaxBytesReader（128KB 请求体硬上限）收口，两层任一超限 400。
 type SendReq struct {
 	ChannelCode  string            `json:"channelCode" binding:"max=64"`
 	TemplateCode string            `json:"templateCode" binding:"required,max=64"`
 	Recipient    string            `json:"recipient" binding:"required,max=255"`
-	Params       map[string]string `json:"params"`
+	Params       map[string]string `json:"params" binding:"omitempty,max=16,dive,keys,max=64,endkeys,max=4096"`
 }
 
 // SendResult 返回本次发送写入的日志 ID。
@@ -132,4 +135,9 @@ type LogPageReq struct {
 	TemplateCode string `form:"templateCode"`
 	Recipient    string `form:"recipient"`
 	Status       *int8  `form:"status"`
+}
+
+// LogBatchDeleteReq 批量删除发送日志（spec §5.2：DELETE /message/log 按 ids）。
+type LogBatchDeleteReq struct {
+	IDs []int64 `json:"ids" binding:"required,gt=0"`
 }

@@ -1,5 +1,10 @@
 package dto
 
+// sensitiveWordCheckMaxRunes 是检测文本的字符上限（#85 安全审计 NV3）：
+// ≈100KB 的检测量级，正常「文章/评论送检」远低于此；多字节字符的字节总量
+// 由检测端点的 MaxBytesReader（128KB 请求体硬上限）收口，两层任一超限 400。
+const sensitiveWordCheckMaxRunes = 102400
+
 // ---------- 敏感词（issue #81，spec §5.6） ----------
 
 // SensitiveWordCreateReq 创建敏感词（当前租户）。
@@ -31,7 +36,7 @@ type SensitiveWordPageReq struct {
 
 // SensitiveWordCheckReq 敏感词检测请求（POST /system/sensitive-word/check）。
 type SensitiveWordCheckReq struct {
-	Text string `json:"text" binding:"required"`
+	Text string `json:"text" binding:"required,max=102400"` // 上限见 sensitiveWordCheckMaxRunes
 }
 
 // SensitiveWordCheckResp 敏感词检测结果：去重后的命中词（按首次出现位置

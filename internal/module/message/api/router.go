@@ -31,5 +31,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	log.POST("/:id/resend", h.perm("message:log:resend"), h.ResendLog)
 	// 静态路由先于 /:id 注册，避免 "clear" 被当成日志 ID。
 	log.DELETE("/clear", h.perm("message:log:delete"), h.ClearLogs)
+	// 批量删除（spec §5.2：DELETE /message/log 按 ids）：与单条删除同权限码。
+	log.DELETE("", h.perm("message:log:delete"), h.DeleteLogs)
 	log.DELETE("/:id", h.perm("message:log:delete"), h.DeleteLog)
 }

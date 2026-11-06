@@ -165,6 +165,14 @@ func TestIntegrationSocialLoginFlow(t *testing.T) {
 	if data["mode"] != "login" || data["accessToken"] == "" || data["username"] != "admin" {
 		t.Fatalf("登录回调应签发 token：data=%v", data)
 	}
+	// 授权码不回流（#85 安全审计 C7 硬化）：回调成功响应不回显 code/state，
+	// 前端拿到的载荷可安全跳转（配合回调页从地址栏清掉 code/state）。
+	if _, ok := data["code"]; ok {
+		t.Fatalf("回调响应不应回显 code：data=%v", data)
+	}
+	if _, ok := data["state"]; ok {
+		t.Fatalf("回调响应不应回显 state：data=%v", data)
+	}
 
 	// 登录日志 login_type=3（验收标准）。
 	var logType int64
@@ -400,5 +408,37 @@ func TestIntegrationSocialEndpointAuth(t *testing.T) {
 	status, api := env.Request(t, http.MethodPost, "/system/social/bind", platformAdmin, map[string]any{"provider": "mock"})
 	if status != http.StatusBadRequest {
 		t.Fatalf("登录后 bind（未配置 provider）应 400：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+}
+
+// TestIntegrationSocialAuthorizeURLRateLimit 公开端点按 IP 限速（#85 安全审计
+// NV1）：authorize-url 每分钟 60 次，第 61 次返回 429；窗口内正常请求不受影响。
+// 每用例独立 env（独立 Handler/限速器），不与其他用例的 authorize 调用串窗。
+func TestIntegrationSocialAuthorizeURLRateLimit(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	createSocialClientFor(t, env, admin, "rl-client", "wechat_open")
+
+	const limit = 60 // 与 api.publicIPLimit 对齐
+	path := "/system/social/authorize-url?provider=wechat_open"
+	last := 0
+	for i := 1; i <= limit+1; i++ {
+		status, api := env.Request(t, http.MethodGet, path, "", nil)
+		last = status
+		if status == http.StatusTooManyRequests {
+			if i <= limit {
+				t.Fatalf("第 %d 次即 429，早于上限", i)
+			}
+			if api.Code != http.StatusTooManyRequests {
+				t.Fatalf("429 业务码不符：%d", api.Code)
+			}
+			break
+		}
+		if status != http.StatusOK {
+			t.Fatalf("第 %d 次应 200：HTTP %d code %d msg %q", i, status, api.Code, api.Msg)
+		}
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("%d 次调用未触发 429：最后一次 HTTP %d", limit+1, last)
 	}
 }

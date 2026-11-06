@@ -1,6 +1,10 @@
 package api
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
@@ -11,6 +15,23 @@ import (
 
 func bindJSON(c *gin.Context, v interface{}) bool {
 	if err := c.ShouldBindJSON(v); err != nil {
+		response.BadRequest(c, "请求参数错误："+err.Error())
+		return false
+	}
+	return true
+}
+
+// bindJSONLimit 在 bindJSON 之上用 MaxBytesReader 给请求体加字节上限
+// （#85 安全审计 NV3，参照 infra 模块上传接口的既有惯例）：超限一律 400
+// 并提示上限。what 用于拼装用户可见的错误文案（如「敏感词检测」）。
+func bindJSONLimit(c *gin.Context, v interface{}, maxBytes int64, what string) bool {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	if err := c.ShouldBindJSON(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			response.BadRequest(c, fmt.Sprintf("%s请求体过大，上限 %dKB", what, maxBytes>>10))
+			return false
+		}
 		response.BadRequest(c, "请求参数错误："+err.Error())
 		return false
 	}

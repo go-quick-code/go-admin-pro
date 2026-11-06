@@ -26,6 +26,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/notify/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/push"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
@@ -823,5 +825,71 @@ func TestIntegrationPushDisabled_HTTP(t *testing.T) {
 	status2, _ := env.Request(t, http.MethodGet, "/notify/push/sse?ticket=x", "", nil)
 	if status2 != http.StatusNotFound {
 		t.Fatalf("推送关闭时 SSE: HTTP %d, want 404", status2)
+	}
+}
+
+// TestIntegrationPushConnQuota_HTTP 连接数配额（#85 安全审计 NV2）：同一
+// (tenant, user) 第 push.MaxConnsPerStream+1 条 WS 连接被服务端直接关闭
+// （1008 policy violation），上限内的连接计数不受影响。
+func TestIntegrationPushConnQuota_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	for i := 0; i < push.MaxConnsPerStream; i++ {
+		tk := issuePushTicket(t, env, token)
+		conn := dialWS(t, env, tk.Ticket, nil)
+		readWS(t, conn) // 后台读循环：自动 pong 保活
+		t.Cleanup(func() { _ = conn.CloseNow() })
+	}
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != push.MaxConnsPerStream {
+		t.Fatalf("上限内连接数 = %d, want %d", got, push.MaxConnsPerStream)
+	}
+
+	// 第 9 条：握手完成（票据有效），随后被服务端以 1008 关闭。
+	tk := issuePushTicket(t, env, token)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsDialURL(env, tk.Ticket), nil)
+	if err != nil {
+		t.Fatalf("第 %d 条 WS 握手（服务端在握手后才拒绝）: %v", push.MaxConnsPerStream+1, err)
+	}
+	defer conn.CloseNow()
+	_, _, err = conn.Read(ctx)
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != websocket.StatusPolicyViolation {
+		t.Fatalf("超限连接应被 1008 关闭：err=%v", err)
+	}
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != push.MaxConnsPerStream {
+		t.Fatalf("被拒连接不应占位：Subscribers = %d, want %d", got, push.MaxConnsPerStream)
+	}
+}
+
+// TestIntegrationPushTicketRateLimit_HTTP 换票限速（#85 安全审计 NV2）：
+// 同一用户每分钟 30 次，第 31 次返回 429；其他用户不受牵连。
+func TestIntegrationPushTicketRateLimit_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	const limit = 30 // 与 api.ticketIssueLimit 对齐
+	for i := 1; i <= limit; i++ {
+		status, api := env.Request(t, http.MethodPost, "/notify/push/ticket", token, nil)
+		if status != http.StatusOK {
+			t.Fatalf("第 %d 次换票应成功：HTTP %d code %d msg %q", i, status, api.Code, api.Msg)
+		}
+	}
+	status, api := env.Request(t, http.MethodPost, "/notify/push/ticket", token, nil)
+	if status != http.StatusTooManyRequests || api.Code != http.StatusTooManyRequests {
+		t.Fatalf("第 %d 次换票应 429：HTTP %d code %d msg %q", limit+1, status, api.Code, api.Msg)
+	}
+
+	// 其他用户不受该用户配额牵连（限速按 (tenant,user) 隔离）。
+	status, api = env.Request(t, http.MethodPost, "/system/tenant", token, map[string]any{
+		"name": "换票限速租户", "contactName": "联系人", "status": 0,
+	})
+	mustCode0(t, status, api, "创建租户")
+	tenant2Token := loginTenant(t, env, 2)
+	status, api = env.Request(t, http.MethodPost, "/notify/push/ticket", tenant2Token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("其他用户换票不应被牵连：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 	}
 }

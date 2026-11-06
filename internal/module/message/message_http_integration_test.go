@@ -468,6 +468,64 @@ func TestIntegrationMessageSendAndLogIsolation(t *testing.T) {
 	}
 }
 
+// TestIntegrationMessageLogBatchDelete 覆盖批量删除端点（spec §5.2
+// DELETE /message/log 按 ids，#85 审查补齐）：正常批量删除、跨租户 ids
+// 404 且不删他租户行、all-or-nothing（混入不可见 ID 一行不删）、空 ids 400。
+func TestIntegrationMessageLogBatchDelete(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	sendOne := func(recipient string) int64 {
+		t.Helper()
+		status, api := sendMessage(t, env, admin, "/message/sms/send", map[string]any{
+			"templateCode": seededTemplateCode, "recipient": recipient, "params": map[string]string{"name": "批量"},
+		})
+		mustOK(t, "发送短信 "+recipient, status, api)
+		return int64(decodeMap(t, api.Data)["logId"].(float64))
+	}
+
+	id1 := sendOne("13700000001")
+	id2 := sendOne("13700000002")
+	id3 := sendOne("13700000003")
+
+	// 空 ids / 缺 ids → 400。
+	status, api := env.Request(t, http.MethodDelete, "/message/log", admin, map[string]any{"ids": []int64{}})
+	if status != http.StatusBadRequest {
+		t.Fatalf("空 ids：HTTP %d msg %q，期望 400", status, api.Msg)
+	}
+	status, _ = env.Request(t, http.MethodDelete, "/message/log", admin, nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("缺 ids：HTTP %d，期望 400", status)
+	}
+
+	// 不存在的 ID → 404，已有行不受影响。
+	status, api = env.Request(t, http.MethodDelete, "/message/log", admin, map[string]any{"ids": []int64{id1, 999999999}})
+	if status != http.StatusNotFound {
+		t.Fatalf("混入不存在 ID：HTTP %d msg %q，期望 404", status, api.Msg)
+	}
+	if _, total := pageLogs(t, env, admin, ""); total != 3 {
+		t.Fatalf("404 后不应删除任何行：total=%d，期望 3", total)
+	}
+
+	// 正常批量删除 id1/id2。
+	status, api = env.Request(t, http.MethodDelete, "/message/log", admin, map[string]any{"ids": []int64{id1, id2}})
+	mustOK(t, "批量删除", status, api)
+	if _, total := pageLogs(t, env, admin, ""); total != 1 {
+		t.Fatalf("批量删除后 total=%d，期望 1", total)
+	}
+
+	// 跨租户：租户 2 批量删除含租户 1 的 id3 → 404，且租户 1 的行原样保留。
+	tenant2 := createTenantByAPI(t, env, admin, "批量删除隔离租户")
+	tenantToken := loginTenant(t, env, tenant2)
+	status, _ = env.Request(t, http.MethodDelete, "/message/log", tenantToken, map[string]any{"ids": []int64{id3}})
+	if status != http.StatusNotFound {
+		t.Fatalf("租户 2 删租户 1 日志：HTTP %d，期望 404", status)
+	}
+	if _, total := pageLogs(t, env, admin, ""); total != 1 {
+		t.Fatalf("跨租户 404 后租户 1 行不应被删：total=%d，期望 1", total)
+	}
+}
+
 // TestIntegrationMessageProviderFailureAndResend 覆盖 provider 失败/未知 provider
 // 的 502 + 失败日志，以及手动重发只更新原行、成功后状态翻转。
 func TestIntegrationMessageProviderFailureAndResend(t *testing.T) {
@@ -581,4 +639,49 @@ func TestIntegrationMessageProviderFailureAndResend(t *testing.T) {
 	if _, total = pageLogs(t, env, admin, ""); total != 0 {
 		t.Fatalf("清空后 total=%d，期望 0", total)
 	}
+}
+
+// TestIntegrationMessageSendBodyLimit 发送端点请求体收口（#85 安全审计 NV3）：
+// 超过 MaxBytesReader（128KB）→ 400；params 值超 dto 上限（4096 字符）→ 400；
+// 正常大小（合法模板参数）不受影响。短信/邮件共用 SendReq，两路都覆盖。
+func TestIntegrationMessageSendBodyLimit(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	// 200KB 参数值 → 请求体硬上限 400（文案提示上限）。
+	status, api := sendMessage(t, env, admin, "/message/mail/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "user@example.com",
+		"params": map[string]string{"name": strings.Repeat("大", 200<<10)},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("200KB 参数：HTTP %d msg %q，期望 400", status, api.Msg)
+	}
+	if !strings.Contains(api.Msg, "请求体过大") {
+		t.Fatalf("超限文案应提示请求体过大：%q", api.Msg)
+	}
+
+	// 参数值 5000 字符（< 128KB 但超 dto 值上限 4096）→ 400。
+	status, api = sendMessage(t, env, admin, "/message/mail/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "user@example.com",
+		"params": map[string]string{"name": strings.Repeat("长", 5000)},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("5000 字符参数值：HTTP %d msg %q，期望 400", status, api.Msg)
+	}
+
+	// 短信同口径：200KB 参数 → 400。
+	status, _ = sendMessage(t, env, admin, "/message/sms/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "13800000000",
+		"params": map[string]string{"name": strings.Repeat("大", 200<<10)},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("短信 200KB 参数：HTTP %d，期望 400", status)
+	}
+
+	// 正常大小不受影响：邮件发送照常成功写日志。
+	status, api = sendMessage(t, env, admin, "/message/mail/send", map[string]any{
+		"templateCode": seededTemplateCode, "recipient": "user@example.com",
+		"params": map[string]string{"name": "收口后正常"},
+	})
+	mustOK(t, "收口后正常邮件发送", status, api)
 }

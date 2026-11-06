@@ -6,6 +6,10 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
+// sensitiveWordCheckMaxBodyBytes 是检测端点的请求体字节硬上限（#85 安全审计
+// NV3）：128KB = 100KB 检测文本 + JSON 信封与转义余量；超限 400。
+const sensitiveWordCheckMaxBodyBytes = 128 << 10
+
 // 敏感词管理（issue #81，spec §5.6）：词库 CRUD 与检测（system:sensitive-word:*）。
 // 词库是租户级资源（不挂 RequirePlatformTenant），跨租户业务 ID 由服务层按
 // 404 收口；检测端点复用 query 权限码。
@@ -64,10 +68,10 @@ func (h *Handler) DeleteSensitiveWord(c *gin.Context) {
 }
 
 // CheckSensitiveWord 检测文本：返回命中词（去重、按首次出现位置排序）与
-// 打码文本。
+// 打码文本。请求体经 MaxBytesReader 收口（#85 安全审计 NV3），超限 400。
 func (h *Handler) CheckSensitiveWord(c *gin.Context) {
 	var req dto.SensitiveWordCheckReq
-	if !bindJSON(c, &req) {
+	if !bindJSONLimit(c, &req, sensitiveWordCheckMaxBodyBytes, "敏感词检测") {
 		return
 	}
 	resp, err := h.sensitive.CheckSensitiveText(c.Request.Context(), req.Text)

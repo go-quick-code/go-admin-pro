@@ -243,6 +243,19 @@ func (r *Repository) FindLogByID(ctx context.Context, id int64) (*model.Log, err
 	return &row, nil
 }
 
+// FindLogsByIDs 按 ID 批量查日志（租户插件自动限定当前租户）：
+// 跨租户/不存在的 ID 不会出现在返回结果中，供 service 层做批量 404 判定。
+func (r *Repository) FindLogsByIDs(ctx context.Context, ids []int64) ([]model.Log, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []model.Log
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ListLogs 按筛选分页查询当前租户的发送日志。
 func (r *Repository) ListLogs(ctx context.Context, f LogFilter, offset, limit int) ([]model.Log, int64, error) {
 	q := r.db.WithContext(ctx).Model(&model.Log{})
@@ -300,6 +313,15 @@ func (r *Repository) UpdateLogAttempt(ctx context.Context, id int64, fields map[
 // DeleteLog 按 ID 硬删除当前租户的日志（append-only 表不设 deleted_at）。
 func (r *Repository) DeleteLog(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Log{}, id).Error
+}
+
+// DeleteLogs 按 ID 批量硬删除当前租户的日志（租户插件自动追加 tenant_id
+// 条件，跨租户 ID 天然不命中）。
+func (r *Repository) DeleteLogs(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Where("id IN ?", ids).Delete(&model.Log{}).Error
 }
 
 // ClearLogs 清空当前租户的全部发送日志。显式带 tenant_id 条件：

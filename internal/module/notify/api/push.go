@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/notify/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/push"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/ratelimit"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -19,6 +21,12 @@ import (
 // wsReadLimit 是客户端消息上限（issue #79：4KB）。服务端只发不收，数据消息
 // 一律丢弃；上限只为在畸形客户端撑爆内存前快速断连（spec §4.5.3）。
 const wsReadLimit = 4096
+
+// ticketIssueLimit 是换票端点按登录用户的限速阈值：每分钟 30 次
+// （#85 安全审计 NV2）。前端断线退避 1/2/5/10/30s 重连时远低于该阈值，
+// 换票风暴（退避失效、脚本刷票）会被拦下；进程内单实例语义，多实例部署
+// 由反代层另配。
+const ticketIssueLimit = 30
 
 // PushHandler 是 notify 模块的实时推送 HTTP 入口（issue #78 SSE + issue #79
 // WebSocket，spec §4.5.3 / §5.4 / ADR 0013）：
@@ -34,6 +42,9 @@ type PushHandler struct {
 	hub       *push.Hub
 	tickets   *push.TicketManager
 	heartbeat time.Duration
+	// ticketLimiter 是换票端点的按用户进程内限速器（#85 安全审计 NV2），
+	// 随 Handler 实例创建（集成测试每用例独立 env 即独立计数）。
+	ticketLimiter *ratelimit.Limiter
 	// resolvePrincipal 解析 Bearer token 为 (tenantID, userID, ok)。
 	// SSE 请求带 Authorization 时做第二身份比对（票据与 Bearer 必须同人，
 	// 防脚本转发票据跨租户订阅）；浏览器不带该头，仅凭票据认证。
@@ -48,7 +59,13 @@ func NewPushHandler(hub *push.Hub, tickets *push.TicketManager, heartbeat time.D
 	if heartbeat <= 0 {
 		heartbeat = 25 * time.Second
 	}
-	return &PushHandler{hub: hub, tickets: tickets, heartbeat: heartbeat, resolvePrincipal: resolvePrincipal}
+	return &PushHandler{
+		hub:              hub,
+		tickets:          tickets,
+		heartbeat:        heartbeat,
+		ticketLimiter:    ratelimit.New(ticketIssueLimit, time.Minute),
+		resolvePrincipal: resolvePrincipal,
+	}
 }
 
 // RegisterStream 注册换票端点：需要登录但不挂操作日志（每次建流都会换票，
@@ -64,11 +81,16 @@ func (h *PushHandler) RegisterPublic(rg *gin.RouterGroup) {
 }
 
 // Ticket 签发一次性推送票据（登录即可，spec §5.4）。transports 按前端实际
-// 优先级列出（issue #79：WS 优先，SSE 次之）。
+// 优先级列出（issue #79：WS 优先，SSE 次之）。按登录用户限速（#85 安全审计
+// NV2）：每分钟 ticketIssueLimit 次，超限 429。
 func (h *PushHandler) Ticket(c *gin.Context) {
 	p, ok := authn.From(c.Request.Context())
 	if !ok || p.UserID <= 0 {
 		response.Fail(c, xerr.Unauthorized("未登录"))
+		return
+	}
+	if h.ticketLimiter != nil && !h.ticketLimiter.Allow(userRateKey(p.TenantID, p.UserID)) {
+		response.Fail(c, xerr.TooManyRequests("换票过于频繁，请稍后重试"))
 		return
 	}
 	token, expiresIn := h.tickets.Issue(p.TenantID, p.UserID)
@@ -77,6 +99,11 @@ func (h *PushHandler) Ticket(c *gin.Context) {
 		ExpiresIn:  int(expiresIn.Seconds()),
 		Transports: []string{"ws", "sse"},
 	})
+}
+
+// userRateKey 拼限速 key（租户:用户，避免不同租户同 ID 用户互相串窗）。
+func userRateKey(tenantID, userID int64) string {
+	return strconv.FormatInt(tenantID, 10) + ":" + strconv.FormatInt(userID, 10)
 }
 
 // authTicket 是 SSE/WS 共用的票据认证（issue #79 抽取自 #78 的 SSE 内联逻辑，
@@ -115,7 +142,12 @@ func (h *PushHandler) SSE(c *gin.Context) {
 		return
 	}
 
-	sub := h.hub.Subscribe(id.TenantID, id.UserID)
+	// 连接数配额（#85 安全审计 NV2）：超限 429，不建立事件流。
+	sub, ok := h.hub.Subscribe(id.TenantID, id.UserID)
+	if !ok {
+		response.Fail(c, xerr.TooManyRequests("该账号连接数已达上限，请稍后重试"))
+		return
+	}
 	defer h.hub.Unsubscribe(sub)
 
 	w := c.Writer
@@ -195,7 +227,13 @@ func (h *PushHandler) WS(c *gin.Context) {
 	// 读循环退出后经 wcancel 走统一清理。
 	ws.SetReadLimit(wsReadLimit)
 
-	sub := h.hub.Subscribe(id.TenantID, id.UserID)
+	// 连接数配额（#85 安全审计 NV2）：握手已完成，超限即直接关闭连接
+	//（1008 policy violation），客户端读循环收到关闭帧退出。
+	sub, ok := h.hub.Subscribe(id.TenantID, id.UserID)
+	if !ok {
+		ws.Close(websocket.StatusPolicyViolation, "该账号连接数已达上限")
+		return
+	}
 	defer h.hub.Unsubscribe(sub)
 
 	// wctx 贯穿读写循环：客户端断开（请求 ctx 取消）、应用关闭或任一侧

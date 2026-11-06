@@ -458,3 +458,36 @@ func TestIntegrationSensitiveWordFollowUp(t *testing.T) {
 	})
 	mustOK(t, "未命中修改跟进", status, api)
 }
+
+// TestIntegrationSensitiveWordCheckBodyLimit 检测端点请求体收口（#85 安全审计
+// NV3）：超过 MaxBytesReader（128KB）的请求体 400；字符数超 dto 上限
+// （102400）但体量在硬上限内的文本同样 400；正常大小（50KB）不受影响。
+func TestIntegrationSensitiveWordCheckBodyLimit(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	mustCreateSensitiveWord(t, env, admin, "违禁")
+
+	// 200KB 文本 → 请求体硬上限 400（超限文案提示上限）。
+	status, _, _, msg := checkTextAPI(t, env, admin, strings.Repeat("a", 200<<10))
+	if status != http.StatusBadRequest {
+		t.Fatalf("200KB 文本：HTTP %d msg %q，期望 400", status, msg)
+	}
+	if !strings.Contains(msg, "请求体过大") {
+		t.Fatalf("超限文案应提示请求体过大：%q", msg)
+	}
+
+	// 110K 字符（ASCII，110KB < 128KB 硬上限）→ dto 字符上限 400。
+	status, _, _, msg = checkTextAPI(t, env, admin, strings.Repeat("a", 110_000))
+	if status != http.StatusBadRequest {
+		t.Fatalf("110K 字符文本：HTTP %d msg %q，期望 400", status, msg)
+	}
+
+	// 50KB 正常大小不受影响，检测照常返回。
+	status, words, _, msg := checkTextAPI(t, env, admin, strings.Repeat("正文", 16000)+"违禁词尾")
+	if status != http.StatusOK {
+		t.Fatalf("50KB 正常文本：HTTP %d msg %q，期望 200", status, msg)
+	}
+	if len(words) != 1 || words[0] != "违禁" {
+		t.Fatalf("正常大小检测应命中违禁词：%v", words)
+	}
+}
