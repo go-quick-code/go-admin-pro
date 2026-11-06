@@ -78,3 +78,11 @@ access-log:
   # 保留天数：cleanAccessLogs 系统级任务每日 03:00 清理超过保留期的记录
   #（缺省 30 天）。
   retention-days: 30
+
+# IP 归属地定位（issue #82，spec §4.8.4）：登录日志分页展示归属地。
+# ip2region v2 xdb 数据文件由部署侧提供（官方 releases 下载，仓库不内置）。
+ip-location:
+  # xdb 文件路径；留空表示未启用——登录日志归属地为空串，其余功能不受影响。
+  # 文件不存在/加载失败只告警一次并退回空实现，不影响启动。
+  # 可用环境变量 GAP_IP_LOCATION_XDB_PATH 覆盖。
+  xdb-path: ""

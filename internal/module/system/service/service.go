@@ -11,6 +11,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/datascope"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/iploc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"golang.org/x/crypto/bcrypt"
@@ -32,6 +33,10 @@ type Service struct {
 	// 业务模块，由业务模块在 internal/app 装配期按 dictType 注册计数函数。
 	dictUsageMu       sync.RWMutex
 	dictUsageCheckers map[string]func(ctx context.Context, code string) (int64, error)
+
+	// ipResolver 是登录日志归属地解析器（issue #82，spec §4.8.4/§4.8.5）：
+	// internal/app 装配期注入（含 LRU 装饰）；nil 表示未启用，归属地为空。
+	ipResolver iploc.Resolver
 }
 
 func New(repo *repository.Repository, jwtManager *jwt.Manager, cfg *config.Config) *Service {

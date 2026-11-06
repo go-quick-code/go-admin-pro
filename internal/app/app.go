@@ -33,6 +33,7 @@ import (
 	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
 	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/iploc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/push"
 	"github.com/go-quick-code/go-admin-pro/internal/router"
@@ -120,6 +121,12 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 
 	sysRepo := systemrepo.New(db)
 	sysSvc := systemservice.New(sysRepo, jwtManager, cfg)
+
+	// IP 归属地定位（issue #82，spec §4.8.4/§4.8.5）：配置 ip-location.xdb-path
+	// 时启用 ip2region xdb 驱动；文件不存在/加载失败只告警一次并退回空实现
+	//（定位是展示增强，不允许阻断启动）。登录日志分页经 10000 条 LRU 缓存
+	// 解析归属地；未配置时为空实现，归属地为空串，分页不受影响。
+	sysSvc.SetIPResolver(iploc.NewCached(iploc.New(log, cfg.IPLocation.XdbPath), iploc.LoginLogCacheSize))
 
 	// 社交登录（issue #76/#77，spec §4.4 / ADR 0011）：与 system 共享仓储/JWT 的
 	// 独立服务；#77 注册微信开放平台/钉钉/企微三个 provider 实现（端点可由

@@ -14,7 +14,28 @@ func (s *Service) ListLoginLogs(ctx context.Context, req *dto.LoginLogPageReq) (
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
 	filter := repository.LoginLogFilter{Username: req.Username, LoginIP: req.LoginIP, Result: req.Result}
-	return s.repo.ListLoginLogs(ctx, filter, page.Offset(), page.PageSize)
+	list, total, err := s.repo.ListLoginLogs(ctx, filter, page.Offset(), page.PageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.fillLoginLocations(list)
+	return list, total, nil
+}
+
+// fillLoginLocations 为分页结果补归属地（issue #82，spec §4.8.5）：
+// 解析器由 internal/app 注入（iploc + 10000 条 LRU）；未注入（未配置
+// ip-location.xdb-path）或单个 IP 定位失败时对应行为空串，
+// 不影响分页本身（iploc.Resolver 契约：永远返回串、不返回错误）。
+func (s *Service) fillLoginLocations(list []model.LoginLog) {
+	if s.ipResolver == nil {
+		return
+	}
+	for i := range list {
+		if list[i].LoginIP == "" {
+			continue
+		}
+		list[i].LoginLocation = s.ipResolver.Resolve(list[i].LoginIP)
+	}
 }
 
 func (s *Service) ClearLoginLogs(ctx context.Context) error {
