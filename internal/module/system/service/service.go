@@ -22,9 +22,10 @@ type Service struct {
 	jwt  *jwt.Manager
 	cfg  *config.Config
 
-	permCache sync.Map // map[int64]permSnapshot
-	pkgCache  sync.Map // map[int64]packageMenuSnapshot：租户套餐菜单快照
-	failCache sync.Map // map[string]*loginFailState
+	permCache     sync.Map      // map[int64]permSnapshot
+	pkgCache      sync.Map      // map[int64]packageMenuSnapshot：租户套餐菜单快照
+	failCache     sync.Map      // map[string]*loginFailState
+	quotaProvider QuotaProvider // app 装配的全量用量提供者（可为 nil）
 
 	// dictUsageMu 保护 dictUsageCheckers：字典项引用检查扩展点
 	//（issue #64 review，spec §4.14「被引用时只能停用」）。system 不反向依赖

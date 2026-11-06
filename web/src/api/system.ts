@@ -143,6 +143,13 @@ export function updateTenantStatus(data: { id: number; status: number }) {
 export function deleteTenant(id: number) {
   return request.delete(`/system/tenant/${id}`) as Promise<any>
 }
+// 租户配额（issue #71）：当前租户登录即可；指定租户需 system:tenant:query（平台）。
+export function getCurrentTenantQuota() {
+  return request.get('/system/tenant/quota') as Promise<any>
+}
+export function getTenantQuota(id: number) {
+  return request.get(`/system/tenant/${id}/quota`) as Promise<any>
+}
 
 // ---------- 租户套餐 ----------
 export function pageTenantPackages(params: any) {
