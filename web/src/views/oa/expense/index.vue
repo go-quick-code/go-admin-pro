@@ -30,6 +30,14 @@
           编辑
         </el-button>
         <el-button
+          v-if="isOwner(row) && isEditable(row.status) && canSubmit"
+          link
+          type="success"
+          @click.stop="doSubmit(row)"
+        >
+          提交
+        </el-button>
+        <el-button
           v-if="isOwner(row) && isEditable(row.status) && canDelete"
           link
           type="danger"
@@ -131,7 +139,8 @@
       </template>
     </el-dialog>
 
-    <!-- 详情：表头 + 明细 + 附件 + 审批时间线（提交后，#55 接入）。 -->
+    <!-- 详情：表头 +「明细 / 审批记录」两个 tab（issue #55：时间线 + 当前待办 +
+         通用待办中心入口）。 -->
     <el-drawer v-model="detailVisible" title="报销详情" size="720px">
       <div v-loading="detailLoading">
         <template v-if="detail">
@@ -154,74 +163,100 @@
             </el-descriptions-item>
           </el-descriptions>
 
-          <div class="section-head"><span>明细</span></div>
-          <el-table :data="detail.items" border size="small">
-            <el-table-column type="index" label="#" width="50" />
-            <el-table-column prop="category" label="类别" min-width="100" />
-            <el-table-column label="金额（元）" width="120">
-              <template #default="{ row }">{{ row.amount }}</template>
-            </el-table-column>
-            <el-table-column prop="expenseDate" label="发生日期" width="120" />
-            <el-table-column prop="remark" label="备注" min-width="150" />
-          </el-table>
-          <div class="form-total">
-            <span class="hint">合计</span>
-            <span class="amount">￥{{ detail.totalAmount }}</span>
-          </div>
-
-          <div class="section-head"><span>审批时间线</span></div>
-          <el-timeline v-if="detail.approval?.records?.length" class="timeline">
-            <el-timeline-item
-              v-for="rec in detail.approval.records"
-              :key="rec.id"
-              :timestamp="formatTime(rec.createTime)"
-            >
-              <div>
-                <el-tag :type="recordTag(rec.action)" size="small">{{ recordText(rec.action) }}</el-tag>
-                <span class="timeline-operator">{{ rec.operatorName || `用户#${rec.operatorId}` }}</span>
+          <el-tabs v-model="detailTab" class="detail-tabs">
+            <el-tab-pane label="明细" name="detail">
+              <div class="section-head"><span>明细</span></div>
+              <el-table :data="detail.items" border size="small">
+                <el-table-column type="index" label="#" width="50" />
+                <el-table-column prop="category" label="类别" min-width="100" />
+                <el-table-column label="金额（元）" width="120">
+                  <template #default="{ row }">{{ row.amount }}</template>
+                </el-table-column>
+                <el-table-column prop="expenseDate" label="发生日期" width="120" />
+                <el-table-column prop="remark" label="备注" min-width="150" />
+              </el-table>
+              <div class="form-total">
+                <span class="hint">合计</span>
+                <span class="amount">￥{{ detail.totalAmount }}</span>
               </div>
-              <div class="timeline-node">{{ rec.nodeName || '（实例级动作）' }}</div>
-              <div v-if="rec.comment" class="timeline-comment">{{ rec.comment }}</div>
-            </el-timeline-item>
-          </el-timeline>
-          <el-empty
-            v-else
-            :description="detail.approvalInstanceId ? '暂无审批记录' : '尚未提交审批（草稿）'"
-          />
 
-          <div class="section-head">
-            <span>附件</span>
-            <el-upload
-              v-if="isOwner(detail) && isEditable(detail.status) && canUpdate"
-              :show-file-list="false"
-              :http-request="handleUpload"
-              :accept="fileAccept"
-            >
-              <el-button size="small">上传附件</el-button>
-            </el-upload>
-          </div>
-          <el-table v-if="detail.files?.length" :data="detail.files" border size="small">
-            <el-table-column label="文件名" min-width="220">
-              <template #default="{ row }">
-                <el-button link type="primary" class="file-link" @click="downloadFile(row)">
-                  {{ row.name }}
-                </el-button>
-              </template>
-            </el-table-column>
-            <el-table-column label="大小" width="100">
-              <template #default="{ row }">{{ formatSize(row.size) }}</template>
-            </el-table-column>
-            <el-table-column
-              v-if="isOwner(detail) && isEditable(detail.status) && canUpdate"
-              label="操作"
-              width="80"
-            >
-              <template #default="{ row }">
-                <el-button link type="danger" @click="removeFile(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-else class="hint">暂无附件；草稿/已驳回状态可上传。</div>
+              <div class="section-head">
+                <span>附件</span>
+                <el-upload
+                  v-if="isOwner(detail) && isEditable(detail.status) && canUpdate"
+                  :show-file-list="false"
+                  :http-request="handleUpload"
+                  :accept="fileAccept"
+                >
+                  <el-button size="small">上传附件</el-button>
+                </el-upload>
+              </div>
+              <el-table v-if="detail.files?.length" :data="detail.files" border size="small">
+                <el-table-column label="文件名" min-width="220">
+                  <template #default="{ row }">
+                    <el-button link type="primary" class="file-link" @click="downloadFile(row)">
+                      {{ row.name }}
+                    </el-button>
+                  </template>
+                </el-table-column>
+                <el-table-column label="大小" width="100">
+                  <template #default="{ row }">{{ formatSize(row.size) }}</template>
+                </el-table-column>
+                <el-table-column
+                  v-if="isOwner(detail) && isEditable(detail.status) && canUpdate"
+                  label="操作"
+                  width="80"
+                >
+                  <template #default="{ row }">
+                    <el-button link type="danger" @click="removeFile(row)">删除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div v-else class="hint">暂无附件；草稿/已驳回状态可上传。</div>
+            </el-tab-pane>
+
+            <!-- 审批记录（issue #55）：时间线 + 当前待办 + 通用待办中心入口。 -->
+            <el-tab-pane label="审批记录" name="approval">
+              <div class="section-head"><span>审批进度</span></div>
+              <el-timeline v-if="detail.approval?.records?.length" class="timeline">
+                <el-timeline-item
+                  v-for="rec in detail.approval.records"
+                  :key="rec.id"
+                  :timestamp="formatTime(rec.createTime)"
+                >
+                  <div>
+                    <el-tag :type="recordTag(rec.action)" size="small">{{ recordText(rec.action) }}</el-tag>
+                    <span class="timeline-operator">{{ rec.operatorName || `用户#${rec.operatorId}` }}</span>
+                  </div>
+                  <div class="timeline-node">{{ rec.nodeName || '（实例级动作）' }}</div>
+                  <div v-if="rec.comment" class="timeline-comment">{{ rec.comment }}</div>
+                </el-timeline-item>
+              </el-timeline>
+              <el-empty
+                v-else
+                :description="detail.approvalInstanceId ? '暂无审批记录' : '尚未提交审批（草稿/已驳回可提交）'"
+              />
+
+              <div class="section-head"><span>当前待办</span></div>
+              <el-table v-if="pendingTasks.length" :data="pendingTasks" border size="small">
+                <el-table-column prop="nodeName" label="节点" min-width="120" />
+                <el-table-column label="办理人" min-width="120">
+                  <template #default="{ row }">
+                    {{ row.assigneeName || `用户#${row.assigneeId}` }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="80">
+                  <template #default>待办</template>
+                </el-table-column>
+              </el-table>
+              <div v-else class="hint">
+                {{ detail.approvalInstanceId ? '当前没有待办任务（流程已结束）' : '尚未提交审批' }}
+              </div>
+              <div v-if="detail.approvalInstanceId" class="todo-link">
+                <el-button type="primary" plain @click="goTodoCenter">前往待办中心</el-button>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
         </template>
       </div>
       <template #footer>
@@ -233,6 +268,14 @@
             @click="openEdit(detail.id)"
           >
             编辑
+          </el-button>
+          <el-button
+            v-if="detail && isOwner(detail) && isEditable(detail.status) && canSubmit"
+            type="success"
+            :loading="submitting"
+            @click="doSubmit(detail)"
+          >
+            提交审批
           </el-button>
           <el-button
             v-if="detail && isOwner(detail) && isEditable(detail.status) && canDelete"
@@ -250,7 +293,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { formatSize, formatTime } from '@/utils/format'
@@ -264,21 +307,25 @@ import {
   downloadExpenseClaimFile,
   getExpenseClaim,
   pageExpenseClaims,
+  submitExpenseClaim,
   updateExpenseClaim,
   uploadExpenseClaimFile,
 } from '@/api/oa'
 
-// 报销（issue #54，菜单 523 报销 / 535 我的报销）：列表 + 草稿编辑抽屉
-// （表头 + 明细行增删改排序 + 合计预览）+ 详情（明细/附件/时间线）。
-// 合计由服务端按明细重算（请求里的 totalAmount 被忽略）；提交与审批属 #55，
-// 本页暂不提供提交按钮。权限码 oa:expense:create/update/delete/query。
+// 报销（issue #54/#55，菜单 523 报销 / 535 我的报销）：列表 + 草稿编辑抽屉
+// （表头 + 明细行增删改排序 + 合计预览）+ 详情（明细 / 审批记录两个 tab，
+// 审批记录含时间线、当前待办与待办中心入口）。合计由服务端按明细重算（请求里
+// 的 totalAmount 被忽略）；提交（POST /:id/submit）在事务内生成审批实例，
+// 审批动作统一在通用待办完成。权限码 oa:expense:query/create/update/delete/submit。
 const userStore = useUserStore()
 const route = useRoute()
+const router = useRouter()
 const tableRef = ref()
 const canQuery = computed(() => userStore.hasPerm('oa:expense:query'))
 const canCreate = computed(() => userStore.hasPerm('oa:expense:create'))
 const canUpdate = computed(() => userStore.hasPerm('oa:expense:update'))
 const canDelete = computed(() => userStore.hasPerm('oa:expense:delete'))
+const canSubmit = computed(() => userStore.hasPerm('oa:expense:submit'))
 const currentUserId = computed(() => Number(userStore.userInfo?.id || 0))
 
 const pageApi = { page: pageExpenseClaims }
@@ -295,7 +342,7 @@ const columns = computed(() => {
     { prop: 'itemCount', label: '明细', width: 90, slot: true },
     { prop: 'status', label: '状态', width: 90, slot: true },
     { prop: 'createTime', label: '创建时间', minWidth: 170, slot: true },
-    { prop: 'actions', label: '操作', width: 190, slot: true },
+    { prop: 'actions', label: '操作', width: 240, slot: true },
   )
   return cols
 })
@@ -501,9 +548,16 @@ async function saveDraft() {
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<any>(null)
+const detailTab = ref('detail')
+
+// pendingTasks 是实例当前未办理的任务（bpm 候选人池物化为每人一行）。
+const pendingTasks = computed(() =>
+  (detail.value?.approval?.tasks ?? []).filter((task: any) => task?.status === 0),
+)
 
 async function openDetail(id: number) {
   detailVisible.value = true
+  detailTab.value = 'detail'
   detailLoading.value = true
   try {
     detail.value = await getExpenseClaim(id)
@@ -519,6 +573,35 @@ async function reloadDetail() {
 }
 
 // ---------- 动作 ----------
+const submitting = ref(false)
+
+// doSubmit 提交审批：服务端校验仅草稿/已驳回可提交，并在同一事务内生成
+// oa_expense_approval 实例（部门负责人 → oa:expense:manage）。
+async function doSubmit(row: any) {
+  await ElMessageBox.confirm(
+    '提交后将进入审批流程（部门负责人 → 财务），审批期间不能修改明细，确认提交吗？',
+    '提示',
+    { type: 'warning' },
+  )
+  submitting.value = true
+  try {
+    const saved = await submitExpenseClaim(row.id)
+    ElMessage.success('已提交审批')
+    tableRef.value?.reload()
+    if (detail.value?.id === row.id && saved?.id) {
+      detail.value = saved
+      detailTab.value = 'approval'
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+// goTodoCenter 跳到通用待办页（审批动作统一在待办完成）。
+function goTodoCenter() {
+  router.push('/bpm/task')
+}
+
 async function doDelete(row: any) {
   await ElMessageBox.confirm('删除后明细将一并移除，确认删除该报销单吗？', '提示', {
     type: 'warning',
@@ -607,6 +690,12 @@ onMounted(async () => {
   color: #909399;
   font-size: 12px;
   margin-top: 8px;
+}
+.detail-tabs {
+  margin-top: 12px;
+}
+.todo-link {
+  margin-top: 12px;
 }
 .file-link {
   padding: 0;

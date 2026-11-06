@@ -63,8 +63,10 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
 	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
-	// 默认审批流程（issue #47，spec §7.3）：crm_contract_approval v1 已发布。
-	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 1, "默认流程定义")
+	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）与
+	// oa_expense_approval v1（issue #55）均已发布。
+	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 2, "默认流程定义")
+	assertDefaultExpenseDefinition(t, db)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -90,9 +92,41 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
-	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 1, "默认流程定义（幂等）")
+	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 2, "默认流程定义（幂等）")
+	assertDefaultExpenseDefinition(t, db)
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
+}
+
+// assertDefaultExpenseDefinition 断言报销默认流程（issue #55，spec §4.9）：
+// oa_expense_approval v1 已发布，节点 1 为发起人部门负责人、节点 2 为
+// oa:expense:manage 权限码候选池。
+func assertDefaultExpenseDefinition(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var def bpmmodel.ProcessDefinition
+	if err := tenant.Skip(db).
+		Where("tenant_id = ? AND `key` = ?", 1, "oa_expense_approval").
+		First(&def).Error; err != nil {
+		t.Fatalf("读取报销默认流程定义: %v", err)
+	}
+	if def.Version != 1 || def.Status != bpmmodel.DefinitionStatusPublished || def.PublishedAt == nil {
+		t.Fatalf("报销默认流程应为已发布 v1：%+v", def)
+	}
+	if def.BusinessType != "oa_expense_approval" {
+		t.Fatalf("报销默认流程 business_type 不符：%q", def.BusinessType)
+	}
+	if len(def.Nodes) != 2 {
+		t.Fatalf("报销默认流程应有两个节点，实际 %+v", def.Nodes)
+	}
+	if def.Nodes[0].AssigneeType != bpmmodel.AssigneeInitiatorDeptLeader {
+		t.Fatalf("节点 1 应为发起人部门负责人：%+v", def.Nodes[0])
+	}
+	if def.Nodes[1].AssigneeType != bpmmodel.AssigneePermission || def.Nodes[1].AssigneeValue != "oa:expense:manage" {
+		t.Fatalf("节点 2 应为 oa:expense:manage 权限码：%+v", def.Nodes[1])
+	}
+	if def.Nodes[1].Name == "" {
+		t.Fatalf("节点 2 缺少名称：%+v", def.Nodes[1])
+	}
 }
 
 func assertCount(t *testing.T, db *gorm.DB, model any, want int64, label string) {

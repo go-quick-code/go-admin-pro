@@ -355,11 +355,11 @@ export function downloadLeaveRequestFile(url: string) {
 }
 
 
-// ---------- OA 报销（issue #54，spec #42 §4.9/§5） ----------
+// ---------- OA 报销（issue #54/#55，spec #42 §4.9/§5） ----------
 // 权限模型：列表/详情/附件查看登录即可（服务端按 §4.6 可见范围收口）；
-// 写动作逐码 oa:expense:create/update/delete；提交（oa:expense:submit）与
-// 审批回调属 #55，本工单只登记按钮码。金额一律十进制字符串（分单位由后端
-// money.Money 解析，拒绝 JSON 数字以避免浮点丢精度）。
+// 写动作逐码 oa:expense:create/update/delete/submit；审批动作统一在通用待办
+// （/bpm/task/*）完成，通过/驳回/撤回由 bpm 回调写回报销单状态。金额一律
+// 十进制字符串（分单位由后端 money.Money 解析，拒绝 JSON 数字以避免浮点丢精度）。
 
 export interface ExpenseItemPayload {
   id?: number
@@ -398,6 +398,12 @@ export function updateExpenseClaim(data: ExpenseClaimPayload) {
 // 删除草稿/已驳回单据（明细级联软删；其他状态 409）。
 export function deleteExpenseClaim(id: number) {
   return request.delete(`/oa/expense/claim/${id}`) as Promise<any>
+}
+// 提交审批（issue #55，oa:expense:submit）：仅本人、仅草稿/已驳回（其余 409）；
+// 服务端在同一事务内生成 oa_expense_approval 实例（部门负责人 → oa:expense:manage），
+// 审批人解析不到返回 400 且不改变状态。
+export function submitExpenseClaim(id: number) {
+  return request.post(`/oa/expense/claim/${id}/submit`) as Promise<any>
 }
 // 附件列表（新上传的在前）。
 export function listExpenseClaimFiles(id: number) {
@@ -459,6 +465,58 @@ export function updateCalendarEvent(data: CalendarEventPayload) {
 // 取消日程（软取消，仅创建人；取消后不再展示）。
 export function cancelCalendarEvent(id: number) {
   return request.delete(`/oa/calendar/event/${id}`) as Promise<any>
+}
+
+
+// ---------- OA 文档目录与 ACL（issue #58，spec #42 §3.8/§4.12/§5） ----------
+// 权限模型：目录树/详情挂 oa:document:query（菜单 526 管理入口 / 537 我的文档），
+// 不可见目录不出现在树里、详情 404；创建挂 oa:document:create（5261），
+// 顶层目录必须带显式 ACL；改名/删除/ACL 设置只要求目录管理权（目录 owner 或
+// oa:document:manage），服务层对「可见无管理权」返回 403、不可见返回 404；
+// 有子目录或文件的目录删除返回 409。文件上传/下载由 #59 落地（码 5263）。
+
+// ACL 主体：0 全员（targetId=0）/ 1 部门（含子树）/ 2 角色 / 3 用户。
+export interface DocumentACLPayload {
+  targetType: number
+  targetId: number
+}
+
+export interface DocumentFolderPayload {
+  id?: number
+  parentId?: number
+  name: string
+  sort?: number
+  acl?: DocumentACLPayload[]
+}
+
+// 可见目录树：只含当前用户有读权限的目录；父目录不可见时子目录提升为根节点。
+export function getDocumentFolderTree() {
+  return request.get('/oa/document/folder/tree') as Promise<any>
+}
+// 目录详情（范围外/跨租户/无 ACL 顶层的非 owner 404）。
+export function getDocumentFolder(id: number) {
+  return request.get(`/oa/document/folder/${id}`) as Promise<any>
+}
+// 创建目录：parentId=0 为顶层（必须带显式 ACL）；子目录 acl 留空表示继承。
+export function createDocumentFolder(data: DocumentFolderPayload) {
+  return request.post('/oa/document/folder', data) as Promise<any>
+}
+// 改名/排序（parentId 不可变，v1 不做跨目录移动）。
+export function updateDocumentFolder(data: DocumentFolderPayload) {
+  const { id, name, sort } = data
+  return request.put('/oa/document/folder', { id, name, sort }) as Promise<any>
+}
+// 删除目录：有子目录或文件返回 409。
+export function deleteDocumentFolder(id: number) {
+  return request.delete(`/oa/document/folder/${id}`) as Promise<any>
+}
+// 读取目录 ACL（需要目录管理权）：own entries + 最近祖先的有效条目。
+export function getDocumentFolderACL(id: number) {
+  return request.get(`/oa/document/folder/${id}/acl`) as Promise<any>
+}
+// 整体替换目录 ACL：顶层目录不允许清空（400）；子目录清空表示继承父目录。
+export function setDocumentFolderACL(id: number, entries: DocumentACLPayload[]) {
+  return request.put(`/oa/document/folder/${id}/acl`, { entries }) as Promise<any>
 }
 
 // ---------- OA 会议室与预约（issue #57，spec #42 §4.11/§4.14/§5） ----------

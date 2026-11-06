@@ -73,6 +73,14 @@ var TenantTables = []string{
 	"oa_calendar_event",
 	"oa_meeting_room",
 	"oa_room_booking",
+	// 文档（issue #58，迁移 00021）：目录/目录 ACL/文件三表全量租户隔离
+	// （spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。目录树为租户级
+	// 共享资源；读权限按最近一个有显式 ACL 的祖先判定（递归 CTE 谓词见
+	// oa/repository/document.go，纯函数镜像见 oa/service/document_rule.go）。
+	// 文件表本工单只建 schema，写入由 #59 承接。
+	"oa_document_folder",
+	"oa_document_folder_acl",
+	"oa_document_file",
 	// 考勤基础（issue #60，迁移 00022）：班次/考勤组/组员/打卡/结果五张表
 	// 全量租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。
 	// 组员唯一键 (tenant_id, user_id)——一个用户只属于一个考勤组；
