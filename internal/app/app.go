@@ -154,6 +154,8 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// *systemservice.Service 满足）；其余领域路由由后续 OA 工单按
 	// docs/oa-mvp-spec.md §2 落地。
 	oaSvc := oaservice.New(sysSvc, repository.New(db))
+	// 业务时区（ADR 0006）：请假取消窗口的「今天」按 app.timezone 计算。
+	oaSvc.SetLocation(cfg.Location())
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
@@ -169,9 +171,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	bpmSvc := bpmservice.New(bpmrepo.New(db), bpmSystemGateway{sys: sysSvc}, notifySvc)
 	bpmAPI := bpmapi.New(bpmSvc, sysAPI.RequirePermission)
 
-	// 请假申请（issue #52）：OA → bpm 单向依赖——提交在业务事务内经
+	// 请假申请（issue #52/#53）：OA → bpm 单向依赖——提交在业务事务内经
 	// StartInstanceInTx 发起审批，bpm 在通过/驳回/撤回的同一事务回调 oaSvc
-	// （OnApproved/OnRejected/OnWithdrawn）。附件复用 infra_file（biz_type=oa_leave）。
+	// （OnApproved/OnRejected/OnWithdrawn）。撤回复用 bpm 撤回入口；
+	// 取消是业务终态（不动 bpm 实例，事务内返还 used）。
+	// 附件复用 infra_file（biz_type=oa_leave）。
 	oaSvc.SetBPM(bpmSvc)
 	oaSvc.SetAPIPrefix(cfg.App.APIPrefix)
 	oaSvc.SetLeaveFileStore(leaveFileStore{infra: infraSvc})

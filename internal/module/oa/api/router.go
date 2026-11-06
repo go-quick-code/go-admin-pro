@@ -55,17 +55,20 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	balance.POST("/init", h.requirePermission(manageLeave), h.InitBalances)
 	balance.POST("/adjust", h.requirePermission(manageLeave), h.AdjustBalance)
 
-	// 请假申请（issue #52，菜单种子 529 段）：本人列表/详情/附件查看登录即可
-	//（服务层按本人收口，非本人 404）；写动作逐码——创建/编辑/删除/提交，
-	// 附件上传与删除跟随编辑码（oa:leave:update）。审批走通用待办
-	//（/bpm/task/*），本组不提供审批接口（spec §5：审批人的动作由 bpm 收口）。
+	// 请假申请（issue #52/#53，菜单种子 529 段）：列表/详情/附件查看登录即可
+	//（服务层按 §4.6 可见范围收口：manage → 全租户、部门负责人 → 子树、
+	// 否则本人；范围外/跨租户 404）；写动作逐码——创建/编辑/删除/提交/
+	// 撤回/取消，附件上传与删除跟随编辑码（oa:leave:update）。审批走通用
+	// 待办（/bpm/task/*），本组不提供审批接口（spec §5：审批人的动作由 bpm 收口）。
 	request := leave.Group("/request")
-	request.GET("/page", h.PageMyLeaveRequests)
-	request.GET("/:id", h.GetMyLeaveRequest)
+	request.GET("/page", h.PageLeaveRequests)
+	request.GET("/:id", h.GetLeaveRequestDetail)
 	request.POST("", h.requirePermission("oa:leave:create"), h.CreateLeaveRequest)
 	request.PUT("", h.requirePermission("oa:leave:update"), h.UpdateLeaveRequest)
 	request.DELETE("/:id", h.requirePermission("oa:leave:delete"), h.DeleteLeaveRequest)
 	request.POST("/:id/submit", h.requirePermission("oa:leave:submit"), h.SubmitLeaveRequest)
+	request.POST("/:id/withdraw", h.requirePermission("oa:leave:withdraw"), h.WithdrawLeaveRequest)
+	request.POST("/:id/cancel", h.requirePermission("oa:leave:cancel"), h.CancelLeaveRequest)
 	request.GET("/:id/files", h.ListLeaveRequestFiles)
 	request.GET("/:id/files/:fileId/download", h.DownloadLeaveRequestFile)
 	request.POST("/:id/files", h.requirePermission("oa:leave:update"), h.UploadLeaveRequestFile)

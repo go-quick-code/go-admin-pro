@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	bpmservice "github.com/go-quick-code/go-admin-pro/internal/module/bpm/service"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
@@ -39,6 +40,11 @@ type Service struct {
 	files LeaveFileStore
 	// apiPrefix 是附件鉴权下载地址的 HTTP 前缀。
 	apiPrefix string
+	// location 是应用业务时区（issue #53：取消窗口的「今天」按 app.timezone
+	// 计算，ADR 0006）。未注入时退回 time.Local（直接构造 Service 的单测）。
+	location *time.Location
+	// clock 是「现在」的来源（未注入时 time.Now），单元测试可替换。
+	clock func() time.Time
 }
 
 // New 创建 oa Service。repo 是 OA 实体表仓储（issue #50 起引入，工作日历
@@ -46,6 +52,34 @@ type Service struct {
 // nil（既有单测），生产装配必传。
 func New(sys SystemGateway, repo *repository.Repository) *Service {
 	return &Service{sys: sys, repo: repo}
+}
+
+// SetLocation 注入应用业务时区（ADR 0006：唯一来源是 config.Location()，
+// 由 internal/app 装配时调用）。nil 忽略，保留当前值。
+func (s *Service) SetLocation(loc *time.Location) {
+	if loc != nil {
+		s.location = loc
+	}
+}
+
+// businessLocation 返回业务时区：app 装配后是配置的 app.timezone；
+// 未注入（如直接构造 Service 的测试）时退回 time.Local。
+func (s *Service) businessLocation() *time.Location {
+	if s.location != nil {
+		return s.location
+	}
+	return time.Local
+}
+
+// businessNow 返回业务时区下的「现在」：请假取消窗口的「今天」走这里，
+// 不直接用 time.Now()（其 Location 是服务器本地时区，与 app.timezone
+// 可能不同，跨日边界会判错窗口——ADR 0006）。
+func (s *Service) businessNow() time.Time {
+	clock := s.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	return clock().In(s.businessLocation())
 }
 
 // VisibilityScopeOf 计算当前用户在指定资源上的可见范围（spec §4.6 取数编排）：

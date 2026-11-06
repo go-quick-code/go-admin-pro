@@ -832,7 +832,27 @@ func (s *Service) GetInstanceDetail(ctx context.Context, id int64) (*dto.Instanc
 			}
 		}
 	}
+	return s.instanceDetailOf(ctx, inst)
+}
 
+// GetInstanceDetailForBusiness 实例详情（业务模块专用读接口，issue #53）：
+// 跳过「发起人/办理人/bpm:instance:query」访问判定。调用方必须已按自己的
+// 数据权限完成可见性校验（例如 OA 请假详情按 spec §4.6 的 manage → 部门
+// 负责人子树 → 本人），再以实例 ID 读取时间线；不得把它暴露为绕过权限的
+// 通用 HTTP 读接口。跨租户实例仍由租户插件过滤为 404。
+func (s *Service) GetInstanceDetailForBusiness(ctx context.Context, id int64) (*dto.InstanceDetail, error) {
+	inst, err := s.repo.FindInstanceByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inst == nil {
+		return nil, xerr.NotFound("流程实例不存在")
+	}
+	return s.instanceDetailOf(ctx, inst)
+}
+
+// instanceDetailOf 组装实例详情（调用方已完成访问/业务可见性判定）。
+func (s *Service) instanceDetailOf(ctx context.Context, inst *model.ProcessInstance) (*dto.InstanceDetail, error) {
 	records, err := s.repo.ListRecordsByInstance(ctx, inst.ID)
 	if err != nil {
 		return nil, err
