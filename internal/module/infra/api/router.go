@@ -41,4 +41,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	dbdoc.GET("/tables", h.perm("infra:db-doc:query"), h.ListDBTables)
 	dbdoc.GET("/table/:name", h.perm("infra:db-doc:query"), h.GetDBTable)
 	dbdoc.GET("/export", h.perm("infra:db-doc:query"), h.ExportDBDoc)
+
+	// 监控面板（issue #84，spec §4.10/§5.8）：仅平台租户（service 层收口 403）。
+	// 只读聚合端点，不做 Prometheus/pprof/链路追踪。
+	monitor := rg.Group("/infra/monitor")
+	monitor.GET("/overview", h.perm("infra:monitor:query"), h.MonitorOverview)
+	monitor.GET("/requests", h.perm("infra:monitor:query"), h.MonitorRequests)
 }
