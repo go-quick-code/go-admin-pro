@@ -336,3 +336,12 @@ func (s *Service) DeleteConfig(ctx context.Context, id int64) error {
 	}
 	return s.repo.DeleteConfig(ctx, id)
 }
+
+// SoftDeleteFilesByBiz 软删除业务归属下的文件记录（仅置 deleted_at，不删磁盘
+// 文件）：公告草稿删除时保留附件记录、不做物理删除（issue #48，spec §4.7）。
+func (s *Service) SoftDeleteFilesByBiz(ctx context.Context, bizType string, bizID int64) error {
+	if err := validateFileBiz(bizType, bizID); err != nil {
+		return err
+	}
+	return s.repo.SoftDeleteFilesByBiz(ctx, bizType, bizID)
+}

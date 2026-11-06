@@ -274,6 +274,22 @@ func seedMenus(db *gorm.DB) error {
 		// OA 业务记录的共享可见范围见 oa/service.VisibilityScopeOf（spec §4.6）。
 		dir(500, 0, "OA", "/oa", "Calendar", 50),
 
+		// 公告（issue #48）：521 段（协调台账分配；grep 去重确认 521/5211–5215
+		// 未被占用）。查询码挂菜单（管理列表与草稿预览入口），创建/编辑/删除/
+		// 发布撤回逐码；5215 已读统计由 #49 承载（码先登记，接口由 #49 落地）。
+		menu(521, 500, "公告", "announcement", "oa/announcement/index", "oa:announcement:query", "Notification", 3),
+		btn(5211, 521, "公告新增", "oa:announcement:create", 1),
+		btn(5212, 521, "公告修改", "oa:announcement:update", 2),
+		btn(5213, 521, "公告删除", "oa:announcement:delete", 3),
+		btn(5214, 521, "公告发布", "oa:announcement:publish", 4),
+		btn(5215, 521, "已读统计", "oa:announcement:read-stats", 5),
+		// 我的公告（issue #48）：员工侧页面，权限码为空——登录即可（分配了
+		// 菜单的角色可见；后端 GET /oa/announcement/my/page 与已发布详情同为
+		// 登录即可，可见性由受众判定收口）。532 在 500–549 空位自取（#52 占
+		// 529 我的请假、#60 占 530 考勤组管理/531 我的考勤），grep 去重确认
+		// 532 未被占用。
+		menu(532, 500, "我的公告", "announcement-mine", "oa/announcement/mine", "", "Bell", 10),
+
 		// 工作日历（issue #50）：520 段（协调台账分配），按钮段 5201+（菜单ID×10+n，
 		// grep 去重确认 520/5201–5203 未被占用）。查询码挂菜单（月视图入口），
 		// 单日/批量/恢复默认三个维护动作各挂独立按钮码。
@@ -447,6 +463,10 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 1014},
 		{RoleID: 2, MenuID: 1024},
 		{RoleID: 2, MenuID: 1054},
+		// OA 员工侧基础菜单（issue #48，spec §7.3「内置普通角色授予公告查看」）：
+		// OA 根目录 + 我的公告（登录即可的只读页面，不含公告管理菜单 521）。
+		{RoleID: 2, MenuID: 500},
+		{RoleID: 2, MenuID: 532},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }

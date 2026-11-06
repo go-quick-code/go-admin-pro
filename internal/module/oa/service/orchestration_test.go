@@ -64,6 +64,35 @@ func (f *fakeSystemGateway) UserNicknames(_ context.Context, userIDs []int64) (m
 	return out, nil
 }
 
+// 以下方法服务于公告受众（issue #48）：可见范围单测不触达，返回零值即可。
+func (f *fakeSystemGateway) UserDeptID(_ context.Context, _ int64) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (f *fakeSystemGateway) DeptParentID(_ context.Context, _ int64) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (f *fakeSystemGateway) UserRoleIDs(_ context.Context, _ int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (f *fakeSystemGateway) ListActiveUserIDsByRole(_ context.Context, _ int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (f *fakeSystemGateway) ListActiveUserIDs(_ context.Context) ([]int64, error) {
+	return nil, nil
+}
+
+func (f *fakeSystemGateway) DeptNames(_ context.Context, _ []int64) (map[int64]string, error) {
+	return map[int64]string{}, nil
+}
+
+func (f *fakeSystemGateway) RoleNames(_ context.Context, _ []int64) (map[int64]string, error) {
+	return map[int64]string{}, nil
+}
+
 // userContext 返回带登录主体（用户 7，租户 1）的上下文。
 func userContext() context.Context {
 	return authn.With(context.Background(), authn.Principal{UserID: 7, TenantID: 1})
@@ -140,7 +169,7 @@ func TestVisibilityScopeOfOrchestration(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := New(tc.gateway, nil)
+			svc := New(tc.gateway, nil, nil)
 			got, err := svc.VisibilityScopeOf(tc.ctx, tc.resource)
 			if tc.wantErr {
 				if err == nil {
@@ -168,7 +197,7 @@ func TestVisibilityScopeOfOrchestration(t *testing.T) {
 // 负责人路径才逐部门解析子树（取数次数可预算）。
 func TestVisibilityScopeOfManageSkipsDeptQueries(t *testing.T) {
 	gw := &fakeSystemGateway{hasManage: map[string]bool{"oa:leave:manage": true}}
-	svc := New(gw, nil)
+	svc := New(gw, nil, nil)
 	if _, err := svc.VisibilityScopeOf(userContext(), "leave"); err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}
@@ -177,7 +206,7 @@ func TestVisibilityScopeOfManageSkipsDeptQueries(t *testing.T) {
 	}
 
 	gw2 := &fakeSystemGateway{ledDepts: map[int64][]int64{7: {102, 103}}}
-	svc2 := New(gw2, nil)
+	svc2 := New(gw2, nil, nil)
 	if _, err := svc2.VisibilityScopeOf(userContext(), "leave"); err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}

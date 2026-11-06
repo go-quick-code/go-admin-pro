@@ -149,20 +149,22 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
 
-	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
-	// 判定复用 system 的权限/部门解析（oa/service.SystemGateway 直接受
-	// *systemservice.Service 满足）；其余领域路由由后续 OA 工单按
-	// docs/oa-mvp-spec.md §2 落地。考勤打卡日期按业务时区取当天（issue #60，
-	// ADR 0006：只经 cfg.Location() 获取）。
-	oaSvc := oaservice.New(sysSvc, repository.New(db))
-	oaSvc.SetLocation(cfg.Location())
-	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
-
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
 	// 无业务依赖、不反向依赖业务模块；bpm/公告/会议室等生产者经 notifySvc 的
 	// CreateInTx seam 把通知写进各自的事务（同生共死），读取侧走 /notify/message/*。
 	notifySvc := notifyservice.New(notifyrepo.New(db))
 	notifyAPI := notifyapi.New(notifySvc, sysAPI.RequirePermission)
+
+	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
+	// 判定复用 system 的权限/部门解析（oa/service.SystemGateway 直接受
+	// *systemservice.Service 满足）；公告发布把 notifySvc 作为 NotifyGateway
+	// 注入（issue #48：通知与发布同事务，spec §4.13）；附件复用 infra_file
+	// （biz_type=oa_announcement，经 AnnouncementFileStore 适配器装配）。
+	oaSvc := oaservice.New(sysSvc, repository.New(db), notifySvc)
+	// 考勤打卡日期按业务时区取当天（issue #60，ADR 0006：只经 cfg.Location() 获取）。
+	oaSvc.SetLocation(cfg.Location())
+	oaSvc.SetAnnouncementFileStore(announcementFileStore{infra: infraSvc})
+	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// bpm 模块（issue #44 定义管理，#46 运行引擎）：BusinessHandler 注册表在
 	// 装配期建立；spec §4.4：未注册 business_type 的定义不允许发布/发起。
