@@ -8,13 +8,14 @@ import (
 )
 
 // 公告权限码（菜单种子 521 段：521 查询、5211 创建、5212 编辑、5213 删除、
-// 5214 发布/撤回、5215 已读统计（#49 使用）；issue #48）。
+// 5214 发布/撤回、5215 已读统计（#49 使用）；issue #48/#49）。
 const (
-	announcementQuery   = "oa:announcement:query"
-	announcementCreate  = "oa:announcement:create"
-	announcementUpdate  = "oa:announcement:update"
-	announcementDelete  = "oa:announcement:delete"
-	announcementPublish = "oa:announcement:publish"
+	announcementQuery     = "oa:announcement:query"
+	announcementCreate    = "oa:announcement:create"
+	announcementUpdate    = "oa:announcement:update"
+	announcementDelete    = "oa:announcement:delete"
+	announcementPublish   = "oa:announcement:publish"
+	announcementReadStats = "oa:announcement:read-stats"
 )
 
 // 考勤结果权限码（菜单种子 533 段；issue #61）：
@@ -133,6 +134,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	announcement.DELETE("/:id", h.requirePermission(announcementDelete), h.DeleteAnnouncement)
 	announcement.POST("/:id/publish", h.requirePermission(announcementPublish), h.PublishAnnouncement)
 	announcement.POST("/:id/withdraw", h.requirePermission(announcementPublish), h.WithdrawAnnouncement)
+	// 已读统计（issue #49）：人数 + 分页名单，挂按钮码 5215；撤回保留历史
+	// 已读、重新发布不重置（service 只读 oa_announcement_read）。
+	announcement.GET("/:id/read-stats", h.requirePermission(announcementReadStats), h.GetAnnouncementReadStats)
 	// 附件沿用 infra_file（biz_type=oa_announcement）：查看跟随公告可见性，
 	// 上传/删除挂 oa:announcement:update 且仅草稿（service 层校验状态）。
 	announcement.GET("/:id/files", h.ListAnnouncementFiles)

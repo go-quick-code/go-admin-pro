@@ -141,6 +141,26 @@ func (h *Handler) WithdrawAnnouncement(c *gin.Context) {
 	response.OK(c, true)
 }
 
+// GetAnnouncementReadStats 已读统计（GET /oa/announcement/:id/read-stats，
+// oa:announcement:read-stats，issue #49）：去重后的已读人数 + 分页名单。
+// 撤回公告保留历史已读；跨租户/不存在 404（service 已收口）。
+func (h *Handler) GetAnnouncementReadStats(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	var req dto.AnnouncementReadStatsReq
+	if !bindQuery(c, &req) {
+		return
+	}
+	stats, err := h.svc.PageAnnouncementReadStats(c.Request.Context(), id, &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, stats)
+}
+
 // ListAnnouncementFiles 公告附件列表（GET /oa/announcement/:id/files，登录即可）：
 // 公告可见即可看附件。
 func (h *Handler) ListAnnouncementFiles(c *gin.Context) {

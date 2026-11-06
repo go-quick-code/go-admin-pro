@@ -242,6 +242,11 @@ export function publishAnnouncement(id: number) {
 export function withdrawAnnouncement(id: number) {
   return request.post(`/oa/announcement/${id}/withdraw`) as Promise<any>
 }
+// 已读统计（issue #49，按钮 5215 oa:announcement:read-stats）：去重后的
+// 已读人数 + 分页名单（userId/nickname/readAt）；撤回保留历史已读。
+export function getAnnouncementReadStats(id: number, params?: { pageNo?: number; pageSize?: number }) {
+  return request.get(`/oa/announcement/${id}/read-stats`, { params }) as Promise<any>
+}
 
 // 附件（infra_file，biz_type=oa_announcement）：查看跟随公告可见性，
 // 上传/删除挂 oa:announcement:update 且仅草稿。

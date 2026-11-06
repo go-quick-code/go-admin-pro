@@ -19,6 +19,7 @@
       <el-table v-loading="loading" :data="rows" row-key="id" @row-click="openDetail">
         <el-table-column label="标题" min-width="320">
           <template #default="{ row }">
+            <span v-if="row.unread" class="unread-dot" title="未读" />
             <el-tag v-if="row.pinned" type="danger" size="small" effect="plain" class="pin-tag">置顶</el-tag>
             <span class="link-title">{{ row.title }}</span>
           </template>
@@ -74,12 +75,15 @@ import { formatTime } from '@/utils/format'
 import { downloadAnnouncementFile, getAnnouncement, listAnnouncementFiles, pageMyAnnouncements } from '@/api/oa'
 
 // 我的公告（issue #48，菜单 532）：登录即可；只展示已发布且命中受众的公告，
-// 置顶在前。打开详情走 GET /oa/announcement/:id（#49 将在该接口写已读记录），
+// 置顶在前。打开详情走 GET /oa/announcement/:id（#49 在该接口幂等写已读），
+// 列表的未读点标（unread）与详情状态一致：打开后本地立即置为已读。
 // 已撤回公告仍可从站内通知跳转查看「已撤回」。
 interface AnnouncementRow {
   id: number
   title: string
   pinned: boolean
+  read: boolean
+  unread: boolean
   publishedAt: string | null
 }
 interface Attachment {
@@ -124,6 +128,12 @@ async function showDetail(id: number) {
     const data = await getAnnouncement(id)
     detail.value = { ...data, visible: true }
     files.value = (await listAnnouncementFiles(id)) || []
+    // 详情接口已写已读，列表本地同步为已读（避免回到列表还显示未读点标）。
+    const row = rows.value.find((item) => item.id === id)
+    if (row) {
+      row.read = true
+      row.unread = false
+    }
   } catch {
     ElMessage.error('公告不存在或已不可见')
   }
@@ -159,6 +169,15 @@ onMounted(async () => {
 }
 .pin-tag {
   margin-right: 6px;
+}
+.unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--el-color-danger);
+  vertical-align: middle;
 }
 .link-title {
   cursor: pointer;
