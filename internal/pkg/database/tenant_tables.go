@@ -107,4 +107,9 @@ var TenantTables = []string{
 	"oa_announcement",
 	"oa_announcement_target",
 	"oa_announcement_read",
+
+	// 消息发送日志（issue #72，迁移 00024，spec §3.4/§4.3）：租户级
+	// append-only，租户只能看自己的日志，跨租户 ID 一律 404。
+	// 渠道/模板是平台级表，刻意不登记（系统级读取显式 tenant.Skip）。
+	"message_log",
 }

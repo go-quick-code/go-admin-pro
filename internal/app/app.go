@@ -20,6 +20,9 @@ import (
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
+	messageapi "github.com/go-quick-code/go-admin-pro/internal/module/message/api"
+	messagerepo "github.com/go-quick-code/go-admin-pro/internal/module/message/repository"
+	messageservice "github.com/go-quick-code/go-admin-pro/internal/module/message/service"
 	notifyapi "github.com/go-quick-code/go-admin-pro/internal/module/notify/api"
 	notifyrepo "github.com/go-quick-code/go-admin-pro/internal/module/notify/repository"
 	notifyservice "github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
@@ -49,6 +52,9 @@ type App struct {
 	// CRM 是 crm 模块的 Service（issue #47）：存量合同审批 backfill 命令与
 	// 集成测试经该字段调用业务服务。
 	CRM *crmservice.Service
+	// Message 是 message 模块的 Service（issue #72）：集成测试经该字段注册
+	// provider 替身（成功/失败）；业务侧只经 HTTP 端点消费。
+	Message *messageservice.Service
 }
 
 // New 初始化数据库、模块与 HTTP 引擎。
@@ -162,6 +168,12 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	notifySvc := notifyservice.New(notifyrepo.New(db))
 	notifyAPI := notifyapi.New(notifySvc, sysAPI.RequirePermission)
 
+	// message 模块（issue #72，spec §4.3 / ADR 0010）：渠道/模板是平台级配置，
+	// 发送日志走租户插件；provider 注册表在 New 内先注册内置 log provider，
+	// smtp（#73）/aliyun_sms（#74）实现后在此追加 RegisterSender。
+	messageSvc := messageservice.New(messagerepo.New(db))
+	messageAPI := messageapi.New(messageSvc, sysAPI.RequirePermission)
+
 	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
 	// 判定复用 system 的权限/部门解析（oa/service.SystemGateway 直接受
 	// *systemservice.Service 满足）；公告发布把 notifySvc 作为 NotifyGateway
@@ -256,11 +268,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI)
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc}, nil
 }
 
 // Close 释放资源。
