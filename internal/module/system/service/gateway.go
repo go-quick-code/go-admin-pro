@@ -124,3 +124,29 @@ func (s *Service) DeptParentID(ctx context.Context, deptID int64) (int64, bool, 
 	}
 	return dept.ParentID, dept.ParentID > 0, nil
 }
+
+// UserRoleIDs 返回用户持有的角色 ID 集合。
+// 公告受众判定用（issue #48）：查看者的角色与被选角色有交集即可见。
+func (s *Service) UserRoleIDs(ctx context.Context, userID int64) ([]int64, error) {
+	return s.repo.GetUserRoleIDs(ctx, userID)
+}
+
+// ListActiveUserIDs 返回租户内启用用户 ID（升序）。
+// 公告全员发布展开收件人用（issue #48）。
+func (s *Service) ListActiveUserIDs(ctx context.Context) ([]int64, error) {
+	return s.repo.ListActiveUserIDs(ctx)
+}
+
+// RoleNames 批量返回角色名称，缺失的 ID 不在返回集合中。
+// 公告受众回显用（issue #48）。
+func (s *Service) RoleNames(ctx context.Context, roleIDs []int64) (map[int64]string, error) {
+	roles, err := s.repo.FindRolesByIDs(ctx, roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[int64]string, len(roles))
+	for i := range roles {
+		names[roles[i].ID] = roles[i].Name
+	}
+	return names, nil
+}

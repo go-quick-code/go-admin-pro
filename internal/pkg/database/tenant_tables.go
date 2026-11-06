@@ -71,4 +71,10 @@ var TenantTables = []string{
 	// 站内通知（issue #45）：通知按接收人物化，严格本人 + 租户隔离
 	//（docs/oa-mvp-spec.md §4.13）；写入/查询的租户条件由插件自动追加。
 	"notify_message",
+	// 公告（issue #48，迁移 00016）：公告/受众/已读三表；受众子查询显式
+	// 带主表 tenant_id（见 oa/repository/announcement.go），跨租户业务 ID
+	// 一律 404，不泄露存在性（spec §4.6）。
+	"oa_announcement",
+	"oa_announcement_target",
+	"oa_announcement_read",
 }

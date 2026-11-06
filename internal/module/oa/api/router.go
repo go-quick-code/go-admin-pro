@@ -7,6 +7,16 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
+// 公告权限码（菜单种子 521 段：521 查询、5211 创建、5212 编辑、5213 删除、
+// 5214 发布/撤回、5215 已读统计（#49 使用）；issue #48）。
+const (
+	announcementQuery   = "oa:announcement:query"
+	announcementCreate  = "oa:announcement:create"
+	announcementUpdate  = "oa:announcement:update"
+	announcementDelete  = "oa:announcement:delete"
+	announcementPublish = "oa:announcement:publish"
+)
+
 // Handler 是 oa 模块的 HTTP 入口。
 // requirePermission 复用 system 模块的权限中间件（与 crm 同款装配方式）：
 // 本工单（issue #43）的可见范围探测接口是登录即可用的「我的可见范围」查询，
@@ -54,6 +64,26 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	balance.GET("/mine", h.MyBalances)
 	balance.POST("/init", h.requirePermission(manageLeave), h.InitBalances)
 	balance.POST("/adjust", h.requirePermission(manageLeave), h.AdjustBalance)
+
+	// 公告（issue #48，菜单种子 521 段）：管理列表/草稿预览挂
+	// oa:announcement:query；创建/编辑/删除/发布/撤回逐码；员工侧「我的公告」
+	// 与已发布详情登录即可，可见性由受众判定收口（spec §4.7）。
+	// 静态路由（/page、/my/page）先于 /:id 注册。
+	announcement := oa.Group("/announcement")
+	announcement.GET("/page", h.requirePermission(announcementQuery), h.PageAnnouncements)
+	announcement.GET("/my/page", h.MyAnnouncements)
+	announcement.GET("/:id", h.GetAnnouncement)
+	announcement.POST("", h.requirePermission(announcementCreate), h.CreateAnnouncement)
+	announcement.PUT("", h.requirePermission(announcementUpdate), h.UpdateAnnouncement)
+	announcement.DELETE("/:id", h.requirePermission(announcementDelete), h.DeleteAnnouncement)
+	announcement.POST("/:id/publish", h.requirePermission(announcementPublish), h.PublishAnnouncement)
+	announcement.POST("/:id/withdraw", h.requirePermission(announcementPublish), h.WithdrawAnnouncement)
+	// 附件沿用 infra_file（biz_type=oa_announcement）：查看跟随公告可见性，
+	// 上传/删除挂 oa:announcement:update 且仅草稿（service 层校验状态）。
+	announcement.GET("/:id/files", h.ListAnnouncementFiles)
+	announcement.GET("/:id/files/:fileId/download", h.DownloadAnnouncementFile)
+	announcement.POST("/:id/files", h.requirePermission(announcementUpdate), h.UploadAnnouncementFile)
+	announcement.DELETE("/:id/files/:fileId", h.requirePermission(announcementUpdate), h.DeleteAnnouncementFile)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。
