@@ -8,8 +8,6 @@
 package dto
 
 import (
-	"time"
-
 	bpmdto "github.com/go-quick-code/go-admin-pro/internal/module/bpm/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
@@ -87,18 +85,8 @@ type ExpenseClaimItem struct {
 // 表头 + 明细行 + 附件 + 审批时间线（#55 提交后填充，草稿为 nil）。
 type ExpenseClaimDetailResp struct {
 	ExpenseClaimItem
-	Items    []ExpenseItemResp      `json:"items"`
-	Files    []ExpenseFileResp      `json:"files"`
-	Approval *bpmdto.InstanceDetail `json:"approval,omitempty"`
-}
-
-// ExpenseFileResp 是报销附件视图（infra_file，biz_type='oa_expense'）：
-// URL 统一改写为鉴权下载端点（GET /oa/expense/claim/{id}/files/{fileId}/download）。
-type ExpenseFileResp struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	URL        string    `json:"url"`
-	Size       int64     `json:"size"`
-	Type       string    `json:"type"`
-	CreateTime time.Time `json:"createTime"`
+	Items     []ExpenseItemResp       `json:"items"`
+	Files     []ExpenseFileResp       `json:"files"`
+	Approvals []bpmdto.InstanceDetail `json:"approvals,omitempty"`
+	Approval  *bpmdto.InstanceDetail  `json:"approval,omitempty"`
 }

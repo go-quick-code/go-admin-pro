@@ -12,6 +12,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -458,8 +459,8 @@ func (s *Service) Punch(ctx context.Context, punchType int8, ip, userAgent strin
 		PunchTime: now,
 		Type:      punchType,
 		Source:    model.PunchSourceWeb,
-		IP:        truncateRunes(ip, maxIPColumnLen),
-		UserAgent: truncateRunes(userAgent, maxUserAgentColLen),
+		IP:        text.TruncateRunes(ip, maxIPColumnLen),
+		UserAgent: text.TruncateRunes(userAgent, maxUserAgentColLen),
 	}
 	if err := s.repo.CreatePunch(ctx, row); err != nil {
 		return nil, err

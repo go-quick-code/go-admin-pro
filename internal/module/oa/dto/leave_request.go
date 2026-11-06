@@ -3,8 +3,6 @@
 package dto
 
 import (
-	"time"
-
 	bpmdto "github.com/go-quick-code/go-admin-pro/internal/module/bpm/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
@@ -61,20 +59,12 @@ type LeaveRequestItem struct {
 
 // LeaveRequestDetailResp 是请假申请详情（GET /oa/leave/request/{id}）：
 // 申请行 + 附件列表 + bpm 审批时间线（提交后；审批人/时间线展示名由 bpm
-// 侧解析）。approval 为 nil 表示草稿尚未发起审批。
+// 侧解析）。approvals 是历次审批尝试（倒序，current 标记当前实例；spec
+// §4.3 每次重新提交创建新实例）；approval 保留为当前实例的便捷引用，
+// 草稿尚未发起审批时二者均为空。
 type LeaveRequestDetailResp struct {
 	LeaveRequestItem
-	Files    []LeaveFileResp        `json:"files"`
-	Approval *bpmdto.InstanceDetail `json:"approval,omitempty"`
-}
-
-// LeaveFileResp 是请假附件视图（infra_file，biz_type='oa_leave'）：
-// URL 统一改写为鉴权下载端点（GET /oa/leave/request/{id}/files/{fileId}/download）。
-type LeaveFileResp struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	URL        string    `json:"url"`
-	Size       int64     `json:"size"`
-	Type       string    `json:"type"`
-	CreateTime time.Time `json:"createTime"`
+	Files     []LeaveFileResp         `json:"files"`
+	Approvals []bpmdto.InstanceDetail `json:"approvals,omitempty"`
+	Approval  *bpmdto.InstanceDetail  `json:"approval,omitempty"`
 }

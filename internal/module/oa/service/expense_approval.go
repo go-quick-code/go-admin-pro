@@ -27,6 +27,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"gorm.io/gorm"
 )
@@ -170,7 +171,7 @@ func (s *Service) onExpenseRejected(ctx context.Context, inst *bpmmodel.ProcessI
 		return xerr.Conflict("报销单当前状态不可驳回")
 	}
 	row.Status = model.ExpenseStatusRejected
-	row.RejectReason = truncateRunes(reason, MaxExpenseRejectReasonLen)
+	row.RejectReason = text.TruncateRunes(reason, MaxExpenseRejectReasonLen)
 	return repo.SaveExpenseClaim(ctx, row)
 }
 

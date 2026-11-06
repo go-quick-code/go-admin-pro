@@ -83,4 +83,8 @@ type InstanceDetail struct {
 	Instance *model.ProcessInstance `json:"instance"`
 	Records  []RecordItem           `json:"records"`
 	Tasks    []TaskRow              `json:"tasks"`
+	// Current 标记业务记录当前生效的实例（spec §4.3：详情页倒序展示历次
+	// 审批尝试。由业务读接口按 approval_instance_id 或最新实例回填；
+	// 通用实例详情接口不设置，前端按缺省 false 处理）。
+	Current bool `json:"current,omitempty"`
 }

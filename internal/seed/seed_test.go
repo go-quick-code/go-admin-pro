@@ -56,6 +56,11 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.Dept{}, 4, "部门")
 	assertCount(t, db, &sysmodel.Role{}, 2, "角色")
 	assertCount(t, db, &sysmodel.Post{}, 2, "岗位")
+	// 内置普通角色只授基础菜单（spec §7.3，issue #64 review）：
+	//   - 请假/报销查询码（5297/5236）与通知查询（5123）必须授予；
+	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
+	assertRoleMenus(t, db, 2, []int64{5297, 5236, 5123}, true, "普通角色")
+	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
 	assertCount(t, db, &sysmodel.DictType{}, 4, "字典类型")
 	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。
 	assertCount(t, db, &sysmodel.DictData{}, 16, "字典数据")
@@ -187,5 +192,23 @@ func assertCount(t *testing.T, db *gorm.DB, model any, want int64, label string)
 	}
 	if total != want {
 		t.Fatalf("%s 数量不符：期望 %d，实际 %d", label, want, total)
+	}
+}
+
+// assertRoleMenus 断言角色对指定菜单的授予/未授予状态（issue #64 review：
+// 普通角色权限收敛的回归守卫）。
+func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, want bool, label string) {
+	t.Helper()
+	for _, menuID := range menuIDs {
+		var total int64
+		if err := tenant.Skip(db).Model(&sysmodel.RoleMenu{}).
+			Where("role_id = ? AND menu_id = ?", roleID, menuID).
+			Count(&total).Error; err != nil {
+			t.Fatalf("统计%s菜单 %d: %v", label, menuID, err)
+		}
+		got := total > 0
+		if got != want {
+			t.Fatalf("%s菜单 %d 授予状态不符：期望 %v，实际 %v", label, menuID, want, got)
+		}
 	}
 }

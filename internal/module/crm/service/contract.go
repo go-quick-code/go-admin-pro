@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -72,8 +73,11 @@ func (s *Service) contractFilter(ctx context.Context, req *dto.ContractPageReq) 
 	return filter, nil
 }
 
-// GetContract 查询合同详情（含行项目、合计与最近一次审批时间线）。
+// GetContract 查询合同详情（含行项目、合计与历次审批时间线）。
 // 数据范围外一律 404；审批时间线随合同可见性收口（业务读接口）。
+// spec §4.3：同一合同保留全部历史实例（作废/驳回后重提会创建新实例），
+// approvals 按 id 倒序返回，current 标记最新实例（合同表无
+// approval_instance_id，最新实例即当前实例）。
 func (s *Service) GetContract(ctx context.Context, id int64) (*dto.ContractDetail, error) {
 	c, err := s.findVisibleContract(ctx, id)
 	if err != nil {
@@ -84,11 +88,15 @@ func (s *Service) GetContract(ctx context.Context, id int64) (*dto.ContractDetai
 	}
 	detail := &dto.ContractDetail{Contract: *c}
 	if s.bpm != nil {
-		approval, err := s.bpm.GetLatestInstanceDetailForBusiness(ctx, ContractApprovalBusinessType, c.ID)
+		approvals, err := s.bpm.ListInstanceDetailsForBusiness(ctx, ContractApprovalBusinessType, c.ID)
 		if err != nil {
 			return nil, err
 		}
-		detail.Approval = approval
+		if len(approvals) > 0 {
+			approvals[0].Current = true
+			detail.Approvals = approvals
+			detail.Approval = &approvals[0]
+		}
 	}
 	return detail, nil
 }
@@ -291,6 +299,11 @@ func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractSta
 		}
 		switch req.Status {
 		case model.ContractStatusPending:
+			// 审批引擎必须由 internal/app 装配（SetBPM 同时注入 approvals）；
+			// 未装配时显式报错，不静默降级成直通审批（issue #47）。
+			if s.approvals == nil {
+				return xerr.Internal(errors.New("crm: 审批引擎未装配"))
+			}
 			err = s.approvals.Submit(ctx, tx, c)
 		case model.ContractStatusVoid:
 			// 待审合同作废：先在同一事务内终止运行中的审批实例（实例 → 合同

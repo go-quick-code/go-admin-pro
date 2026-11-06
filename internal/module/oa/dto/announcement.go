@@ -2,7 +2,6 @@
 package dto
 
 import (
-	"io"
 	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
@@ -84,25 +83,6 @@ type AnnouncementDetailResp struct {
 	AnnouncementItemResp
 	Content string                   `json:"content"`
 	Targets []AnnouncementTargetResp `json:"targets"`
-}
-
-// AnnouncementFileResp 是公告附件视图（infra_file，biz_type='oa_announcement'）。
-type AnnouncementFileResp struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	URL        string    `json:"url"`
-	Size       int64     `json:"size"`
-	Type       string    `json:"type"`
-	CreateTime time.Time `json:"createTime"`
-}
-
-// AnnouncementFileContent 是公告附件的下载内容（已通过公告可见性与文件归属校验）。
-// Reader 由调用方负责关闭（API 层流式写出后关闭）。
-type AnnouncementFileContent struct {
-	Name        string
-	ContentType string
-	Size        int64
-	Reader      io.ReadCloser
 }
 
 // ---------- 公告已读统计（issue #49，docs/oa-mvp-spec.md §4.7）----------

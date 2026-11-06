@@ -80,12 +80,15 @@ type ContractStatusReq struct {
 	Reason string `json:"reason" binding:"max=500"`
 }
 
-// ContractDetail 是合同详情响应：合同本体 + 最近一次审批实例的时间线与
-// 当前待办（issue #47；从未发起审批时 approval 为 nil）。
+// ContractDetail 是合同详情响应：合同本体 + 历次审批实例的时间线与
+// 当前待办（issue #47；spec §4.3 每次重新提交创建新实例。approvals 倒序，
+// current 标记最新实例；approval 保留为当前实例的便捷引用，从未发起审批时
+// 二者均为空）。
 // 嵌入 model.Contract 保持既有字段平铺，新增 approval 不破坏旧调用方。
 type ContractDetail struct {
 	model.Contract
-	Approval *bpmdto.InstanceDetail `json:"approval,omitempty"`
+	Approvals []bpmdto.InstanceDetail `json:"approvals,omitempty"`
+	Approval  *bpmdto.InstanceDetail  `json:"approval,omitempty"`
 }
 
 // ContractFileResp 是合同附件的展示视图（issue #17：复用 infra_file，

@@ -259,6 +259,18 @@ func (r *Repository) ListInstancesByIDs(ctx context.Context, ids []int64) ([]mod
 	return rows, err
 }
 
+// ListInstancesByBusiness 按业务类型 + 业务 ID 读全部实例（id 倒序），
+// 未命中返回空切片。业务详情展示历次审批尝试用（spec §4.3：每次重新提交
+// 创建新实例，业务记录保留全部历史实例）。
+func (r *Repository) ListInstancesByBusiness(ctx context.Context, businessType string, businessID int64) ([]model.ProcessInstance, error) {
+	var rows []model.ProcessInstance
+	err := r.db.WithContext(ctx).
+		Where("business_type = ? AND business_id = ?", businessType, businessID).
+		Order("id DESC").
+		Find(&rows).Error
+	return rows, err
+}
+
 // FindLatestInstanceByBusiness 按业务类型 + 业务 ID 读最近一次实例（id 倒序），
 // 未命中（含跨租户）返回 nil。业务详情展示审批时间线用（issue #47）。
 func (r *Repository) FindLatestInstanceByBusiness(ctx context.Context, businessType string, businessID int64) (*model.ProcessInstance, error) {

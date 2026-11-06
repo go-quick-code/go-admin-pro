@@ -23,7 +23,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"strings"
 	"time"
@@ -35,6 +34,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/text"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 	"gorm.io/gorm"
@@ -58,13 +58,9 @@ const MaxLeaveRejectReasonLen = 200
 const defaultLeaveAPIPrefix = "/admin-api"
 
 // LeaveFileContent 是请假附件的下载内容（已通过归属校验）。
+// 与公告/报销/文档共用 dto.FileContent（issue #64 review 去重）。
 // Reader 由调用方负责关闭（API 层流式写出后关闭）。
-type LeaveFileContent struct {
-	Name        string
-	ContentType string
-	Size        int64
-	Reader      io.ReadCloser
-}
+type LeaveFileContent = dto.FileContent
 
 // LeaveFileStore 是请假附件的存储依赖面（由 internal/app 装配 infra 适配器，
 // 与 CRM 合同附件同款模式）。实现负责按 (bizType, bizID) 做归属过滤。
@@ -487,11 +483,19 @@ func (s *Service) GetLeaveRequestDetail(ctx context.Context, id int64) (*dto.Lea
 		}
 		// 可见性已由本方法按 §4.6 校验，时间线使用业务读接口（跳过 bpm 的
 		// 发起人/办理人身份判定），保证部门负责人与 HR 能看到完整时间线。
-		approval, err := s.bpm.GetInstanceDetailForBusiness(ctx, *row.ApprovalInstanceID)
+		// spec §4.3：同一申请保留全部历史实例（驳回重提会创建新实例），
+		// 按 id 倒序返回历次审批尝试；current 指向 approval_instance_id，
+		// 无该字段（历史数据）时退化为最新实例。
+		approvals, err := s.bpm.ListInstanceDetailsForBusiness(ctx, LeaveApprovalBusinessType, row.ID)
 		if err != nil {
 			return nil, err
 		}
-		detail.Approval = approval
+		if len(approvals) > 0 {
+			current := currentInstanceIndex(approvals, row.ApprovalInstanceID)
+			approvals[current].Current = true
+			detail.Approvals = approvals
+			detail.Approval = &approvals[current]
+		}
 	}
 	return detail, nil
 }
@@ -664,7 +668,7 @@ func (s *Service) OnRejected(ctx context.Context, inst *bpmmodel.ProcessInstance
 		return xerr.Conflict("请假申请当前状态不可驳回")
 	}
 	row.Status = model.LeaveRequestStatusRejected
-	row.RejectReason = truncateRunes(reason, MaxLeaveRejectReasonLen)
+	row.RejectReason = text.TruncateRunes(reason, MaxLeaveRejectReasonLen)
 	return repo.SaveLeaveRequest(ctx, row)
 }
 
@@ -864,13 +868,4 @@ func formatLeaveDays(v money.Money) string {
 		return "0"
 	}
 	return out
-}
-
-// truncateRunes 按字符截断到 max 个字符（列宽按字符计，避免切坏多字节字符）。
-func truncateRunes(value string, max int) string {
-	runes := []rune(value)
-	if len(runes) <= max {
-		return value
-	}
-	return string(runes[:max])
 }

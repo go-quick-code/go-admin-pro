@@ -179,6 +179,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { useUserStore } from '@/stores/user'
 import { formatTime } from '@/utils/format'
+import { recordTag, recordText } from '@/utils/bpm-record'
 import {
   pageTasks,
   pageInstances,
@@ -286,14 +287,6 @@ function taskStatusTag(status: number): string {
   if (status === 2) return 'danger'
   if (status === 3) return 'warning'
   return 'info'
-}
-function recordText(action: number): string {
-  return ['通过', '驳回', '撤回', '转办'][action - 1] ?? `未知(${action})`
-}
-function recordTag(action: number): string {
-  if (action === 1) return 'success'
-  if (action === 2) return 'danger'
-  return 'warning'
 }
 function instanceStatusTag(status: number): string {
   if (status === 1) return 'success'

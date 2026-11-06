@@ -215,26 +215,12 @@
               <div v-else class="hint">暂无附件；草稿/已驳回状态可上传。</div>
             </el-tab-pane>
 
-            <!-- 审批记录（issue #55）：时间线 + 当前待办 + 通用待办中心入口。 -->
+            <!-- 审批记录（issue #55/#64）：历次实例分组时间线 + 当前待办 + 通用待办中心入口。 -->
             <el-tab-pane label="审批记录" name="approval">
               <div class="section-head"><span>审批进度</span></div>
-              <el-timeline v-if="detail.approval?.records?.length" class="timeline">
-                <el-timeline-item
-                  v-for="rec in detail.approval.records"
-                  :key="rec.id"
-                  :timestamp="formatTime(rec.createTime)"
-                >
-                  <div>
-                    <el-tag :type="recordTag(rec.action)" size="small">{{ recordText(rec.action) }}</el-tag>
-                    <span class="timeline-operator">{{ rec.operatorName || `用户#${rec.operatorId}` }}</span>
-                  </div>
-                  <div class="timeline-node">{{ rec.nodeName || '（实例级动作）' }}</div>
-                  <div v-if="rec.comment" class="timeline-comment">{{ rec.comment }}</div>
-                </el-timeline-item>
-              </el-timeline>
-              <el-empty
-                v-else
-                :description="detail.approvalInstanceId ? '暂无审批记录' : '尚未提交审批（草稿/已驳回可提交）'"
+              <BpmApprovalHistory
+                :approvals="approvalInstancesOf(detail)"
+                :empty-text="detail.approvalInstanceId ? '暂无审批记录' : '尚未提交审批（草稿/已驳回可提交）'"
               />
 
               <div class="section-head"><span>当前待办</span></div>
@@ -296,7 +282,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
+import BpmApprovalHistory from '@/components/BpmApprovalHistory.vue'
 import { formatSize, formatTime } from '@/utils/format'
+import { approvalInstancesOf, currentApprovalOf } from '@/utils/bpm-record'
 import { saveBlobAs } from '@/utils/download'
 import { useUserStore } from '@/stores/user'
 import { listDictDataByType } from '@/api/system'
@@ -377,14 +365,6 @@ function isEditable(status: number): boolean {
 // 写动作只对发起人显示：管理/财务可在列表看到他人单据。
 function isOwner(row: any): boolean {
   return currentUserId.value > 0 && Number(row?.userId) === currentUserId.value
-}
-function recordText(action: number): string {
-  return ['通过', '驳回', '撤回', '转办'][action - 1] ?? `未知(${action})`
-}
-function recordTag(action: number): string {
-  if (action === 1) return 'success'
-  if (action === 2) return 'danger'
-  return 'warning'
 }
 
 // ---------- 金额（分）工具：全程整数分，避免浮点误差 ----------
@@ -550,9 +530,10 @@ const detailLoading = ref(false)
 const detail = ref<any>(null)
 const detailTab = ref('detail')
 
-// pendingTasks 是实例当前未办理的任务（bpm 候选人池物化为每人一行）。
+// pendingTasks 是当前实例未办理的任务（bpm 候选人池物化为每人一行）；
+// 历史实例的待办均已终结，不展示（spec §4.3）。
 const pendingTasks = computed(() =>
-  (detail.value?.approval?.tasks ?? []).filter((task: any) => task?.status === 0),
+  (currentApprovalOf(detail.value)?.tasks ?? []).filter((task: any) => task?.status === 0),
 )
 
 async function openDetail(id: number) {
@@ -670,21 +651,6 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-.timeline {
-  padding-left: 4px;
-}
-.timeline-operator {
-  margin-left: 8px;
-}
-.timeline-node {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 2px;
-}
-.timeline-comment {
-  margin-top: 4px;
-  white-space: pre-wrap;
 }
 .hint {
   color: #909399;

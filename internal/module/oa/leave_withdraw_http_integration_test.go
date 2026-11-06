@@ -332,7 +332,7 @@ func TestIntegrationLeaveVisibilityScope(t *testing.T) {
 
 	// 部门 103 的局外人：仅自己的一条草稿（需创建码）。
 	outsiderID, outsider := createUserWithMenus(t, env, le.admin, "leave_scope_outsider", 103,
-		[]int64{leaveRequestMenuID, leaveRequestCreate})
+		[]int64{leaveRequestMenuID, leaveRequestQuery, leaveRequestCreate})
 	outStart := leaveDateKey(days[2])
 	status, outDraft, msg := createLeaveDraft(t, env, outsider, le.annualTypeID,
 		outStart, 0, outStart, 1, "局外人草稿")

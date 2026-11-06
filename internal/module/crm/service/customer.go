@@ -76,8 +76,8 @@ type Service struct {
 	productImports  *excel.ImportGuard[dto.ProductImportRow]
 }
 
-// New 创建 crm Service。合同审批缺省「未装配」实现（internal/app 装配时
-// SetBPM 注入 bpm 引擎）；合同回收排除缺省空实现（真实实现由 app 装配处注入）；
+// New 创建 crm Service。合同审批依赖面在 SetBPM 前为 nil（提交入口显式报
+// 「审批引擎未装配」）；合同回收排除缺省空实现（真实实现由 app 装配处注入）；
 // 作废守卫缺省空实现；导入 guard 使用固定限额与默认并发。
 func New(repo *repository.Repository, sys SystemGateway) *Service {
 	return &Service{
@@ -85,7 +85,6 @@ func New(repo *repository.Repository, sys SystemGateway) *Service {
 		sys:             sys,
 		clock:           time.Now,
 		contracts:       NoopContractChecker{},
-		approvals:       unavailableApprovalService{},
 		customerImports: excel.NewImportGuard[dto.CustomerImportRow](excel.GuardDefaultConcurrent),
 		contactImports:  excel.NewImportGuard[dto.ContactImportRow](excel.GuardDefaultConcurrent),
 		productImports:  excel.NewImportGuard[dto.ProductImportRow](excel.GuardDefaultConcurrent),

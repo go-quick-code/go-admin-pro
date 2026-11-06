@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
@@ -130,6 +132,31 @@ func (s *Service) UpdateDictData(ctx context.Context, req *dto.DictDataUpdateReq
 	return s.repo.SaveDictData(ctx, item)
 }
 
+// RegisterDictUsageChecker 注册字典项引用检查（issue #64 review，spec §4.14）：
+// 按 dictType 维度登记一个计数函数，DeleteDictData 删除前调用它统计业务数据
+// 对「该字典值」的引用数；>0 返回 409 并提示改为停用。system 不反向依赖业务
+// 模块，由业务方在 internal/app 装配期注册（如 OA 的 oa_expense_category）。
+// 同一 dictType 重复注册以后者为准；空 dictType 或 nil fn 忽略。
+func (s *Service) RegisterDictUsageChecker(dictType string, fn func(ctx context.Context, code string) (int64, error)) {
+	dictType = strings.TrimSpace(dictType)
+	if dictType == "" || fn == nil {
+		return
+	}
+	s.dictUsageMu.Lock()
+	defer s.dictUsageMu.Unlock()
+	if s.dictUsageCheckers == nil {
+		s.dictUsageCheckers = make(map[string]func(ctx context.Context, code string) (int64, error))
+	}
+	s.dictUsageCheckers[dictType] = fn
+}
+
+// dictUsageChecker 取字典类型的引用计数函数（未注册返回 nil）。
+func (s *Service) dictUsageChecker(dictType string) func(ctx context.Context, code string) (int64, error) {
+	s.dictUsageMu.RLock()
+	defer s.dictUsageMu.RUnlock()
+	return s.dictUsageCheckers[dictType]
+}
+
 func (s *Service) DeleteDictData(ctx context.Context, id int64) error {
 	item, err := s.repo.FindDictDataByID(ctx, id)
 	if err != nil {
@@ -137,6 +164,20 @@ func (s *Service) DeleteDictData(ctx context.Context, id int64) error {
 	}
 	if item == nil {
 		return xerr.NotFound("字典数据不存在")
+	}
+	// 被业务数据引用时只能停用不能删除（spec §4.14）；检查失败按内部错误
+	// fail-closed，避免静默放宽引用保护。
+	if checker := s.dictUsageChecker(item.DictType); checker != nil {
+		used, err := checker(ctx, item.Value)
+		if err != nil {
+			return xerr.Internal(fmt.Errorf("字典项引用检查失败: %w", err))
+		}
+		if used > 0 {
+			return xerr.Conflict(fmt.Sprintf(
+				"字典项「%s」已被 %d 条业务数据引用，不能删除；请改为停用",
+				item.Label, used,
+			))
+		}
 	}
 	return s.repo.DeleteDictData(ctx, id)
 }

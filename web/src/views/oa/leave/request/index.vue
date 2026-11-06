@@ -153,24 +153,9 @@
               提交审批
             </el-button>
           </div>
-          <el-timeline v-if="detail.approval?.records?.length" class="timeline">
-            <el-timeline-item
-              v-for="rec in detail.approval.records"
-              :key="rec.id"
-              :timestamp="formatTime(rec.createTime)"
-              :type="recordTag(rec.action) === 'success' ? 'success' : recordTag(rec.action) === 'danger' ? 'danger' : 'primary'"
-            >
-              <div>
-                <el-tag :type="recordTag(rec.action)" size="small">{{ recordText(rec.action) }}</el-tag>
-                <span class="timeline-operator">{{ rec.operatorName || `用户#${rec.operatorId}` }}</span>
-              </div>
-              <div class="timeline-node">{{ rec.nodeName || '（实例级动作）' }}</div>
-              <div v-if="rec.comment" class="timeline-comment">{{ rec.comment }}</div>
-            </el-timeline-item>
-          </el-timeline>
-          <el-empty
-            v-else
-            :description="detail.approvalInstanceId ? '暂无审批记录' : '尚未提交审批（草稿）'"
+          <BpmApprovalHistory
+            :approvals="approvalInstancesOf(detail)"
+            :empty-text="detail.approvalInstanceId ? '暂无审批记录' : '尚未提交审批（草稿）'"
           />
 
           <div class="section-head">
@@ -234,7 +219,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
+import BpmApprovalHistory from '@/components/BpmApprovalHistory.vue'
 import { formatSize, formatTime } from '@/utils/format'
+import { approvalInstancesOf } from '@/utils/bpm-record'
 import { saveBlobAs } from '@/utils/download'
 import { useUserStore } from '@/stores/user'
 import {
@@ -315,14 +302,6 @@ function isEditable(status: number): boolean {
 // 部门负责人/HR 可见的他人申请。
 function isOwner(row: any): boolean {
   return currentUserId.value > 0 && Number(row?.userId) === currentUserId.value
-}
-function recordText(action: number): string {
-  return ['通过', '驳回', '撤回', '转办'][action - 1] ?? `未知(${action})`
-}
-function recordTag(action: number): string {
-  if (action === 1) return 'success'
-  if (action === 2) return 'danger'
-  return 'warning'
 }
 
 // ---------- 表单 ----------
@@ -551,21 +530,6 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-.timeline {
-  padding-left: 4px;
-}
-.timeline-operator {
-  margin-left: 8px;
-}
-.timeline-node {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 2px;
-}
-.timeline-comment {
-  margin-top: 4px;
-  white-space: pre-wrap;
 }
 .hint {
   color: #909399;

@@ -33,6 +33,7 @@ const (
 	expenseDelete     = int64(5233)
 	expenseSubmit     = int64(5234)
 	expenseManage     = int64(5235)
+	expenseQuery      = int64(5236)
 	expenseMineMenuID = int64(535)
 )
 
@@ -193,7 +194,10 @@ func downloadExpenseFile(t *testing.T, env *testutil.IntegrationEnv, token, file
 // expenseUser 建一个带报销基础按钮码的用户（默认部门 101）。
 func expenseUser(t *testing.T, env *testutil.IntegrationEnv, admin, username string, menuIDs []int64) (int64, string) {
 	t.Helper()
-	return createUserWithMenus(t, env, admin, username, 101, menuIDs)
+	// 报销列表/详情挂 oa:expense:query（issue #64 review）：用例用户默认带
+	// 查询码（5236），避免每条用例重复声明；写码仍由传入菜单逐项控制。
+	ids := append(append([]int64{}, menuIDs...), expenseQuery)
+	return createUserWithMenus(t, env, admin, username, 101, ids)
 }
 
 // ---------- 主流程 ----------
@@ -408,6 +412,23 @@ func TestIntegrationExpensePermissionCodes(t *testing.T) {
 	readerRoleID := createRoleWithMenus(t, env, admin, "expense_reader", []int64{expenseMenuID})
 	reader := oaLoginNewUser(t, env, admin, "expense_code_reader", readerRoleID)
 
+	// 无 oa:expense:query：列表/详情 403（spec §5，issue #64 review）；
+	// 仅持员工页 535 + 查询按钮 5236 的用户可读列表（200）。
+	noQueryRole := createRoleWithMenus(t, env, admin, "expense_no_query", []int64{expenseMineMenuID})
+	noQuery := oaLoginNewUser(t, env, admin, "expense_no_query_u", noQueryRole)
+	if status, _, _ := pageExpenseClaimsAPI(t, env, noQuery, ""); status != http.StatusForbidden {
+		t.Fatalf("无 oa:expense:query 读列表应 403，实际 %d", status)
+	}
+	if status, _ := getExpenseClaimAPI(t, env, noQuery, claimID); status != http.StatusForbidden {
+		t.Fatalf("无 oa:expense:query 读详情应 403，实际 %d", status)
+	}
+	queryOnlyRole := createRoleWithMenus(t, env, admin, "expense_query_only",
+		[]int64{expenseMineMenuID, expenseQuery})
+	queryOnly := oaLoginNewUser(t, env, admin, "expense_query_only_u", queryOnlyRole)
+	if status, _, _ := pageExpenseClaimsAPI(t, env, queryOnly, ""); status != http.StatusOK {
+		t.Fatalf("持 5236 查询码读列表应 200，实际 %d", status)
+	}
+
 	// 读者（仅查询码）：列表可读，写动作全部 403。
 	if status, _, _ := pageExpenseClaimsAPI(t, env, reader, ""); status != http.StatusOK {
 		t.Fatalf("查询码用户读列表应 200，实际 %d", status)
@@ -495,11 +516,11 @@ func TestIntegrationExpenseVisibilityScope(t *testing.T) {
 	deptID := createSubDept(t, env, admin, "报销一部", 101)
 
 	employeeID, employee := createUserWithMenus(t, env, admin, "expense_scope_emp", deptID,
-		[]int64{expenseMineMenuID, expenseCreate})
+		[]int64{expenseMineMenuID, expenseQuery, expenseCreate})
 	leaderID, leader := createUserWithMenus(t, env, admin, "expense_scope_leader", deptID,
-		[]int64{expenseMineMenuID})
+		[]int64{expenseMineMenuID, expenseQuery})
 	_, outsider := createUserWithMenus(t, env, admin, "expense_scope_out", 101,
-		[]int64{expenseMineMenuID})
+		[]int64{expenseMineMenuID, expenseQuery})
 	setDeptLeader(t, env, admin, deptID, leaderID)
 
 	claimID := createExpenseClaimAPI(t, env, employee,
