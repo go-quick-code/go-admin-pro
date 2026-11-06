@@ -160,6 +160,82 @@ export function getMyLeaveBalances(year?: number) {
   return request.get('/oa/leave/balance/mine', { params: year ? { year } : {} }) as Promise<any>
 }
 
+// ---------- OA 公告（issue #48，spec #42 §3.4/§4.7/§5） ----------
+// 权限模型：管理列表/草稿预览挂 oa:announcement:query（菜单 521），创建/编辑/
+// 删除/发布撤回逐码（5211–5214）；员工侧「我的公告」（菜单 532）与已发布详情
+// 登录即可，可见性由受众判定收口。
+
+export interface AnnouncementTargetPayload {
+  targetType: number
+  targetId: number
+}
+
+export interface AnnouncementPayload {
+  id?: number
+  title: string
+  content: string
+  audienceType: number
+  targets: AnnouncementTargetPayload[]
+  pinned: boolean
+}
+
+// 管理端分页（全部状态，置顶在前；status/audienceType/pinned 精确，keyword 匹配标题）。
+export function pageAnnouncements(params?: {
+  pageNo?: number
+  pageSize?: number
+  status?: number
+  audienceType?: number
+  pinned?: boolean
+  keyword?: string
+}) {
+  return request.get('/oa/announcement/page', { params }) as Promise<any>
+}
+// 我的公告（已发布且命中受众；置顶在前）。
+export function pageMyAnnouncements(params?: { pageNo?: number; pageSize?: number; keyword?: string }) {
+  return request.get('/oa/announcement/my/page', { params }) as Promise<any>
+}
+// 公告详情（已发布按受众可见；草稿/撤回仅管理查询码可预览）。
+export function getAnnouncement(id: number) {
+  return request.get(`/oa/announcement/${id}`) as Promise<any>
+}
+export function createAnnouncement(data: AnnouncementPayload) {
+  return request.post('/oa/announcement', data) as Promise<any>
+}
+export function updateAnnouncement(data: AnnouncementPayload) {
+  return request.put('/oa/announcement', data) as Promise<any>
+}
+// 删除仅草稿（发布后不可删除，只能撤回）。
+export function deleteAnnouncement(id: number) {
+  return request.delete(`/oa/announcement/${id}`) as Promise<any>
+}
+// 发布/重新发布：事务内为受众批量写 announcement 通知。
+export function publishAnnouncement(id: number) {
+  return request.post(`/oa/announcement/${id}/publish`) as Promise<any>
+}
+// 撤回：不再出现在员工列表，已写通知保留并在详情显示已撤回。
+export function withdrawAnnouncement(id: number) {
+  return request.post(`/oa/announcement/${id}/withdraw`) as Promise<any>
+}
+
+// 附件（infra_file，biz_type=oa_announcement）：查看跟随公告可见性，
+// 上传/删除挂 oa:announcement:update 且仅草稿。
+export function listAnnouncementFiles(id: number) {
+  return request.get(`/oa/announcement/${id}/files`) as Promise<any>
+}
+export function uploadAnnouncementFile(id: number, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/oa/announcement/${id}/files`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+export function deleteAnnouncementFile(id: number, fileId: number) {
+  return request.delete(`/oa/announcement/${id}/files/${fileId}`) as Promise<any>
+}
+// 鉴权下载（后端返回的 url 已含 /admin-api 前缀，baseURL 置空原样请求）。
+export function downloadAnnouncementFile(url: string) {
+  return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
+}
 // ---------- OA 请假申请（issue #52/#53，spec #42 §4.8/§5） ----------
 // 权限模型：列表/详情/附件查看登录即可（服务端按 §4.6 可见范围收口）；
 // 写动作逐码 oa:leave:create/update/delete/submit/withdraw/cancel；

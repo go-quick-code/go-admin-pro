@@ -240,3 +240,11 @@ func (r *Repository) ListJobLogs(ctx context.Context, f JobLogFilter, offset, li
 	}
 	return list, total, nil
 }
+
+// SoftDeleteFilesByBiz 软删除业务归属下的全部文件记录（仅置 deleted_at，
+// 不删除磁盘文件；公告草稿删除时保留附件记录，issue #48）。
+func (r *Repository) SoftDeleteFilesByBiz(ctx context.Context, bizType string, bizID int64) error {
+	return r.db.WithContext(ctx).
+		Where("biz_type = ? AND biz_id = ?", bizType, bizID).
+		Delete(&model.File{}).Error
+}
