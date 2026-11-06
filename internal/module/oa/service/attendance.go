@@ -22,19 +22,6 @@ const (
 	maxUserAgentColLen = MaxUserAgentLength
 )
 
-// SetLocation 注入业务时区（ADR 0006：唯一来源是 config.Location()，app 装配
-// 时调用）。打卡日期按业务时区取当天（spec §4.10）；未注入时退回本地时区
-// （测试装配恒注入）。
-func (s *Service) SetLocation(loc *time.Location) { s.location = loc }
-
-// locationOf 返回业务时区（未注入退回 time.Local）。
-func (s *Service) locationOf() *time.Location {
-	if s.location != nil {
-		return s.location
-	}
-	return time.Local
-}
-
 // ---------- 班次 ----------
 
 // CreateShift 新建班次（默认启用）。时段校验失败/字段越界 400。
@@ -464,7 +451,7 @@ func (s *Service) Punch(ctx context.Context, punchType int8, ip, userAgent strin
 		return nil, err
 	}
 
-	now := time.Now().In(s.locationOf())
+	now := time.Now().In(s.businessLocation())
 	row := &model.AttendancePunch{
 		UserID:    userID,
 		PunchDate: mustUTCDate(now), // DATE 列存业务时区当天的零点表示
@@ -518,7 +505,7 @@ func (s *Service) GetMyPunchToday(ctx context.Context) (*dto.MyPunchTodayResp, e
 	if userID <= 0 {
 		return nil, xerr.Unauthorized("")
 	}
-	now := time.Now().In(s.locationOf())
+	now := time.Now().In(s.businessLocation())
 	resp := &dto.MyPunchTodayResp{
 		Date:    DateKey(now),
 		Group:   nil,

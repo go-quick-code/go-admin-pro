@@ -67,8 +67,9 @@ type Service struct {
 	repo *repository.Repository
 	// notify 是公告发布的站内通知 seam（issue #48，spec §4.13）。
 	notify NotifyGateway
-	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
-	// 考勤打卡日期按它取当天（issue #60）。nil 时退回 time.Local。
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入：
+	// 考勤打卡日期（issue #60）与请假取消窗口的「今天」（issue #53）都按它
+	// 计算。nil 时退回 time.Local。
 	location *time.Location
 	// bpm 是审批引擎（issue #52 请假提交/回调的接点）：OA → bpm 单向依赖，
 	// bpm 不反向依赖业务模块（ADR 0008/0009）。装配前为 nil，相关入口显式报错。
@@ -83,6 +84,8 @@ type Service struct {
 	// leaveDays 是请假天数取数接缝（issue #61 预留，#62 装配请假联动）；
 	// nil 表示无请假联动，派生时 leave_days 恒 0。
 	leaveDays LeaveDaysProvider
+	// clock 是「现在」的来源（未注入时 time.Now），单元测试可替换。
+	clock func() time.Time
 }
 
 // New 创建 oa Service。repo 是 OA 实体表仓储（issue #50 起引入，工作日历
@@ -91,6 +94,34 @@ type Service struct {
 // （spec §4.13），生产装配必传。
 func New(sys SystemGateway, repo *repository.Repository, notify NotifyGateway) *Service {
 	return &Service{sys: sys, repo: repo, notify: notify}
+}
+
+// SetLocation 注入应用业务时区（ADR 0006：唯一来源是 config.Location()，
+// 由 internal/app 装配时调用）。nil 忽略，保留当前值。
+func (s *Service) SetLocation(loc *time.Location) {
+	if loc != nil {
+		s.location = loc
+	}
+}
+
+// businessLocation 返回业务时区：app 装配后是配置的 app.timezone；
+// 未注入（如直接构造 Service 的测试）时退回 time.Local。
+func (s *Service) businessLocation() *time.Location {
+	if s.location != nil {
+		return s.location
+	}
+	return time.Local
+}
+
+// businessNow 返回业务时区下的「现在」：请假取消窗口的「今天」走这里，
+// 不直接用 time.Now()（其 Location 是服务器本地时区，与 app.timezone
+// 可能不同，跨日边界会判错窗口——ADR 0006）。
+func (s *Service) businessNow() time.Time {
+	clock := s.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	return clock().In(s.businessLocation())
 }
 
 // VisibilityScopeOf 计算当前用户在指定资源上的可见范围（spec §4.6 取数编排）：

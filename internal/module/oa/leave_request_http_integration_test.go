@@ -22,17 +22,19 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
-// 请假申请测试的菜单/按钮码（菜单 529 + 5291–5294，issue #52 种子）。
+// 请假申请测试的菜单/按钮码（菜单 529 + 5291–5296，issue #52/#53 种子）。
 const (
-	leaveRequestMenuID  = int64(529)
-	leaveRequestCreate  = int64(5291)
-	leaveRequestUpdate  = int64(5292)
-	leaveRequestDelete  = int64(5293)
-	leaveRequestSubmit  = int64(5294)
-	bpmTaskMenuID       = int64(512)
-	bpmTaskHandleButton = int64(5121)
-	leaveManageMenuID   = int64(522)
-	leaveApprovalType   = "oa_leave_approval"
+	leaveRequestMenuID   = int64(529)
+	leaveRequestCreate   = int64(5291)
+	leaveRequestUpdate   = int64(5292)
+	leaveRequestDelete   = int64(5293)
+	leaveRequestSubmit   = int64(5294)
+	leaveRequestWithdraw = int64(5295)
+	leaveRequestCancel   = int64(5296)
+	bpmTaskMenuID        = int64(512)
+	bpmTaskHandleButton  = int64(5121)
+	leaveManageMenuID    = int64(522)
+	leaveApprovalType    = "oa_leave_approval"
 )
 
 // leaveRequestEnv 聚合一个用例的类型/用户/流程定义基础设施。
@@ -111,10 +113,10 @@ func newLeaveRequestEnv(t *testing.T) *leaveRequestEnv {
 
 	employeeID, employee := createUserWithMenus(t, env, admin, "leave_emp", 101, []int64{
 		leaveRequestMenuID, leaveRequestCreate, leaveRequestUpdate, leaveRequestDelete, leaveRequestSubmit,
-		leaveMineMenuID,
+		leaveRequestWithdraw, leaveRequestCancel, leaveMineMenuID,
 	})
 	leaderID, leader := createUserWithMenus(t, env, admin, "leave_leader", 101, []int64{
-		bpmTaskMenuID, bpmTaskHandleButton,
+		bpmTaskMenuID, bpmTaskHandleButton, leaveRequestWithdraw, leaveRequestCancel,
 	})
 	_, manager := createUserWithMenus(t, env, admin, "leave_manager", 102, []int64{
 		bpmTaskMenuID, bpmTaskHandleButton, leaveManageMenuID,
@@ -533,12 +535,19 @@ func TestIntegrationLeaveRequestPermissionAndTenant(t *testing.T) {
 		t.Fatalf("无码删除应 403，实际 HTTP %d", status)
 	}
 
-	// 非本人（即使持码）读详情/附件一律 404，不泄露存在性。
-	if status, _ := getLeaveDetail(t, env, le.manager, requestID); status != http.StatusNotFound {
-		t.Fatalf("非本人读详情应 404，实际 HTTP %d", status)
+	// 可见范围（issue #53，spec §4.6）：持 oa:leave:manage 的 HR 可读全租户，
+	// 所以本人以外「可见」不再一律 404；范围外（普通用户读他人）才是 404。
+	if status, _ := getLeaveDetail(t, env, le.manager, requestID); status != http.StatusOK {
+		t.Fatalf("持 oa:leave:manage 的 HR 读详情应 200，实际 HTTP %d", status)
 	}
-	if status, _ := env.Request(t, http.MethodGet, fmt.Sprintf("/oa/leave/request/%d/files", requestID), le.manager, nil); status != http.StatusNotFound {
-		t.Fatalf("非本人读附件应 404，实际 HTTP %d", status)
+	if status, _ := env.Request(t, http.MethodGet, fmt.Sprintf("/oa/leave/request/%d/files", requestID), le.manager, nil); status != http.StatusOK {
+		t.Fatalf("持 oa:leave:manage 的 HR 读附件应 200，实际 HTTP %d", status)
+	}
+	if status, _ := getLeaveDetail(t, env, noPerm, requestID); status != http.StatusNotFound {
+		t.Fatalf("范围外普通用户读详情应 404，实际 HTTP %d", status)
+	}
+	if status, _ := env.Request(t, http.MethodGet, fmt.Sprintf("/oa/leave/request/%d/files", requestID), noPerm, nil); status != http.StatusNotFound {
+		t.Fatalf("范围外普通用户读附件应 404，实际 HTTP %d", status)
 	}
 
 	// 租户隔离：租户 2 列表为空，跨租户详情 404。

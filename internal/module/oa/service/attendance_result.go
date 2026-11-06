@@ -144,7 +144,7 @@ type AttendanceDailySummary struct {
 func (s *Service) RunDailyAttendanceResult(ctx context.Context, param string) (AttendanceDailySummary, error) {
 	date := trimSpace(param)
 	if date == "" {
-		now := time.Now().In(s.locationOf())
+		now := s.businessNow()
 		date = DateKey(now.AddDate(0, 0, -1))
 	}
 	key, err := normalizeResultDate(date)
@@ -264,7 +264,7 @@ func (s *Service) CorrectAttendanceResult(ctx context.Context, id int64, req *dt
 	if _, err := s.RecomputeUserDate(ctx, row.UserID, DateKey(row.WorkDate)); err != nil {
 		return err
 	}
-	ok, err := s.repo.SetAttendanceCorrection(ctx, row.ID, *req.OverrideStatus, remark, correctedBy, time.Now().In(s.locationOf()))
+	ok, err := s.repo.SetAttendanceCorrection(ctx, row.ID, *req.OverrideStatus, remark, correctedBy, s.businessNow())
 	if err != nil {
 		return err
 	}
@@ -382,7 +382,7 @@ func (s *Service) computeResultRow(ctx context.Context, repo *repository.Reposit
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().In(s.locationOf())
+	now := s.businessNow()
 	row := &model.AttendanceResult{
 		UserID:       userID,
 		WorkDate:     workDate,

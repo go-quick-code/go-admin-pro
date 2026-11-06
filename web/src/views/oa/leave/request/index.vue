@@ -29,7 +29,7 @@
       <template #cell-actions="{ row }">
         <el-button link type="info" @click.stop="openDetail(row.id)">详情</el-button>
         <el-button
-          v-if="isEditable(row.status) && canUpdate"
+          v-if="isOwner(row) && isEditable(row.status) && canUpdate"
           link
           type="primary"
           @click.stop="openEdit(row)"
@@ -37,7 +37,7 @@
           编辑
         </el-button>
         <el-button
-          v-if="isEditable(row.status) && canSubmit"
+          v-if="isOwner(row) && isEditable(row.status) && canSubmit"
           link
           type="success"
           @click.stop="doSubmit(row)"
@@ -45,7 +45,7 @@
           提交
         </el-button>
         <el-button
-          v-if="isEditable(row.status) && canDelete"
+          v-if="isOwner(row) && isEditable(row.status) && canDelete"
           link
           type="danger"
           @click.stop="doDelete(row)"
@@ -144,7 +144,7 @@
           <div class="section-head">
             <span>审批时间线</span>
             <el-button
-              v-if="isEditable(detail.status) && canSubmit"
+              v-if="isOwner(detail) && isEditable(detail.status) && canSubmit"
               type="primary"
               size="small"
               :loading="submitting"
@@ -176,7 +176,7 @@
           <div class="section-head">
             <span>附件</span>
             <el-upload
-              v-if="isEditable(detail.status) && canUpdate"
+              v-if="isOwner(detail) && isEditable(detail.status) && canUpdate"
               :show-file-list="false"
               :http-request="handleUpload"
               :accept="fileAccept"
@@ -195,7 +195,11 @@
             <el-table-column label="大小" width="100">
               <template #default="{ row }">{{ formatSize(row.size) }}</template>
             </el-table-column>
-            <el-table-column v-if="isEditable(detail.status) && canUpdate" label="操作" width="80">
+            <el-table-column
+              v-if="isOwner(detail) && isEditable(detail.status) && canUpdate"
+              label="操作"
+              width="80"
+            >
               <template #default="{ row }">
                 <el-button link type="danger" @click="removeFile(row)">删除</el-button>
               </template>
@@ -204,6 +208,23 @@
           <div v-else class="hint">暂无附件；草稿/已驳回状态可上传。</div>
         </template>
       </div>
+      <!-- 发起人动作：待审可撤回（首个审批前），已通过且开始前可取消。 -->
+      <template #footer>
+        <div class="drawer-footer">
+          <el-button @click="detailVisible = false">关闭</el-button>
+          <el-button
+            v-if="canWithdrawDetail"
+            type="warning"
+            :loading="withdrawing"
+            @click="doWithdraw"
+          >
+            撤回
+          </el-button>
+          <el-button v-if="canCancelDetail" type="danger" plain :loading="cancelling" @click="doCancel">
+            取消请假
+          </el-button>
+        </div>
+      </template>
     </el-drawer>
   </div>
 </template>
@@ -217,6 +238,7 @@ import { formatSize, formatTime } from '@/utils/format'
 import { saveBlobAs } from '@/utils/download'
 import { useUserStore } from '@/stores/user'
 import {
+  cancelLeaveRequest,
   createLeaveRequest,
   deleteLeaveRequest,
   deleteLeaveRequestFile,
@@ -227,16 +249,22 @@ import {
   submitLeaveRequest,
   updateLeaveRequest,
   uploadLeaveRequestFile,
+  withdrawLeaveRequest,
 } from '@/api/oa'
 
-// 我的请假（issue #52，菜单 529）：本人列表/详情/时间线 + 草稿表单（含附件）。
-// 权限码 oa:leave:create/update/delete/submit；审批在通用待办（/bpm/task）完成。
+// 我的请假（issue #52/#53，菜单 529）：列表/详情/时间线 + 草稿表单（含附件）。
+// 列表按可见范围返回（manage → 全租户、部门负责人 → 部门子树、否则本人），
+// 但编辑/提交/删除/撤回/取消只对本人显示；审批在通用待办（/bpm/task）完成。
+// 权限码 oa:leave:create/update/delete/submit/withdraw/cancel。
 const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
 const tableRef = ref()
 const canCreate = computed(() => userStore.hasPerm('oa:leave:create'))
 const canUpdate = computed(() => userStore.hasPerm('oa:leave:update'))
+const canWithdraw = computed(() => userStore.hasPerm('oa:leave:withdraw'))
+const canCancel = computed(() => userStore.hasPerm('oa:leave:cancel'))
+const currentUserId = computed(() => Number(userStore.userInfo?.id || 0))
 const canDelete = computed(() => userStore.hasPerm('oa:leave:delete'))
 const canSubmit = computed(() => userStore.hasPerm('oa:leave:submit'))
 
@@ -282,6 +310,11 @@ function halfText(half: number): string {
 }
 function isEditable(status: number): boolean {
   return status === 0 || status === 3
+}
+// 写动作（编辑/提交/删除/撤回/取消）只对发起人显示：列表可能包含
+// 部门负责人/HR 可见的他人申请。
+function isOwner(row: any): boolean {
+  return currentUserId.value > 0 && Number(row?.userId) === currentUserId.value
 }
 function recordText(action: number): string {
   return ['通过', '驳回', '撤回', '转办'][action - 1] ?? `未知(${action})`
@@ -377,6 +410,15 @@ const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<any>(null)
 
+// 发起人动作按状态显示：待审 → 撤回；已通过 → 取消（开始日期后由后端
+// 返回可读 400）。列表可含他人申请，因此同时要求当前用户是发起人。
+const canWithdrawDetail = computed(
+  () => !!detail.value && isOwner(detail.value) && detail.value.status === 1 && canWithdraw.value,
+)
+const canCancelDetail = computed(
+  () => !!detail.value && isOwner(detail.value) && detail.value.status === 2 && canCancel.value,
+)
+
 async function openDetail(id: number) {
   detailVisible.value = true
   detailLoading.value = true
@@ -424,6 +466,42 @@ async function doDelete(row: any) {
   tableRef.value?.reload()
 }
 
+const withdrawing = ref(false)
+
+async function doWithdraw() {
+  if (!detail.value) return
+  await ElMessageBox.confirm('撤回后本次审批将终止，已扣额度不受影响。确认撤回吗？', '提示', {
+    type: 'warning',
+  })
+  withdrawing.value = true
+  try {
+    await withdrawLeaveRequest(detail.value.id)
+    ElMessage.success('已撤回')
+    tableRef.value?.reload()
+    await reloadDetail()
+  } finally {
+    withdrawing.value = false
+  }
+}
+
+const cancelling = ref(false)
+
+async function doCancel() {
+  if (!detail.value) return
+  await ElMessageBox.confirm('取消后已扣额度将返还，确认取消该请假吗？', '提示', {
+    type: 'warning',
+  })
+  cancelling.value = true
+  try {
+    await cancelLeaveRequest(detail.value.id)
+    ElMessage.success('已取消请假')
+    tableRef.value?.reload()
+    await reloadDetail()
+  } finally {
+    cancelling.value = false
+  }
+}
+
 // ---------- 附件 ----------
 const fileAccept =
   '.jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.zip,.rar,.7z,.mp4,.mp3'
@@ -468,6 +546,11 @@ onMounted(async () => {
   justify-content: space-between;
   margin: 20px 0 10px;
   font-weight: 600;
+}
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .timeline {
   padding-left: 4px;
