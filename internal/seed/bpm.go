@@ -21,9 +21,11 @@ type defaultBPMDefinition struct {
 // defaultBPMDefinitions 是安装时写入的默认审批流程（spec §7.3）：
 //   - crm_contract_approval v1（issue #47）：单节点，审批人规则为权限码
 //     crm:contract:approve（候选池物化，任一持有人可办理，ADR 0008）；
+//   - oa_leave_approval v1（issue #63 收口，spec §4.8/§7.3）：节点 1 发起人
+//     所在部门负责人，节点 2 权限码 oa:leave:manage（HR/管理员）；
 //   - oa_expense_approval v1（issue #55，spec §4.9）：节点 1 发起人所在部门
-//     负责人，节点 2 权限码 oa:expense:manage（财务/管理员）；负责人缺失时由
-//     bpm 返回 400 拒绝提交（不跳过节点、不自动通过）。
+//     负责人，节点 2 权限码 oa:expense:manage（财务/管理员）；
+//     负责人或候选池缺失时由 bpm 返回 400 拒绝提交（不跳过节点、不自动通过）。
 var defaultBPMDefinitions = []defaultBPMDefinition{
 	{
 		Key:          "crm_contract_approval",
@@ -37,6 +39,16 @@ var defaultBPMDefinitions = []defaultBPMDefinition{
 		Remark: "默认合同审批流程（issue #47，spec §4.5/§7.3）",
 	},
 	{
+		Key:          "oa_leave_approval",
+		Name:         "请假审批",
+		BusinessType: "oa_leave_approval",
+		Nodes: bpmmodel.NodeList{
+			{Name: "部门负责人审批", AssigneeType: bpmmodel.AssigneeInitiatorDeptLeader},
+			{Name: "HR 审批", AssigneeType: bpmmodel.AssigneePermission, AssigneeValue: "oa:leave:manage"},
+		},
+		Remark: "默认请假审批流程（issue #63 收口，#52 运行时使用，spec §4.8/§7.3）",
+	},
+	{
 		Key:          "oa_expense_approval",
 		Name:         "报销审批",
 		BusinessType: "oa_expense_approval",
@@ -48,7 +60,7 @@ var defaultBPMDefinitions = []defaultBPMDefinition{
 	},
 }
 
-// seedBPMDefinitions 写入默认审批流程定义（spec §7.3，issue #47/#55）。
+// seedBPMDefinitions 写入默认审批流程定义（spec §7.3，issue #47/#52/#55/#63）。
 //
 // 幂等：同 tenant + key 已有任意版本（含软删，版本号唯一键覆盖软删行）即跳过，
 // 不覆盖租户自行维护的流程配置。默认版本直接以「已发布」落库——种子是安装

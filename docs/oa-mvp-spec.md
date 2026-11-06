@@ -205,12 +205,15 @@
 - 附件挂表头；状态草稿 → 待审 → 通过/驳回；驳回回草稿可修改重提；待审可撤回。
 - 通过即终态，不做付款、预算、发票验真；审批通过后不允许修改明细。
 - 默认流程 `oa_expense_approval`：节点 1 发起人所在部门负责人，节点 2 权限码 `oa:expense:manage`（财务/管理员）。
+- 实现口径（issue #63 收口）：驳回落 `ExpenseStatusRejected(3)`（可编辑重提），撤回落
+  `ExpenseStatusWithdrawn(4)`，不字面回写草稿 `0`；状态守卫与 #54 一致，
+  其余语义仍以本文「驳回可修改重提」为准。
 
 ### 4.10 考勤
 
 - 班次：一天一个时段，`end_time > start_time`，不支持跨天；`grace_minutes` 为迟到/早退宽限。
 - 考勤组绑定一个班次；组员按用户物化，一个用户只能属于一个组；管理端支持按部门批量添加用户。用户没有考勤组时打卡返回 400。
-- 打卡：上班/下班两种类型，Web 来源，记录 IP 与 User-Agent；同一天允许多次，结果取最早上班与最晚下班。打卡日期按 `app.timezone` 计算。
+- 打卡：上班/下班两种类型，Web 来源，记录 IP 与 User-Agent；同一天允许多次，结果取最早上班与最晚下班。打卡日期按 `app.timezone` 计算。实现口径（issue #63）：v1 打卡接口以登录身份收口，未强制 `oa:attendance:punch` 权限码，无启用考勤组时返回 400。
 - 结果派生优先级：非工作日 → 休息；`leave_days >= 1` → 请假；缺上班卡或缺下班卡 → 缺卡；迟到且早退 → 迟到且早退；仅迟到 → 迟到；仅早退 → 早退；否则正常。`leave_days=0.5` 不改变状态，只在结果中记录半天请假。
 - 管理员校正写 `override_status` + `override_remark`，不覆盖原始打卡；校正结果优先于派生结果，列表以标记区分。
 - 重算触发：上班/下班打卡、请假通过/取消、管理员校正、每日定时任务、手工重算；重算按用户 + 日期范围执行。
@@ -360,14 +363,14 @@
 
 | 方法 | 路径 | 权限/说明 |
 |---|---|---|
-| POST | `/oa/attendance/punch` | `oa:attendance:punch`，需有考勤组 |
-| GET | `/oa/attendance/result/my` | 本人 |
-| GET | `/oa/attendance/result/page` | `oa:attendance:query`，按 4.6 |
-| POST | `/oa/attendance/result/{id}/override` | `oa:attendance:manage` |
-| GET | `/oa/attendance/summary` | `oa:attendance:summary:query`，按 4.6 |
+| POST | `/oa/attendance/punch` | 登录即可（实现口径：未强制 `oa:attendance:punch`），需有考勤组 |
+| GET | `/oa/attendance/result/mine` | 本人 |
+| GET | `/oa/attendance/result/page` | `oa:attendance:result:query`，按 4.6 |
+| PUT | `/oa/attendance/result/{id}/correct` | `oa:attendance:result:correct`（全租户可见另需 `oa:attendance:manage`） |
+| GET | `/oa/attendance/summary/page` | `oa:attendance:summary:query`，按 4.6 |
 | POST/PUT/DELETE | `/oa/attendance/shift...` | `oa:attendance:shift:manage` |
 | POST/PUT/DELETE | `/oa/attendance/group...` | `oa:attendance:group:manage` |
-| POST/PUT/DELETE | `/oa/attendance/calendar...` | `oa:attendance:calendar:manage` |
+| GET/PUT/POST/DELETE | `/oa/workday...` | `oa:workday:query/set/batch/delete`（工作日历） |
 
 ## 6. 前端页面
 
@@ -425,14 +428,19 @@
 
 按钮 ID 在 5000–5299 段内按模块取号（5011+ 公告、5031+ 请假、5041+ 报销、5051+ 考勤、5061+ 日程、5071+ 会议室、5081+ 文档、5111+ 流程定义、5121+ 待办）。新工单先 `grep` 去重再取号。
 
+实现口径（issue #63 收口，以 `internal/seed/seed.go` 的 `seedMenus` 为准）：实际菜单号段按协调台账落在 520–539——工作日历 520、公告 521、请假类型/额度 522、报销 523、日程 524、会议室 525、文档 526、班次 527、我的额度 528、我的请假 529、考勤组 530、我的考勤 531、我的公告 532、考勤结果 533、考勤汇总 534、我的报销 535、我的日程 536、我的文档 537、会议室预约 538、我的会议 539；按钮 ID = 菜单 ID ×10 + n。请假管理动作合并为单一 `oa:leave:manage`（不再拆 type/balance 两个码）；考勤结果查询/校正/月度汇总分别用 `oa:attendance:result:query`、`oa:attendance:result:correct`、`oa:attendance:summary:query`，全租户可见复用 `oa:attendance:manage`（5332）；打卡接口 v1 以登录身份收口，未强制 `oa:attendance:punch`。
+
 ### 7.3 种子
 
 - 流程定义：`crm_contract_approval` v1（权限码 `crm:contract:approve`）；`oa_leave_approval` v1（发起人部门负责人 → `oa:leave:manage`）；`oa_expense_approval` v1（发起人部门负责人 → `oa:expense:manage`）。
-- 请假类型：年假（额度 5，占额度）、事假（不占额度）、病假（不占额度）、调休（占额度，0）、婚假（3）、产假（98）、陪产假（15）。额度可由管理员调整。
+- 请假类型：年假（额度 5，占额度）、事假（不占额度）、病假（不占额度）、调休（占额度，0）、婚假（3）、产假（98）、陪产假（15）。额度可由管理员调整。实现口径（issue #63）：类型随 `seed-demo` 写入租户 1（不进入基础种子），管理员仍可增删改。
 - 报销类别字典 `oa_expense_category`：交通、餐饮、住宿、办公、其他。
 - 默认班次 09:00–18:00，宽限 5 分钟；默认考勤组。
 - 菜单与权限码写入 `seedMenus`；内置普通角色授予公告查看、请假/报销/考勤/日程/文档的基础菜单，管理员角色全量。
 - `seed-demo` 写入 OA 演示数据：公告、请假申请与额度、报销单、打卡与考勤结果、日程、会议室预约、文档目录与文件；仅当对应表为空时写入，重复启动不重复插入。
+- 实现口径（issue #63 收口）：基础种子的报销类别按 `(dict_type, value)`、流程定义按 `(tenant_id, key)` 幂等；请假类型由 `seed-demo` 按 `code` 幂等补齐（不进入基础种子）；`infra_job` 插入后显式回写 `status`，保证「默认启用」不被 GORM 的 `default:1` 零值省略写成暂停。
+- 演示数据哨兵按表：`oa_announcement`、`oa_leave_request`、`oa_expense_claim`、`oa_attendance_group_user/punch/result`、`oa_calendar_event`（source=0）、`oa_meeting_room/oa_room_booking`、`oa_document_folder/oa_document_file`；已通过请假与报销单带完整的 bpm 实例/任务/审批记录，会议室预约带 `source=room_booking` 的部门日程。
+- OA 基础数据中的报销类别字典、默认班次/考勤组、默认审批流程只种租户 1，请假类型由 `seed-demo` 写入；新建租户 bootstrap 仍只有总公司/super_admin/admin，需按 README「运维注意点」手工补齐。
 
 ## 8. 测试矩阵
 

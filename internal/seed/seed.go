@@ -62,9 +62,16 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedJobs(db); err != nil {
 		return err
 	}
-	if withDemo && seedCRMDemoFunc != nil {
-		if err := seedCRMDemoFunc(db); err != nil {
-			return err
+	if withDemo {
+		if seedCRMDemoFunc != nil {
+			if err := seedCRMDemoFunc(db); err != nil {
+				return err
+			}
+		}
+		if seedOADemoFunc != nil {
+			if err := seedOADemoFunc(db); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -75,6 +82,11 @@ func Run(db *gorm.DB, withDemo bool) error {
 // 产品实体及其消费者）可以在不携带 crm_demo.go 的副本上继续编译 seed 包；
 // 正常构建里 crm_demo.go 始终存在，行为等价于直接调用。
 var seedCRMDemoFunc func(*gorm.DB) error
+
+// seedOADemoFunc 是 OA 演示数据的写入入口，由 oa_demo.go 的 init 注册。
+// OA 演示数据依赖 CRM 演示组织（sales1/sales2/manager）与基础种子（默认
+// 班次/考勤组、默认审批流程、报销类别字典），因此固定排在 CRM 演示数据之后。
+var seedOADemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64
@@ -586,6 +598,23 @@ func seedRoles(db *gorm.DB) error {
 		// 目录 ACL 过滤；不含 526 管理菜单、5261 创建与 5262 管理码
 		//（顶层目录创建与全租户管理由管理员另行授予）。
 		{RoleID: 2, MenuID: 537},
+		// 请假员工侧（issue #63 收口）：我的额度（528）与我的请假（529）+
+		// 创建/编辑/删除/提交/撤回/取消按钮码。此前 #52/#53 只登记了菜单与
+		// 按钮，未并入内置普通角色，演示账号见不到「请假」「撤回」「取消」。
+		{RoleID: 2, MenuID: 528},
+		{RoleID: 2, MenuID: 529},
+		{RoleID: 2, MenuID: 5291},
+		{RoleID: 2, MenuID: 5292},
+		{RoleID: 2, MenuID: 5293},
+		{RoleID: 2, MenuID: 5294},
+		{RoleID: 2, MenuID: 5295},
+		{RoleID: 2, MenuID: 5296},
+		// 考勤结果页与校正/全租户按钮（issue #63 演示要求）：内置普通角色在
+		// 演示环境需要能看到考勤结果、校正与全租户结果；生产如不需要，可在
+		// 「角色管理」中回收 5331/5332。员工自助页 531（含本月汇总）此前已授予。
+		{RoleID: 2, MenuID: 533},
+		{RoleID: 2, MenuID: 5331},
+		{RoleID: 2, MenuID: 5332},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }
@@ -793,14 +822,28 @@ func seedJobs(db *gorm.DB) error {
 			Remark:         "每 5 分钟扫描 15 分钟内开始的会议室预约，向预约人发送 meeting_reminder 通知（reminded_at 保证只发一次）；handler_param 可填 YYYY-MM-DD HH:mm:ss 固定现在",
 		},
 	}
+	// Create 会把带 default 标签的零值列回写成数据库默认值（1 暂停），
+	// 因此在插入前先快照种子的意图状态，再逐条用 Exec 显式回写。
+	statusByHandler := make(map[string]int8, len(jobs))
+	for _, job := range jobs {
+		statusByHandler[job.HandlerName] = job.Status
+	}
 	if err := tenant.Skip(db).Create(&jobs).Error; err != nil {
 		return err
 	}
-	// GORM 对带 `default:1` 标签的零值 Status 会落库默认值 1（暂停），显式
-	// 把会议提醒任务改回启用（0），保证「infra_job 种子默认启用」（#57）。
-	return tenant.Skip(db).Model(&inframodel.Job{}).
-		Where("`handler_name` = ?", "oaRoomBookingReminder").
-		Update("`status`", inframodel.JobStatusRunning).Error
+	// GORM 对带 `default:1` 标签的零值 Status 会走「省略列 → 落库默认值」，
+	// 导致「默认启用」的任务实际以暂停状态入库（issue #63 收口 #57 遗留）。
+	// 逐条用 Exec 显式回写种子意图的状态：无论 0（启用）还是 1（暂停）都以
+	// 种子为准，避免 ORM 对带 default 标签列的省略行为影响最终状态。
+	for handlerName, status := range statusByHandler {
+		if err := tenant.Skip(db).Exec(
+			"UPDATE `infra_job` SET `status` = ? WHERE `tenant_id` = ? AND `handler_name` = ?",
+			status, 1, handlerName,
+		).Error; err != nil {
+			return fmt.Errorf("seed job status %s: %w", handlerName, err)
+		}
+	}
+	return nil
 }
 
 // seedPoolConfigs 写入租户 1 的公海配置默认行（issue #14）：

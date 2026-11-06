@@ -63,10 +63,17 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
 	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
-	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）与
-	// oa_expense_approval v1（issue #55）均已发布。
-	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 2, "默认流程定义")
+	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
+	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
+	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
+	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
+	// 定时任务状态（issue #63 收口 GORM 零值 + default:1 导致「默认启用」被写成暂停）：
+	// 演示任务与公海回收默认暂停，考勤日结果与会议提醒默认启用。
+	assertJobStatus(t, db, "demoJob", inframodel.JobStatusPaused)
+	assertJobStatus(t, db, "recyclePoolCustomers", inframodel.JobStatusPaused)
+	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -92,10 +99,53 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
-	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 2, "默认流程定义（幂等）")
+	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义（幂等）")
+	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
+	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
+}
+
+// assertDefaultLeaveDefinition 断言请假默认流程（issue #63 收口，spec §4.8）：
+// oa_leave_approval v1 已发布，节点 1 为发起人部门负责人、节点 2 为
+// oa:leave:manage 权限码候选池。
+func assertDefaultLeaveDefinition(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var def bpmmodel.ProcessDefinition
+	if err := tenant.Skip(db).
+		Where("tenant_id = ? AND `key` = ?", 1, "oa_leave_approval").
+		First(&def).Error; err != nil {
+		t.Fatalf("读取请假默认流程定义: %v", err)
+	}
+	if def.Version != 1 || def.Status != bpmmodel.DefinitionStatusPublished || def.PublishedAt == nil {
+		t.Fatalf("请假默认流程应为已发布 v1：%+v", def)
+	}
+	if def.BusinessType != "oa_leave_approval" {
+		t.Fatalf("请假默认流程 business_type 不符：%q", def.BusinessType)
+	}
+	if len(def.Nodes) != 2 {
+		t.Fatalf("请假默认流程应有两个节点，实际 %+v", def.Nodes)
+	}
+	if def.Nodes[0].AssigneeType != bpmmodel.AssigneeInitiatorDeptLeader {
+		t.Fatalf("节点 1 应为发起人部门负责人：%+v", def.Nodes[0])
+	}
+	if def.Nodes[1].AssigneeType != bpmmodel.AssigneePermission || def.Nodes[1].AssigneeValue != "oa:leave:manage" {
+		t.Fatalf("节点 2 应为 oa:leave:manage 权限码：%+v", def.Nodes[1])
+	}
+}
+
+// assertJobStatus 断言种子任务的启用状态（GORM 零值 + default:1 的回归守卫）。
+func assertJobStatus(t *testing.T, db *gorm.DB, handlerName string, want int8) {
+	t.Helper()
+	var job inframodel.Job
+	if err := tenant.Skip(db).Where("`handler_name` = ?", handlerName).First(&job).Error; err != nil {
+		t.Fatalf("读取定时任务 %s: %v", handlerName, err)
+	}
+	if job.Status != want {
+		t.Fatalf("定时任务 %s 状态应为 %d，实际 %d（0 启用 / 1 暂停）", handlerName, want, job.Status)
+	}
 }
 
 // assertDefaultExpenseDefinition 断言报销默认流程（issue #55，spec §4.9）：

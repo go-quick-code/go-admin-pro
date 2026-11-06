@@ -79,6 +79,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	}
 
 	if cfg.Database.Seed {
+		// OA 演示数据的文档文件需要落到实际存储目录（默认 ./uploads）；
+		// seed 包不读配置，这里显式传入本地存储根路径。
+		seed.SetDemoStorageBasePath(cfg.Storage.Local.BasePath)
 		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}
