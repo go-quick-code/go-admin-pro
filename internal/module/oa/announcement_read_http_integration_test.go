@@ -199,6 +199,107 @@ func TestIntegrationAnnouncementReadFlow(t *testing.T) {
 	}
 }
 
+// TestIntegrationAnnouncementDraftPreviewNotRead 草稿预览不产生已读行
+// （PR #66 审查 P2-3）：管理员预览草稿不写已读；发布后未读仍为未读，
+// 首次打开已发布详情才落已读。
+func TestIntegrationAnnouncementDraftPreviewNotRead(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	demo := env.Login(t, "demo", "123456")
+	adminID := usernameOf(t, env, "admin")
+	demoID := usernameOf(t, env, "demo")
+
+	id, status, msg := createAnnouncementAPI(t, env, admin, map[string]any{
+		"title": "草稿预览公告", "content": "<p>草稿内容</p>", "audienceType": 0,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("创建草稿：HTTP %d msg %q", status, msg)
+	}
+
+	// 管理员（oa:announcement:query）预览草稿：详情可见，但不落已读行。
+	status, detail, msg := announcementDetail(t, env, admin, id)
+	if status != http.StatusOK {
+		t.Fatalf("预览草稿：HTTP %d msg %q", status, msg)
+	}
+	if got, _ := detail["read"].(bool); got {
+		t.Fatalf("草稿预览 read=%v，期望 false（预览不算已读）", detail["read"])
+	}
+	if n := countAnnouncementReadRows(t, env, id, adminID); n != 0 {
+		t.Fatalf("草稿预览产生了 %d 条已读记录，期望 0", n)
+	}
+
+	// 发布后：管理员与 demo 的列表都应仍为未读（预览没有提前消费已读）。
+	if status, msg := publishAnnouncementAPI(t, env, admin, id); status != http.StatusOK {
+		t.Fatalf("发布公告：HTTP %d msg %q", status, msg)
+	}
+	for name, token := range map[string]string{"admin": admin, "demo": demo} {
+		flags := myAnnouncementReadFlags(t, env, token)
+		row, ok := flags[id]
+		if !ok {
+			t.Fatalf("%s 发布后应在员工列表看到公告：%v", name, flags)
+		}
+		if row.Read || !row.Unread {
+			t.Fatalf("%s 发布后未读状态不符：read=%v unread=%v", name, row.Read, row.Unread)
+		}
+	}
+	if n := countAnnouncementReadRows(t, env, id, adminID); n != 0 {
+		t.Fatalf("发布后、管理员未打开详情前已读行数 = %d，期望 0", n)
+	}
+
+	// demo 首次打开已发布详情：落一条已读；管理员仍未读。
+	if status, _, msg := announcementDetail(t, env, demo, id); status != http.StatusOK {
+		t.Fatalf("demo 打开已发布公告：HTTP %d msg %q", status, msg)
+	}
+	if n := countAnnouncementReadRows(t, env, id, demoID); n != 1 {
+		t.Fatalf("demo 打开后已读行数 = %d，期望 1", n)
+	}
+	if n := countAnnouncementReadRows(t, env, id, adminID); n != 0 {
+		t.Fatalf("管理员未打开详情却出现 %d 条已读记录，期望 0", n)
+	}
+}
+
+// TestIntegrationAnnouncementAudienceSkipsDisabledUser 部门受众展开过滤停用
+// 用户（PR #66 审查 P3-3）：停用用户不写发布通知，启用用户照常投递。
+func TestIntegrationAnnouncementAudienceSkipsDisabledUser(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	status, api := env.Request(t, http.MethodPost, "/system/user", admin, map[string]any{
+		"username": "ann_disabled", "password": "123456", "nickname": "停用用户",
+		"deptId": 101, "roleIds": []int64{}, "status": 1,
+	})
+	mustOK(t, "创建停用用户", status, api)
+	disabledID := usernameOf(t, env, "ann_disabled")
+	demoID := usernameOf(t, env, "demo") // 部门 101 的启用用户
+
+	id, status, msg := createAnnouncementAPI(t, env, admin, map[string]any{
+		"title": "部门受众公告", "content": "<p>部门可见</p>", "audienceType": 1,
+		"targets": []map[string]any{{"targetType": 1, "targetId": 101}},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("创建部门公告：HTTP %d msg %q", status, msg)
+	}
+	if status, msg := publishAnnouncementAPI(t, env, admin, id); status != http.StatusOK {
+		t.Fatalf("发布部门公告：HTTP %d msg %q", status, msg)
+	}
+	notifyCount := func(userID int64) int64 {
+		t.Helper()
+		var count int64
+		if err := tenant.Skip(env.DB).Table("notify_message").
+			Where("user_id = ? AND biz_type = ? AND biz_id = ?", userID, "oa_announcement", id).
+			Count(&count).Error; err != nil {
+			t.Fatalf("统计用户 %d 公告通知: %v", userID, err)
+		}
+		return count
+	}
+	if n := notifyCount(disabledID); n != 0 {
+		t.Fatalf("停用用户收到 %d 条公告通知，期望 0", n)
+	}
+	if n := notifyCount(demoID); n != 1 {
+		t.Fatalf("启用用户应收到 1 条公告通知，实际 %d", n)
+	}
+}
+
 // TestIntegrationAnnouncementReadRetention 覆盖统计口径与状态流转：
 // 多用户去重计数、名单分页、撤回保留历史已读、重新发布不重置已读。
 func TestIntegrationAnnouncementReadRetention(t *testing.T) {

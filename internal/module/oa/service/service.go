@@ -28,6 +28,9 @@ type SystemGateway interface {
 	DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error)
 	// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合（租户内）。
 	ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error)
+	// ListActiveUserIDsByDeptIDs 返回部门集合内的启用用户 ID 集合
+	// （公告发布按部门展开收件人：停用用户不投递，PR #66 审查 P3-3）。
+	ListActiveUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error)
 	// ListSimpleUsers 返回本租户启用用户的精简列表（考勤组员物化的合法性
 	// 校验用，issue #60）。
 	ListSimpleUsers(ctx context.Context) ([]systemmodel.SimpleUser, error)

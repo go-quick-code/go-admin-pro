@@ -50,12 +50,13 @@ var runtimeRoleMenus = []int64{512, 5121, 5122, 5123}
 // runtimeFakeHandler 是 BusinessHandler 测试替身：记录调用轨迹、可注入失败、
 // 以定义行 remark 模拟业务状态落库（事务内写，随整笔回滚）。
 type runtimeFakeHandler struct {
-	mu           sync.Mutex
-	markerDefID  int64
-	failApprove  bool
-	failReject   bool
-	failWithdraw bool
-	calls        []string
+	mu            sync.Mutex
+	markerDefID   int64
+	failApprove   bool
+	failReject    bool
+	failWithdraw  bool
+	calls         []string
+	afterApproved []int64
 }
 
 func (h *runtimeFakeHandler) OnApproved(_ context.Context, inst *model.ProcessInstance, tx *gorm.DB) error {
@@ -110,6 +111,21 @@ func (h *runtimeFakeHandler) callCount(prefix string) int {
 		}
 	}
 	return n
+}
+
+// AfterApproved 实现 ApprovalCommitHook：只应在实例最终通过后调用一次
+// （PR #66 审查 P2-1）。记录实例 ID 供多节点用例断言。
+func (h *runtimeFakeHandler) AfterApproved(_ context.Context, inst *model.ProcessInstance) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.afterApproved = append(h.afterApproved, inst.ID)
+}
+
+// afterApprovedCount 返回提交后钩子的调用次数。
+func (h *runtimeFakeHandler) afterApprovedCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.afterApproved)
 }
 
 // runtimeEnv 聚合一个用例的角色/用户/handler 基础设施。
@@ -496,6 +512,10 @@ func TestIntegrationRuntimeApproveAdvanceFinish(t *testing.T) {
 	if got := re.instanceStatus(t, rTok, inst.ID); got != model.InstanceStatusRunning {
 		t.Fatalf("还有下一节点，实例应保持运行中，实际 %d", got)
 	}
+	// 中间节点通过只推进任务：提交后钩子不得触发（PR #66 审查 P2-1）。
+	if n := re.handler.afterApprovedCount(); n != 0 {
+		t.Fatalf("中间节点通过不应调用 AfterApproved，实际 %d 次", n)
+	}
 	if rows := re.listTasks(t, bTok, "todo"); len(rows) != 0 {
 		t.Fatalf("兄弟任务应被取消，B 仍有 %d 条待办", len(rows))
 	}
@@ -518,6 +538,10 @@ func TestIntegrationRuntimeApproveAdvanceFinish(t *testing.T) {
 	}
 	if n := re.handler.callCount("approved:"); n != 1 {
 		t.Fatalf("OnApproved 应回调恰 1 次，实际 %d", n)
+	}
+	// 最终通过：提交后钩子恰触发一次（PR #66 审查 P2-1）。
+	if n := re.handler.afterApprovedCount(); n != 1 {
+		t.Fatalf("最终通过应调用 AfterApproved 恰 1 次，实际 %d", n)
 	}
 	if re.definitionRemark(t, defID) != "biz-approved" {
 		t.Fatalf("handler 的业务写应随事务提交")
@@ -1076,6 +1100,22 @@ func TestIntegrationRuntimeDeptLeaderRulesHTTP(t *testing.T) {
 		t.Fatalf("停用负责人：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 	}
 	re.startWantStatus(t, memberID, defID, 7603, "不应发起", http.StatusBadRequest)
+}
+
+// TestIntegrationRuntimeCommonRoleTodoAccess 普通角色（内置 role 2）经种子
+// 授权 512/5121 后可直接打开待办页（PR #66 审查 P1-2）：三个 tab 的查询
+// 接口都不再 403，通知深链的落点可用。
+func TestIntegrationRuntimeCommonRoleTodoAccess(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	demo := env.Login(t, "demo", "123456")
+	for _, tab := range []string{"todo", "done", "initiated"} {
+		status, api := env.Request(t, http.MethodGet,
+			"/bpm/task/page?tab="+tab+"&pageNo=1&pageSize=10", demo, nil)
+		if status != http.StatusOK || api.Code != 0 {
+			t.Fatalf("普通角色查询 %s 待办：HTTP %d code %d msg %q，期望 HTTP 200 code 0",
+				tab, status, api.Code, api.Msg)
+		}
+	}
 }
 
 // createUserWithDept 建指定部门的启用用户，返回 ID（不登录）。

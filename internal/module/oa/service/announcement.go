@@ -126,25 +126,38 @@ func (s *Service) PageMyAnnouncements(ctx context.Context, req *dto.Announcement
 	return items, total, nil
 }
 
-// GetAnnouncement 公告详情（打开即已读，issue #49）：
+// GetAnnouncement 公告详情（已发布公告打开即已读，issue #49）：
 // 已发布公告对命中受众的登录用户可见；已撤回公告仍对命中受众可见（spec §4.7：
 // 撤回不删除已写通知，用户打开详情看到「已撤回」），但不再出现在列表；
 // 草稿仅 oa:announcement:query 持有者可预览。都不可见时按 404 处理，
-// 不泄露存在性。通过可见性判定后幂等写入已读记录（唯一键保证重复打开
-// 不产生重复行、保留首次 read_at）。
+// 不泄露存在性。
+//
+// 只有**已发布**公告打开时幂等写入已读记录（唯一键保证重复打开不产生重复行、
+// 保留首次 read_at）；草稿预览与已撤回公告的详情只回显历史已读状态，不新增
+// 已读行（PR #66 审查 P2-3）。
 func (s *Service) GetAnnouncement(ctx context.Context, id int64) (*dto.AnnouncementDetailResp, error) {
 	row, _, err := s.findAccessibleAnnouncement(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.MarkAnnouncementRead(ctx, id, CurrentUserID(ctx), s.businessNow()); err != nil {
-		return nil, err
+	read := false
+	if row.Status == oamodel.AnnouncementStatusPublished {
+		if err := s.repo.MarkAnnouncementRead(ctx, id, CurrentUserID(ctx), s.businessNow()); err != nil {
+			return nil, err
+		}
+		read = true
+	} else {
+		// 草稿/撤回：不写已读，但如实回显该用户是否在发布期间读过。
+		read, err = s.repo.HasAnnouncementRead(ctx, id, CurrentUserID(ctx))
+		if err != nil {
+			return nil, err
+		}
 	}
 	targets, err := s.repo.ListAnnouncementTargets(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.announcementDetailOf(ctx, row, targets, true)
+	return s.announcementDetailOf(ctx, row, targets, read)
 }
 
 // PageAnnouncementReadStats 已读统计（oa:announcement:read-stats，issue #49）：
@@ -393,7 +406,9 @@ func (s *Service) resolveAudienceRecipients(ctx context.Context, tx *repository.
 		if err != nil {
 			return nil, err
 		}
-		users, err := s.sys.ListUserIDsByDeptIDs(ctx, children)
+		// 只向启用用户投递（PR #66 审查 P3-3）：部门子树解析含停用用户，
+		// 这里按启用口径过滤，与角色受众展开一致。
+		users, err := s.sys.ListActiveUserIDsByDeptIDs(ctx, children)
 		if err != nil {
 			return nil, err
 		}

@@ -98,9 +98,9 @@ func (s *Service) recomputeLeaveAttendance(ctx context.Context, userID int64, st
 	if userID <= 0 || startKey > endKey {
 		return
 	}
-	days, err := s.RecomputeUserRange(ctx, &dto.AttendanceRecomputeReq{
+	days, err := s.recomputeUserRange(ctx, &dto.AttendanceRecomputeReq{
 		UserID: userID, StartDate: startKey, EndDate: endKey,
-	})
+	}, false)
 	if err != nil {
 		slog.Error("recompute attendance after leave change failed",
 			"err", err, "trigger", trigger, "userId", userID, "start", startKey, "end", endKey)

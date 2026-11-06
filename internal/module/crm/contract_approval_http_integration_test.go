@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
@@ -288,6 +289,88 @@ func todoTasksOf(t *testing.T, approval map[string]any) []any {
 		}
 	}
 	return out
+}
+
+// TestIntegrationContractVoidApproveConcurrent 作废与审批并发（PR #66 审查
+// P2-2）：作废改为「实例 → 合同」锁序后与审批动作同向，不再出现反向加锁；
+// 断言两边都不返回 500（MySQL 1213 死锁会冒泡成 500），作废成功，最终状态
+// 合法（合同作废，实例已终止或已通过后合同被作废）。
+func TestIntegrationContractVoidApproveConcurrent(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	customer := createCustomer(t, env, admin, "并发作废宿主客户", nil)
+	customerID := int64(customer["id"].(float64))
+
+	for round := 0; round < 5; round++ {
+		contract := createContract(t, env, admin, fmt.Sprintf("并发作废合同-%d", round), map[string]any{
+			"customerId": customerID, "amount": "66.00",
+		})
+		contractID := int64(contract["id"].(float64))
+		if status, api := submitContract(t, env, admin, contractID); status != http.StatusOK || api.Code != 0 {
+			t.Fatalf("第 %d 轮提交审批：HTTP %d code %d msg %q", round, status, api.Code, api.Msg)
+		}
+		todo := myContractApprovalTodo(t, env, admin, contractID)
+		if todo == nil {
+			t.Fatalf("第 %d 轮提交后应有待办", round)
+		}
+		taskID := int64(todo["id"].(float64))
+
+		type result struct {
+			status int
+			msg    string
+		}
+		var wg sync.WaitGroup
+		gate := make(chan struct{})
+		approveRes := make([]result, 1)
+		voidRes := make([]result, 1)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-gate
+			status, api := env.Request(t, http.MethodPost, fmt.Sprintf("/bpm/task/%d/approve", taskID), admin,
+				map[string]any{"comment": "并发通过"})
+			approveRes[0] = result{status: status, msg: api.Msg}
+		}()
+		go func() {
+			defer wg.Done()
+			<-gate
+			status, api := changeContractStatusDirect(t, env, admin, contractID, crmmodel.ContractStatusVoid, "")
+			voidRes[0] = result{status: status, msg: api.Msg}
+		}()
+		close(gate)
+		wg.Wait()
+
+		if approveRes[0].status >= http.StatusInternalServerError {
+			t.Fatalf("第 %d 轮并发审批返回 5xx（疑似死锁）：HTTP %d msg %q",
+				round, approveRes[0].status, approveRes[0].msg)
+		}
+		if voidRes[0].status >= http.StatusInternalServerError {
+			t.Fatalf("第 %d 轮并发作废返回 5xx（疑似死锁）：HTTP %d msg %q",
+				round, voidRes[0].status, voidRes[0].msg)
+		}
+		// 作废是目标动作：无论审批先到还是后到都必须成功。
+		if voidRes[0].status != http.StatusOK {
+			t.Fatalf("第 %d 轮作废：HTTP %d msg %q，期望 200", round, voidRes[0].status, voidRes[0].msg)
+		}
+		// 审批可能成功（先拿到实例锁）或因实例已终止而 409；其余状态不合法。
+		if approveRes[0].status != http.StatusOK && approveRes[0].status != http.StatusConflict {
+			t.Fatalf("第 %d 轮审批：HTTP %d msg %q，期望 200（先办）或 409（实例已终止）",
+				round, approveRes[0].status, approveRes[0].msg)
+		}
+		detail := mustContractDetail(t, env, admin, contractID)
+		if detail["status"] != float64(crmmodel.ContractStatusVoid) {
+			t.Fatalf("第 %d 轮最终合同状态 = %v，期望作废", round, detail["status"])
+		}
+		approval := approvalOf(t, detail)
+		if approval == nil {
+			t.Fatalf("第 %d 轮详情缺少审批时间线", round)
+		}
+		instStatus := approval["instance"].(map[string]any)["status"]
+		if instStatus != float64(bpmmodel.InstanceStatusWithdrawn) &&
+			instStatus != float64(bpmmodel.InstanceStatusApproved) {
+			t.Fatalf("第 %d 轮实例最终状态不合法：%v", round, instStatus)
+		}
+	}
 }
 
 // TestIntegrationContractApprovalBackfill 存量待审合同补建实例幂等：

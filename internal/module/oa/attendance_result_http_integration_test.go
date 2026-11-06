@@ -405,6 +405,28 @@ func TestIntegrationAttendanceResultVisibility(t *testing.T) {
 		t.Fatalf("负责人查范围外用户应为空页，实际 %d", total)
 	}
 
+	// 手工重算与列表同一可见范围（PR #66 审查 P2-4）：负责人给子树内用户
+	// 重算成功，范围外 404；全租户管理员可重算任意用户。给负责人补校正权限
+	// 码（重算接口挂 oa:attendance:result:correct）。
+	correctRole := attCreateRole(t, env, admin, "考勤结果校正角色", "att_result_correct_vis",
+		[]int64{menuAttResult, menuAttResultCorrect})
+	if status, api := env.Request(t, http.MethodPut, "/system/user", admin, map[string]any{
+		"id": leadID, "username": "res_lead", "nickname": "res_lead",
+		"deptId": int64(102), "roleIds": []int64{queryRole, correctRole}, "status": 0,
+	}); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("给负责人追加校正权限：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	lead = env.Login(t, "res_lead", "123456")
+	if status, msg, days := attRecompute(t, env, lead, peerID, "2026-03-03", "2026-03-03"); status != http.StatusOK || msg != "" || days != 1 {
+		t.Fatalf("负责人重算子部门用户：HTTP %d msg %q days %d，期望 200/1", status, msg, days)
+	}
+	if status, _, _ := attRecompute(t, env, lead, outID, "2026-03-03", "2026-03-03"); status != http.StatusNotFound {
+		t.Fatalf("负责人重算范围外用户应 404，实际 %d", status)
+	}
+	if status, msg, days := attRecompute(t, env, hr, outID, "2026-03-03", "2026-03-03"); status != http.StatusOK || msg != "" || days != 1 {
+		t.Fatalf("全租户管理员重算任意用户：HTTP %d msg %q days %d，期望 200/1", status, msg, days)
+	}
+
 	// 普通员工：admin 结果页仅授予 531 时 403；仅本人（有 533 查询码但不是负责人）。
 	if status, _, _, _ := attPageResults(t, env, peer, "?pageNo=1&pageSize=10"); status != http.StatusForbidden {
 		t.Fatalf("无查询码用户应 403，实际 %d", status)
