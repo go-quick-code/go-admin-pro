@@ -17,8 +17,8 @@ type TenantQuotaLimits struct {
 	MaxMailMonthly int64 `json:"maxMailMonthly"`
 }
 
-// TenantQuotaUsage 是当前用量；短信/邮件月度用量由消息工单（#75）补齐，
-// 当前恒为 0。
+// TenantQuotaUsage 是当前用量；短信/邮件月度用量（issue #75）按应用时区
+// 统计当月 message_log 行数（成功与失败都算），由 app 装配的适配器补齐。
 type TenantQuotaUsage struct {
 	Users        int64 `json:"users"`
 	StorageBytes int64 `json:"storageBytes"`
