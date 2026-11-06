@@ -343,6 +343,13 @@ func seedMenus(db *gorm.DB) error {
 		btn(5331, 533, "考勤校正", "oa:attendance:result:correct", 1),
 		btn(5332, 533, "全租户可见", "oa:attendance:manage", 2),
 
+		// 考勤月度汇总（issue #62）：534 段（500–549 空位自取，grep 去重确认
+		// 534 未被占用）。查询码挂菜单（汇总页入口）；可见范围复用 #43 helper——
+		// oa:attendance:manage（5332 按钮承载）看全租户、部门负责人看子树、
+		// 否则仅本人。员工「本月汇总」卡片在「我的考勤」531 页面内登录即可，
+		// 不新增菜单。
+		menu(534, 500, "考勤汇总", "attendance-summary", "oa/attendance/summary", "oa:attendance:summary:query", "TrendCharts", 12),
+
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。

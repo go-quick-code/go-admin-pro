@@ -161,6 +161,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 注入（issue #48：通知与发布同事务，spec §4.13）；附件复用 infra_file
 	// （biz_type=oa_announcement，经 AnnouncementFileStore 适配器装配）。
 	oaSvc := oaservice.New(sysSvc, repository.New(db), notifySvc)
+	// 请假联动（issue #62）：考勤结果派生经 LeaveDaysProvider 读已通过请假
+	//（整天 → 请假状态、半天 → leave_days=0.5 不改状态，spec §4.10）。
+	oaSvc.SetLeaveDaysProvider(oaservice.NewLeaveDaysProvider(repository.New(db)))
 	// 业务时区（ADR 0006）：考勤打卡日期（issue #60）与请假取消窗口
 	// （issue #53）都按 app.timezone 取「今天」。
 	oaSvc.SetLocation(cfg.Location())

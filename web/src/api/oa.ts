@@ -123,6 +123,23 @@ export function correctAttendanceResult(id: number, data: any) {
 export function clearAttendanceResultCorrection(id: number) {
   return request.delete(`/oa/attendance/result/${id}/correct`) as Promise<any>
 }
+// ---------- OA 考勤月度汇总（issue #62，spec #42 §4.10） ----------
+// 管理端汇总分页/单用户查询挂 oa:attendance:summary:query（菜单 534），
+// 可见范围复用 oa:attendance:manage（5332）：全租户 / 部门负责人子树 / 本人；
+// 员工「我的考勤」本月汇总卡片登录即可（强制本人）。
+
+// 管理端月度汇总分页（按用户分页；month 缺省当月，可见范围由后端收口）。
+export function pageAttendanceSummaries(params: any) {
+  return request.get('/oa/attendance/summary/page', { params }) as Promise<any>
+}
+// 单用户月度汇总（范围外/跨租户后端 404）。
+export function getAttendanceSummaryOfUser(params: { month?: string; userId: number }) {
+  return request.get('/oa/attendance/summary/user', { params }) as Promise<any>
+}
+// 我的月度汇总（强制本人；month 缺省当月）。
+export function getMyAttendanceSummary(params?: { month?: string }) {
+  return request.get('/oa/attendance/summary/mine', { params }) as Promise<any>
+}
 // ---------- OA 请假类型与额度（issue #51，spec #42 §3.5/§4.8） ----------
 // 权限模型：类型与额度的全部管理动作挂 oa:leave:manage（菜单 522）；
 // 类型列表与本人余额登录即可（员工发起请假的前置）。

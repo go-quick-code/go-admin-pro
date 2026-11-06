@@ -77,23 +77,9 @@ type AttendanceResultFilter struct {
 
 // PageAttendanceResults 分页查询结果（work_date 降序、user_id 升序稳定序）。
 func (r *Repository) PageAttendanceResults(ctx context.Context, filter AttendanceResultFilter, offset, limit int) ([]model.AttendanceResult, int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.AttendanceResult{})
-	if filter.UserID > 0 {
-		q = q.Where("user_id = ?", filter.UserID)
-	} else if filter.UserIDs != nil {
-		if len(filter.UserIDs) == 0 {
-			return []model.AttendanceResult{}, 0, nil
-		}
-		q = q.Where("user_id IN ?", filter.UserIDs)
-	}
-	if filter.StartDate != "" {
-		q = q.Where("`work_date` >= ?", filter.StartDate)
-	}
-	if filter.EndDate != "" {
-		q = q.Where("`work_date` <= ?", filter.EndDate)
-	}
-	if filter.Status != nil {
-		q = q.Where("COALESCE(override_status, status) = ?", *filter.Status)
+	q, ok := r.resultsQuery(ctx, filter)
+	if !ok {
+		return []model.AttendanceResult{}, 0, nil
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -106,6 +92,46 @@ func (r *Repository) PageAttendanceResults(ctx context.Context, filter Attendanc
 		return nil, 0, fmt.Errorf("查询考勤结果: %w", err)
 	}
 	return list, total, nil
+}
+
+// ListAttendanceResultsInRange 读取区间内的全部结果行（issue #62 月度汇总用，
+// 不分页）：过滤条件与 PageAttendanceResults 一致（可见范围/日期/生效状态），
+// 按 user_id、work_date 升序，供纯函数按月聚合。月数据量 = 用户数 × ≤31 行，
+// v1 接受一次取回。
+func (r *Repository) ListAttendanceResultsInRange(ctx context.Context, filter AttendanceResultFilter) ([]model.AttendanceResult, error) {
+	q, ok := r.resultsQuery(ctx, filter)
+	if !ok {
+		return []model.AttendanceResult{}, nil
+	}
+	var rows []model.AttendanceResult
+	if err := q.Order("`user_id` ASC, `work_date` ASC, `id` ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询考勤结果: %w", err)
+	}
+	return rows, nil
+}
+
+// resultsQuery 按过滤条件构造结果查询；ok=false 表示可见集合为空（fail-closed，
+// 调用方直接返回空集，避免把 user_id IN () 拼进 SQL）。
+func (r *Repository) resultsQuery(ctx context.Context, filter AttendanceResultFilter) (*gorm.DB, bool) {
+	q := r.db.WithContext(ctx).Model(&model.AttendanceResult{})
+	if filter.UserID > 0 {
+		q = q.Where("user_id = ?", filter.UserID)
+	} else if filter.UserIDs != nil {
+		if len(filter.UserIDs) == 0 {
+			return nil, false
+		}
+		q = q.Where("user_id IN ?", filter.UserIDs)
+	}
+	if filter.StartDate != "" {
+		q = q.Where("`work_date` >= ?", filter.StartDate)
+	}
+	if filter.EndDate != "" {
+		q = q.Where("`work_date` <= ?", filter.EndDate)
+	}
+	if filter.Status != nil {
+		q = q.Where("COALESCE(override_status, status) = ?", *filter.Status)
+	}
+	return q, true
 }
 
 // SetAttendanceCorrection 写入管理员校正（override 状态 + 备注 + 校正人/时间）。
