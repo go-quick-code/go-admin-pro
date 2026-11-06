@@ -29,6 +29,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedMenus(db); err != nil {
 		return err
 	}
+	if err := seedTenantPackages(db); err != nil {
+		return err
+	}
 	if err := seedBPMDefinitions(db); err != nil {
 		return err
 	}
@@ -116,14 +119,6 @@ func seedTenant(db *gorm.DB) error {
 }
 
 func seedMenus(db *gorm.DB) error {
-	var count int64
-	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
 	btn := func(id, parent int64, name, perm string, sort int) sysmodel.Menu {
 		return sysmodel.Menu{
 			BaseEntity: sysmodel.BaseEntity{ID: id}, Name: name, Permission: perm,
@@ -160,6 +155,12 @@ func seedMenus(db *gorm.DB) error {
 		menu(107, 100, "租户管理", "tenant", "system/tenant/index", "system:tenant:query", "Shop", 7),
 		menu(108, 100, "登录日志", "login-log", "system/login-log/index", "system:login-log:query", "Document", 8),
 		menu(109, 100, "操作日志", "operate-log", "system/operate-log/index", "system:operate-log:query", "Tickets", 9),
+		// 租户套餐（issue #69）：110 段（109 操作日志已占用，110 起空闲）。
+		// 套餐是平台级资源，页面仅平台租户可操作；按钮码按菜单 ID×10+n。
+		menu(110, 100, "租户套餐", "tenant-package", "system/tenant-package/index", "system:tenant-package:query", "Box", 10),
+		btn(1101, 110, "套餐新增", "system:tenant-package:create", 1),
+		btn(1102, 110, "套餐修改", "system:tenant-package:update", 2),
+		btn(1103, 110, "套餐删除", "system:tenant-package:delete", 3),
 
 		btn(1011, 101, "用户新增", "system:user:create", 1),
 		btn(1012, 101, "用户修改", "system:user:update", 2),
@@ -472,10 +473,63 @@ func seedMenus(db *gorm.DB) error {
 		crmDashboard,
 		btn(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
 	)
-	if err := db.Create(&menus).Error; err != nil {
+	// 菜单补齐（issue #69）：按 ID 只插入缺失项，不更新、不复活已软删菜单。
+	// 旧实现「有菜单就整体跳过」会让存量库永远看不到新版本追加的菜单；
+	// Unscoped 把软删 ID 也视为已存在，避免重新插入撞主键或复活管理员删除的菜单。
+	var existing []int64
+	if err := tenant.Skip(db).Unscoped().Model(&sysmodel.Menu{}).Pluck("id", &existing).Error; err != nil {
 		return err
 	}
-	slog.Info("seed menus created", "count", len(menus))
+	seen := make(map[int64]struct{}, len(existing))
+	for _, id := range existing {
+		seen[id] = struct{}{}
+	}
+	missing := make([]sysmodel.Menu, 0, len(menus))
+	for _, menu := range menus {
+		if _, ok := seen[menu.ID]; ok {
+			continue
+		}
+		missing = append(missing, menu)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := db.Create(&missing).Error; err != nil {
+		return err
+	}
+	slog.Info("seed menus created", "count", len(missing))
+	return nil
+}
+
+// seedTenantPackages 写入默认「标准版」套餐（issue #69）：全部启用目录/菜单、
+// 配额不限。仅当套餐表为空时写入；管理员改名/删除后重复启动不复活。
+func seedTenantPackages(db *gorm.DB) error {
+	var count int64
+	if err := tenant.Skip(db).Model(&sysmodel.TenantPackage{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	var menuIDs sysmodel.Int64List
+	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).
+		Where("type IN ?", []int8{sysmodel.MenuTypeDir, sysmodel.MenuTypeMenu}).
+		Where("status = ?", sysmodel.StatusEnable).
+		Order("id ASC").
+		Pluck("id", &menuIDs).Error; err != nil {
+		return err
+	}
+	pkg := &sysmodel.TenantPackage{
+		BaseEntity: sysmodel.BaseEntity{ID: 1},
+		Name:       "标准版",
+		Status:     sysmodel.StatusEnable,
+		MenuIDs:    menuIDs,
+		Remark:     "默认套餐：全部菜单，配额不限",
+	}
+	if err := tenant.Skip(db).Create(pkg).Error; err != nil {
+		return err
+	}
+	slog.Info("seed tenant package created", "name", pkg.Name, "menus", len(menuIDs))
 	return nil
 }
 

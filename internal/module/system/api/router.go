@@ -90,6 +90,17 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	tenantGroup.PUT("/status", h.RequirePermission("system:tenant:update"), h.UpdateTenantStatus)
 	tenantGroup.DELETE("/:id", h.RequirePermission("system:tenant:delete"), h.DeleteTenant)
 
+	// 租户套餐（issue #69）：平台级资源，仅平台租户可管理。
+	tenantPackage := rg.Group("/system/tenant-package")
+	tenantPackage.Use(h.RequirePlatformTenant())
+	tenantPackage.GET("/page", h.RequirePermission("system:tenant-package:query"), h.PageTenantPackages)
+	tenantPackage.GET("/simple-list", h.RequirePermission("system:tenant-package:query"), h.ListSimpleTenantPackages)
+	tenantPackage.GET("/:id", h.RequirePermission("system:tenant-package:query"), h.GetTenantPackage)
+	tenantPackage.POST("", h.RequirePermission("system:tenant-package:create"), h.CreateTenantPackage)
+	tenantPackage.PUT("", h.RequirePermission("system:tenant-package:update"), h.UpdateTenantPackage)
+	tenantPackage.PUT("/status", h.RequirePermission("system:tenant-package:update"), h.UpdateTenantPackageStatus)
+	tenantPackage.DELETE("/:id", h.RequirePermission("system:tenant-package:delete"), h.DeleteTenantPackage)
+
 	// 登录日志
 	loginLog := rg.Group("/system/login-log")
 	loginLog.GET("/page", h.RequirePermission("system:login-log:query"), h.PageLoginLogs)
