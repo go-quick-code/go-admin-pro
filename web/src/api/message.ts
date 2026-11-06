@@ -16,6 +16,10 @@ export function updateChannelStatus(id: number, status: number) {
 export function deleteChannel(id: number) {
   return request.delete(`/message/channel/${id}`) as Promise<any>
 }
+// 渠道测试发送（issue #73，仅平台租户可用）：用指定渠道投递一条真实消息。
+export function testChannel(id: number, data: { recipient: string; templateCode: string; params?: Record<string, string> }) {
+  return request.post(`/message/channel/${id}/test`, data) as Promise<any>
+}
 
 // ---------- 消息模板（平台级，仅平台租户可管理） ----------
 export function pageTemplates(params: any) {

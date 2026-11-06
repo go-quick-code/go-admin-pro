@@ -11,6 +11,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	channel.POST("", h.perm("message:channel:create"), h.CreateChannel)
 	channel.PUT("", h.perm("message:channel:update"), h.UpdateChannel)
 	channel.PUT("/:id/status", h.perm("message:channel:update"), h.UpdateChannelStatus)
+	// 测试发送（issue #73）：与 spec §5.2 一致，权限码 message:channel:update；
+	// 「仅平台租户」在 service 层校验（非平台 403）。
+	channel.POST("/:id/test", h.perm("message:channel:update"), h.TestChannel)
 	channel.DELETE("/:id", h.perm("message:channel:delete"), h.DeleteChannel)
 
 	template := rg.Group("/message/template")
