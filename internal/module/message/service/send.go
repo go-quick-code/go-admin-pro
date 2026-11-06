@@ -34,8 +34,9 @@ func (s *Service) SendMail(ctx context.Context, req *dto.SendReq) (*dto.SendResu
 }
 
 // send 是短信/邮件共用的发送流程（spec §4.3.2）：
-// 模板启用 → 渠道启用 → 参数与声明一致 → 渲染 → provider 发送 → 写日志。
-// 失败（未知 provider / provider 错误 / 超时）返回 502，并写失败日志。
+// 模板启用 → 渠道启用 → 参数与声明一致 → 渲染 → 月度配额校验 →
+// provider 发送 → 写日志。失败（未知 provider / provider 错误 / 超时）
+// 返回 502，并写失败日志；月度配额超限返回 409 且不写日志。
 func (s *Service) send(ctx context.Context, channelType string, req *dto.SendReq) (*dto.SendResult, error) {
 	recipient := strings.TrimSpace(req.Recipient)
 	if err := validateRecipient(channelType, recipient); err != nil {
@@ -68,8 +69,9 @@ func (s *Service) findEnabledTemplate(ctx context.Context, channelType, code str
 }
 
 // deliver 是发送流程的共用核心（发送与渠道测试发送共用）：参数校验一致 →
-// 渲染 → provider 发送（超时 10s）→ 写日志（成功与失败都写）。
-// provider 未知/发送失败返回 502，错误详情只落日志，不回显密钥。
+// 渲染 → 月度配额校验（#75）→ provider 发送（超时 10s）→ 写日志（成功与失败都写）。
+// provider 未知/发送失败返回 502，错误详情只落日志，不回显密钥；
+// 配额超限返回 409 且不写日志行。
 func (s *Service) deliver(ctx context.Context, channel *model.Channel, template *model.Template, recipient string, params map[string]string) (*dto.SendResult, error) {
 	declared, err := decodeTemplateParams(template.Params)
 	if err != nil {
@@ -85,6 +87,13 @@ func (s *Service) deliver(ctx context.Context, channel *model.Channel, template 
 	}
 	content, err := renderTemplate(template.Content, params)
 	if err != nil {
+		return nil, err
+	}
+
+	// 月度配额校验（issue #75，spec §4.2.4/§4.3.2）：渲染之后、provider
+	// 发送与日志落库之前。409 时必须不写任何 message_log 行（spec §4.2.6），
+	// 因此这里直接返回，不走 recordSendResult。
+	if err := s.checkSendQuota(ctx, channel.ChannelType); err != nil {
 		return nil, err
 	}
 
