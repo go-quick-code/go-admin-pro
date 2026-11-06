@@ -11,15 +11,16 @@ import (
 
 // Config 是应用的完整配置，对应 configs/config.yaml 的层级结构。
 type Config struct {
-	App       AppConfig       `mapstructure:"app"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	Security  SecurityConfig  `mapstructure:"security"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Tenant    TenantConfig    `mapstructure:"tenant"`
-	Logger    LoggerConfig    `mapstructure:"logger"`
-	Push      PushConfig      `mapstructure:"push"`
-	AccessLog AccessLogConfig `mapstructure:"access-log"`
+	App        AppConfig        `mapstructure:"app"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	JWT        JWTConfig        `mapstructure:"jwt"`
+	Security   SecurityConfig   `mapstructure:"security"`
+	Storage    StorageConfig    `mapstructure:"storage"`
+	Tenant     TenantConfig     `mapstructure:"tenant"`
+	Logger     LoggerConfig     `mapstructure:"logger"`
+	Push       PushConfig       `mapstructure:"push"`
+	AccessLog  AccessLogConfig  `mapstructure:"access-log"`
+	IPLocation IPLocationConfig `mapstructure:"ip-location"`
 
 	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
 	loc *time.Location
@@ -42,6 +43,14 @@ type AccessLogConfig struct {
 	// RetentionDays 是访问日志保留天数（默认 30）：cleanAccessLogs 系统级
 	// 定时任务每日 03:00 清理超过保留期的记录。
 	RetentionDays int `mapstructure:"retention-days"`
+}
+
+// IPLocationConfig 是 IP 归属地定位（issue #82，spec §4.8.4）的配置。
+type IPLocationConfig struct {
+	// XdbPath 是 ip2region xdb v2 数据文件路径（部署侧提供，仓库不内置）。
+	// 为空表示未启用：登录日志归属地为空串；文件不存在/加载失败只告警一次，
+	// 退回空实现，不影响启动。
+	XdbPath string `mapstructure:"xdb-path"`
 }
 
 // DefaultTimezone 是 app.timezone 为空时的默认业务时区。
@@ -316,6 +325,11 @@ func (c *Config) applyEnv() {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			c.Push.Heartbeat = d
 		}
+	}
+	// IP 定位（issue #82）：环境变量覆盖 xdb 路径（容器部署与集成测试用）。
+	// 仅在变量存在时覆盖——空串同样是合法配置（未启用）。
+	if v, ok := os.LookupEnv("GAP_IP_LOCATION_XDB_PATH"); ok {
+		c.IPLocation.XdbPath = v
 	}
 }
 

@@ -242,3 +242,17 @@ export function clearOperateLogs() {
 export function getDashboardSummary() {
   return request.get('/system/dashboard/summary') as Promise<any>
 }
+
+// ---------- 地区（issue #82，spec §5.7）----------
+// 地区树：parentCode 为空返回全量树（顶层省级），指定编码返回子树。
+export function listAreaTree(parentCode?: string) {
+  return request.get('/system/area/tree', { params: { parentCode: parentCode || undefined } }) as Promise<any>
+}
+// 直接子级（平铺一跳）：parentCode 为空返回省级；供 AreaCascader 懒加载。
+export function listAreaChildren(parentCode?: string) {
+  return request.get('/system/area/children', { params: { parentCode: parentCode || undefined } }) as Promise<any>
+}
+// 平台导入（JSON 数组，按 code upsert，单次 ≤5000 条）。
+export function importAreas(items: any[]) {
+  return request.post('/system/area/import', items) as Promise<any>
+}

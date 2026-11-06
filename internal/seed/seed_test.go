@@ -39,7 +39,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
 		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
-		&msgmodel.Channel{}, &msgmodel.Template{},
+		&msgmodel.Channel{}, &msgmodel.Template{}, &sysmodel.Area{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -126,6 +126,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")
 	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板（幂等）")
+	// 行政区划（issue #82，spec §4.8.2）：省市两级全量 377 行（34 省 + 343 市）。
+	assertCount(t, db, &sysmodel.Area{}, 377, "地区（省市两级）")
 }
 
 // assertDefaultLeaveDefinition 断言请假默认流程（issue #63 收口，spec §4.8）：

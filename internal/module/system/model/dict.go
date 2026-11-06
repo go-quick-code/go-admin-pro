@@ -58,6 +58,11 @@ type LoginLog struct {
 	Result    int8      `gorm:"not null;default:0" json:"result"`    // 0 成功 1 失败
 	Message   string    `gorm:"size:500" json:"message"`
 	LoginTime time.Time `json:"loginTime"`
+
+	// LoginLocation 是查询时按 LoginIP 实时解析的归属地（issue #82，
+	// spec §4.8.5）：非持久化字段（gorm:"-"），不改表结构；未配置
+	// ip-location.xdb-path 或定位失败时为空串。
+	LoginLocation string `gorm:"-" json:"loginLocation,omitempty"`
 }
 
 func (LoginLog) TableName() string { return "system_login_log" }

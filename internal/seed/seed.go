@@ -69,6 +69,10 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedJobs(db); err != nil {
 		return err
 	}
+	// 行政区划种子（issue #82，spec §4.8.2）：省市两级，表为空时幂等写入。
+	if err := Areas(db); err != nil {
+		return err
+	}
 	if withDemo {
 		if seedCRMDemoFunc != nil {
 			if err := seedCRMDemoFunc(db); err != nil {
@@ -203,6 +207,12 @@ func seedMenus(db *gorm.DB) error {
 		btn(1073, 107, "租户删除", "system:tenant:delete", 3),
 		btn(1081, 108, "日志清空", "system:login-log:delete", 1),
 		btn(1091, 109, "日志清空", "system:operate-log:delete", 1),
+		// 地区管理（issue #82，spec §4.8/§5.7/§7.2）：113 段（grep 去重确认
+		// 113/1131 空闲）。行政区划是平台级参考数据，页面只读 + 平台导入；
+		// 查询码挂菜单（树/子级接口对所有登录用户开放，spec §4.8.1，
+		// 供 AreaCascader 在任意页面使用），导入是平台租户专属动作。
+		menu(113, 100, "地区管理", "area", "system/area/index", "system:area:query", "Location", 13),
+		btn(1131, 113, "地区导入", "system:area:import", 1),
 
 		dir(200, 0, "基础设施", "/infra", "Tools", 20),
 		menu(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),

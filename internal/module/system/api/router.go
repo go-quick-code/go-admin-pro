@@ -136,6 +136,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	socialClient.PUT("", h.RequirePermission("system:social:update"), h.UpdateSocialClient)
 	socialClient.DELETE("/:id", h.RequirePermission("system:social:delete"), h.DeleteSocialClient)
 
+	// 地区（issue #82，spec §4.8/§5.7）：行政区划参考数据，树/子级开放给
+	// 所有登录用户（spec §4.8.1，同部门树不设 RequirePermission，供级联
+	// 选择器在任意页面使用）；导入仅平台租户 + system:area:import 权限码
+	//（service 层再做平台校验兜底，同 db-doc 模式）。
+	area := rg.Group("/system/area")
+	area.GET("/tree", h.ListAreaTree)
+	area.GET("/children", h.ListAreaChildren)
+	area.POST("/import", h.RequirePlatformTenant(), h.RequirePermission("system:area:import"), h.ImportAreas)
+
 	// 登录日志
 	loginLog := rg.Group("/system/login-log")
 	loginLog.GET("/page", h.RequirePermission("system:login-log:query"), h.PageLoginLogs)

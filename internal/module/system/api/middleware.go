@@ -120,8 +120,12 @@ func (h *Handler) OperateLog() gin.HandlerFunc {
 
 		var body []byte
 		if strings.HasPrefix(c.GetHeader("Content-Type"), "application/json") {
+			// 日志只取前 64KB（RequestParams 落库前还会截到 4000）；
+			// 但必须把完整请求体还给下游——原先直接用截断内容替换 Body，
+			// 会把超过 64KB 的 JSON 请求（如地区批量导入）截断成
+			// unexpected EOF（issue #82 集成测试暴露的既有基线问题）。
 			body, _ = io.ReadAll(io.LimitReader(c.Request.Body, 64<<10))
-			c.Request.Body = io.NopCloser(bytes.NewReader(body))
+			c.Request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), c.Request.Body))
 		}
 
 		start := time.Now()
