@@ -59,6 +59,9 @@ type Service struct {
 	// files 是合同附件存储依赖面（issue #17，由 app 装配 infra 适配器，
 	// 见 contract_file.go；未装配时附件接口显式报错）。
 	files ContractFileStore
+	// sensitive 是敏感词检查依赖面（issue #81，spec §4.7.4，由 internal/app
+	// 装配 system 实现；未注入时跟进创建/修改跳过检查，见 sensitive_word.go）。
+	sensitive SensitiveWordChecker
 	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入；
 	// nil 表示未注入（退回 time.Local，见 businessLocation）。
 	location *time.Location

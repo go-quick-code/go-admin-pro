@@ -8,10 +8,11 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=64  断言 up 后的业务表数量（默认 64；CI 继承此默认值；
+#   EXPECTED_TABLES=65  断言 up 后的业务表数量（默认 65；CI 继承此默认值；
 #                       00023 新增 system_tenant_package（system_tenant 加
 #                       package_id 列，列变更不改表数），
 #                       00026 新增 infra_api_log，
+#                       00027 新增 system_sensitive_word，
 #                       00003 新增 system_role_dept，00004 新增 crm_customer、crm_sequence，
 #                       00005 新增 crm_contact，00006 新增 crm_customer_owner_history，
 #                       00007 新增 crm_follow_up，00008 新增 crm_pool_config，
@@ -42,7 +43,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-64}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-65}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
