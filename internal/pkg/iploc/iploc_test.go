@@ -1,4 +1,4 @@
-package iploc
+package iploc_test
 
 import (
 	"encoding/binary"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/iploc"
 )
 
 // capturingLogger 捕获日志输出（每条一行），用于断言「加载失败只告警一次」。
@@ -37,7 +39,7 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 
 // TestNoopResolver 空实现：任何 IP 都返回空串（spec §4.8.4 未配置 xdb 时）。
 func TestNoopResolver(t *testing.T) {
-	r := NewNoop()
+	r := iploc.NewNoop()
 	for _, ip := range []string{"1.2.3.4", "", "not-an-ip", "8.8.8.8"} {
 		if v := r.Resolve(ip); v != "" {
 			t.Fatalf("空实现 Resolve(%q) 应为空串，实际 %q", ip, v)
@@ -48,7 +50,7 @@ func TestNoopResolver(t *testing.T) {
 // TestNewEmptyPathNoWarn 未配置 xdb-path：直接空实现，无任何告警。
 func TestNewEmptyPathNoWarn(t *testing.T) {
 	cap := &capturingLogger{}
-	r := New(cap.Logger(), "")
+	r := iploc.New(cap.Logger(), "")
 	if r == nil {
 		t.Fatal("工厂应返回非 nil resolver")
 	}
@@ -64,7 +66,7 @@ func TestNewEmptyPathNoWarn(t *testing.T) {
 // 不影响启动（Resolve 不再报错、不再追加告警）。
 func TestNewMissingXdbWarnsOnce(t *testing.T) {
 	cap := &capturingLogger{}
-	r := New(cap.Logger(), filepath.Join(t.TempDir(), "missing.xdb"))
+	r := iploc.New(cap.Logger(), filepath.Join(t.TempDir(), "missing.xdb"))
 	if r == nil {
 		t.Fatal("加载失败应退回空实现而非 panic")
 	}
@@ -91,7 +93,7 @@ func TestNewCorruptXdbWarnsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	cap := &capturingLogger{}
-	r := New(cap.Logger(), path)
+	r := iploc.New(cap.Logger(), path)
 	if v := r.Resolve("1.2.3.4"); v != "" {
 		t.Fatalf("损坏 xdb 应退回空实现，实际 %q", v)
 	}
@@ -111,8 +113,8 @@ func TestFormatRegion(t *testing.T) {
 		{"中国|0|浙江省|杭州市|阿里云", "中国 浙江省 杭州市 阿里云"},
 	}
 	for _, c := range cases {
-		if got := FormatRegion(c.in); got != c.want {
-			t.Fatalf("FormatRegion(%q) = %q，期望 %q", c.in, got, c.want)
+		if got := iploc.FormatRegion(c.in); got != c.want {
+			t.Fatalf("iploc.FormatRegion(%q) = %q，期望 %q", c.in, got, c.want)
 		}
 	}
 }
@@ -171,7 +173,7 @@ func buildMiniXdb(t *testing.T, region string) string {
 // 非法 IP / 解析失败返回空串（spec §4.8.5 定位失败不影响分页）。
 func TestIP2RegionResolver(t *testing.T) {
 	path := buildMiniXdb(t, "中国|0|广东省|深圳市|电信")
-	r, err := NewIP2Region(path)
+	r, err := iploc.NewIP2Region(path)
 	if err != nil {
 		t.Fatalf("加载自制 xdb: %v", err)
 	}
@@ -191,7 +193,7 @@ func TestIP2RegionResolver(t *testing.T) {
 // （ioCount 等内部状态），驱动层必须串行化。
 func TestIP2RegionResolverConcurrent(t *testing.T) {
 	path := buildMiniXdb(t, "中国|0|广东省|深圳市|电信")
-	r, err := NewIP2Region(path)
+	r, err := iploc.NewIP2Region(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +216,7 @@ func TestIP2RegionResolverConcurrent(t *testing.T) {
 // TestNewIP2RegionMissingFile 直接构造驱动时文件缺失应显式报错
 // （由工厂兜底转告警；构造函数本身不吞错误）。
 func TestNewIP2RegionMissingFile(t *testing.T) {
-	if _, err := NewIP2Region(filepath.Join(t.TempDir(), "nope.xdb")); err == nil {
+	if _, err := iploc.NewIP2Region(filepath.Join(t.TempDir(), "nope.xdb")); err == nil {
 		t.Fatal("文件缺失应返回错误")
 	}
 }
@@ -222,11 +224,11 @@ func TestNewIP2RegionMissingFile(t *testing.T) {
 // TestCachedResolver 带 LRU 的装饰器：同 IP 只回源一次。
 func TestCachedResolver(t *testing.T) {
 	counts := map[string]int{}
-	base := ResolverFunc(func(ip string) string {
+	base := iploc.ResolverFunc(func(ip string) string {
 		counts[ip]++
 		return "loc-" + ip
 	})
-	cached := NewCached(base, 16)
+	cached := iploc.NewCached(base, 16)
 	for i := 0; i < 3; i++ {
 		if got := cached.Resolve("1.2.3.4"); got != "loc-1.2.3.4" {
 			t.Fatalf("缓存解析结果错误: %q", got)

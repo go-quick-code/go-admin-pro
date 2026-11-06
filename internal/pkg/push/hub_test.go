@@ -1,3 +1,6 @@
+// 内部协作豁免（CODING_STANDARDS.md：公共包用外部测试包，只测内部协作用同包）：
+// TestHubSlowConsumerDropsAndCounts 断言慢消费者的丢弃计数与缓冲内容顺序，
+// 依赖未导出常量 subscriberBuffer 的缓冲语义，属内部协作测试，故保留同包。
 package push
 
 import (
