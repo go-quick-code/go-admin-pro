@@ -13,6 +13,10 @@ import (
 // Service 是 notify 模块的业务服务。
 type Service struct {
 	repo *repository.Repository
+	// push 是实时推送发布器（issue #78，spec §4.5.5）：Create 提交后发布，
+	// 生产者在事务提交后经 PublishInputs 显式发布。nil 表示推送关闭
+	//（push.enabled=false 或测试基座）。
+	push PushPublisher
 }
 
 // New 创建 notify Service。

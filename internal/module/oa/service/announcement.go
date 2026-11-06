@@ -330,7 +330,8 @@ func (s *Service) PublishAnnouncement(ctx context.Context, id int64) error {
 	if s.notify == nil {
 		return xerr.Internal(errors.New("公告发布未装配通知网关"))
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+	var pending []notifyservice.Input
+	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
 		row, err := tx.FindAnnouncementForUpdate(ctx, id)
 		if err != nil {
 			return err
@@ -352,8 +353,16 @@ func (s *Service) PublishAnnouncement(ctx context.Context, id int64) error {
 		if err := tx.SaveAnnouncement(ctx, row); err != nil {
 			return err
 		}
-		return s.notify.CreateInTx(ctx, tx.DB(), buildAnnouncementNotifies(row, recipients))
+		pending = buildAnnouncementNotifies(row, recipients)
+		return s.notify.CreateInTx(ctx, tx.DB(), pending)
 	})
+	if err != nil {
+		return err
+	}
+	// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+	// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
+	return nil
 }
 
 // WithdrawAnnouncement 撤回公告（仅已发布）：置撤回状态并记录撤回时间；
