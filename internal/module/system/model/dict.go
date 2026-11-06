@@ -37,6 +37,7 @@ type Tenant struct {
 	ContactName   string     `gorm:"size:64" json:"contactName"`
 	ContactMobile string     `gorm:"size:32" json:"contactMobile"`
 	Status        int8       `gorm:"not null;default:0" json:"status"`
+	PackageID     int64      `gorm:"index;not null;default:0" json:"packageId"`
 	Domain        string     `gorm:"size:200" json:"domain"`
 	ExpireTime    *time.Time `json:"expireTime"`
 	AccountCount  int        `gorm:"not null;default:0" json:"accountCount"`

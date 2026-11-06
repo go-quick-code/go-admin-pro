@@ -23,6 +23,7 @@ type Service struct {
 	cfg  *config.Config
 
 	permCache sync.Map // map[int64]permSnapshot
+	pkgCache  sync.Map // map[int64]packageMenuSnapshot：租户套餐菜单快照
 	failCache sync.Map // map[string]*loginFailState
 
 	// dictUsageMu 保护 dictUsageCheckers：字典项引用检查扩展点
@@ -42,12 +43,23 @@ type permSnapshot struct {
 	expires time.Time
 }
 
+// packageMenuSnapshot 是租户套餐允许的菜单集合快照。
+// allowed == nil 表示不做套餐过滤（平台租户或未绑定套餐）；
+// 非 nil 空集合表示套餐缺失时的 fail-closed 结果（该租户无任何菜单权限）。
+type packageMenuSnapshot struct {
+	allowed map[int64]struct{}
+	expires time.Time
+}
+
 type loginFailState struct {
 	count    int
 	lockedAt time.Time
 }
 
-const permCacheTTL = time.Minute
+const (
+	permCacheTTL = time.Minute
+	pkgCacheTTL  = time.Minute
+)
 
 func (s *Service) Repo() *repository.Repository { return s.repo }
 
@@ -112,13 +124,24 @@ func (s *Service) Permissions(ctx context.Context, userID int64) ([]string, []st
 	if err != nil {
 		return nil, nil, err
 	}
+	allowed, err := s.allowedMenuIDs(ctx, tenant.ID(ctx))
+	if err != nil {
+		return nil, nil, err
+	}
 	codes := make([]string, 0, len(menus))
 	for _, m := range menus {
+		if allowed != nil {
+			if _, ok := allowed[m.ID]; !ok {
+				continue
+			}
+		}
 		if m.Permission != "" {
 			codes = append(codes, m.Permission)
 		}
 	}
-	if IsSuperAdmin(roles) {
+	// 只有平台租户（ID=1）的超管保留通配；其他租户超管按套餐/role_menu 取码
+	//（ADR 0012，spec §4.1）。
+	if IsSuperAdmin(roles) && tenant.ID(ctx) == tenant.DefaultID {
 		codes = append(codes, "*")
 	}
 
@@ -133,6 +156,10 @@ func (s *Service) ClearPermissionCache(userID int64) {
 func (s *Service) ClearAllPermissionCache() {
 	s.permCache.Range(func(key, _ interface{}) bool {
 		s.permCache.Delete(key)
+		return true
+	})
+	s.pkgCache.Range(func(key, _ interface{}) bool {
+		s.pkgCache.Delete(key)
 		return true
 	})
 }
@@ -189,8 +216,9 @@ func (s *Service) DataScopeFilter(ctx context.Context, userID int64) (datascope.
 	inputs := make([]datascope.RoleInput, 0, len(roles))
 	for _, role := range roles {
 		scope := datascope.Scope(role.DataScope)
-		if role.Code == "super_admin" {
-			// 内置超管不受存量 data_scope 值影响，始终全部可见。
+		if role.Code == "super_admin" && tenant.ID(ctx) == tenant.DefaultID {
+			// 只有平台租户的内置超管强制全部可见；租户超管按角色 data_scope
+			//（引导时为全部），不能越过套餐语义（ADR 0012）。
 			scope = datascope.ScopeAll
 		}
 		input := datascope.RoleInput{Scope: scope}
@@ -233,4 +261,47 @@ func (s *Service) deptWithChildren(ctx context.Context, deptID int64) ([]int64, 
 		}
 	}
 	return result, nil
+}
+
+// allowedMenuIDs 返回租户套餐允许的菜单 ID 集合（含按钮）。
+//   - 平台租户 / 未绑定套餐：nil（不限制，兼容旧行为）；
+//   - 非平台租户 + 套餐：选中菜单及其按钮；
+//   - 套餐记录丢失：空集合（fail-closed），避免异常时反而放开全部权限。
+//
+// 结果按租户缓存 1 分钟；套餐/租户变更时 ClearAllPermissionCache 清空。
+func (s *Service) allowedMenuIDs(ctx context.Context, tenantID int64) (map[int64]struct{}, error) {
+	if tenantID <= 0 || tenantID == tenant.DefaultID {
+		return nil, nil
+	}
+	if v, ok := s.pkgCache.Load(tenantID); ok {
+		snap := v.(packageMenuSnapshot)
+		if time.Now().Before(snap.expires) {
+			return snap.allowed, nil
+		}
+	}
+
+	t, err := s.repo.FindTenantByID(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil || t.PackageID == 0 {
+		s.pkgCache.Store(tenantID, packageMenuSnapshot{allowed: nil, expires: time.Now().Add(pkgCacheTTL)})
+		return nil, nil
+	}
+	pkg, err := s.repo.FindTenantPackageByID(ctx, t.PackageID)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[int64]struct{}{}
+	if pkg != nil {
+		menus, err := s.repo.ListMenus(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range expandPackageMenuIDs(menus, pkg.MenuIDs) {
+			allowed[id] = struct{}{}
+		}
+	}
+	s.pkgCache.Store(tenantID, packageMenuSnapshot{allowed: allowed, expires: time.Now().Add(pkgCacheTTL)})
+	return allowed, nil
 }

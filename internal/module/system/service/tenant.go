@@ -42,11 +42,15 @@ func (s *Service) CreateTenant(ctx context.Context, req *dto.TenantCreateReq) er
 	if total > 0 {
 		return xerr.Conflict("租户名称已存在")
 	}
+	if err := s.validateTenantPackageForAssign(ctx, req.PackageID, 0); err != nil {
+		return err
+	}
 	t := &model.Tenant{
 		Name:          req.Name,
 		ContactName:   req.ContactName,
 		ContactMobile: req.ContactMobile,
 		Status:        req.Status,
+		PackageID:     req.PackageID,
 		Domain:        req.Domain,
 		ExpireTime:    parseExpireTime(req.ExpireTime),
 		AccountCount:  req.AccountCount,
@@ -58,13 +62,13 @@ func (s *Service) CreateTenant(ctx context.Context, req *dto.TenantCreateReq) er
 		if err := tx.CreateTenant(ctx, t); err != nil {
 			return err
 		}
-		return s.bootstrapTenant(ctx, tx, t.ID)
+		return s.bootstrapTenant(ctx, tx, t.ID, req.PackageID)
 	})
 }
 
 // bootstrapTenant 为新租户创建默认部门、角色与管理员账号。
 // repo 参数是调用方事务里的 DAL：引导写入必须全部走它，才能一起回滚。
-func (s *Service) bootstrapTenant(ctx context.Context, repo *repository.Repository, tenantID int64) error {
+func (s *Service) bootstrapTenant(ctx context.Context, repo *repository.Repository, tenantID, packageID int64) error {
 	tctx := tenant.WithTenantID(ctx, tenantID)
 
 	dept := &model.Dept{
@@ -108,7 +112,16 @@ func (s *Service) bootstrapTenant(ctx context.Context, repo *repository.Reposito
 	if err := repo.CreateUser(tctx, user); err != nil {
 		return err
 	}
-	return repo.ReplaceUserRoles(tctx, user.ID, []int64{role.ID})
+	if err := repo.ReplaceUserRoles(tctx, user.ID, []int64{role.ID}); err != nil {
+		return err
+	}
+	// 套餐绑定：未指定套餐时绑定全部启用菜单（保持旧行为）；指定套餐时
+	// 只绑定套餐菜单 + 其下按钮（spec §4.1）。
+	menuIDs, err := s.menuIDsForTenant(tctx, repo, packageID)
+	if err != nil {
+		return err
+	}
+	return repo.ReplaceRoleMenus(tctx, role.ID, menuIDs)
 }
 
 func (s *Service) UpdateTenant(ctx context.Context, req *dto.TenantUpdateReq) error {
@@ -131,15 +144,34 @@ func (s *Service) UpdateTenant(ctx context.Context, req *dto.TenantUpdateReq) er
 	if t.ID == 1 && req.Status == model.StatusDisable {
 		return xerr.Business(1701, "内置租户不能被禁用")
 	}
+	if err := s.validateTenantPackageForAssign(ctx, req.PackageID, t.ID); err != nil {
+		return err
+	}
+	packageChanged := t.PackageID != req.PackageID
 	t.Name = req.Name
 	t.ContactName = req.ContactName
 	t.ContactMobile = req.ContactMobile
 	t.Status = req.Status
+	t.PackageID = req.PackageID
 	t.Domain = req.Domain
 	t.ExpireTime = parseExpireTime(req.ExpireTime)
 	t.AccountCount = req.AccountCount
 	t.Remark = req.Remark
-	return s.repo.SaveTenant(ctx, t)
+	if !packageChanged {
+		return s.repo.SaveTenant(ctx, t)
+	}
+	// 换套餐与超管菜单重绑必须同事务：任一失败整体回滚，避免租户配置与
+	// 实际权限不一致。
+	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.SaveTenant(ctx, t); err != nil {
+			return err
+		}
+		return s.syncTenantSuperAdminMenus(ctx, tx, t.ID, t.PackageID)
+	}); err != nil {
+		return err
+	}
+	s.ClearAllPermissionCache()
+	return nil
 }
 
 // parseExpireTime 兼容 RFC3339 与 "2006-01-02 15:04:05" 两种前端格式。
@@ -190,4 +222,113 @@ func (s *Service) DeleteTenant(ctx context.Context, id int64) error {
 		return xerr.Business(1704, "租户下存在用户，请先清理数据")
 	}
 	return s.repo.DeleteTenant(ctx, id)
+}
+
+// validateTenantPackageForAssign 校验套餐可绑定：平台租户不允许套餐；
+// 套餐必须存在且启用。tenantID 为 0 表示新建租户（尚未有平台租户限制）。
+func (s *Service) validateTenantPackageForAssign(ctx context.Context, packageID, tenantID int64) error {
+	if packageID <= 0 {
+		return nil
+	}
+	if tenantID == tenant.DefaultID {
+		return xerr.BadRequest("平台租户不能绑定套餐")
+	}
+	pkg, err := s.findTenantPackage(ctx, packageID)
+	if err != nil {
+		return err
+	}
+	if pkg.Status != model.StatusEnable {
+		return xerr.BadRequest("套餐已停用，不能绑定")
+	}
+	return nil
+}
+
+// menuIDsForTenant 计算租户超管应绑定的菜单集合：
+//   - packageID > 0：套餐选中的目录/菜单 + 其下按钮（不隐式补全子菜单）；
+//   - packageID == 0：全部启用菜单/按钮（未绑定套餐的兼容行为）。
+func (s *Service) menuIDsForTenant(ctx context.Context, repo *repository.Repository, packageID int64) ([]int64, error) {
+	menus, err := repo.ListMenus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if packageID <= 0 {
+		return allEnabledMenuIDs(menus), nil
+	}
+	pkg, err := repo.FindTenantPackageByID(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	if pkg == nil {
+		return nil, xerr.NotFound("套餐不存在")
+	}
+	return expandPackageMenuIDs(menus, pkg.MenuIDs), nil
+}
+
+// syncTenantSuperAdminMenus 重写目标租户全部 super_admin 角色的菜单绑定。
+// 调用方负责提供事务仓储；角色/菜单读写显式使用目标租户上下文。
+func (s *Service) syncTenantSuperAdminMenus(ctx context.Context, repo *repository.Repository, tenantID, packageID int64) error {
+	roles, err := repo.ListRolesByTenantAndCode(ctx, tenantID, "super_admin")
+	if err != nil {
+		return err
+	}
+	if len(roles) == 0 {
+		return nil
+	}
+	menuIDs, err := s.menuIDsForTenant(ctx, repo, packageID)
+	if err != nil {
+		return err
+	}
+	tctx := tenant.WithTenantID(ctx, tenantID)
+	for _, role := range roles {
+		if err := repo.ReplaceRoleMenus(tctx, role.ID, menuIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// allEnabledMenuIDs 返回全部启用菜单（含目录/菜单/按钮）。
+func allEnabledMenuIDs(menus []model.Menu) []int64 {
+	ids := make([]int64, 0, len(menus))
+	for _, menu := range menus {
+		if menu.Status == model.StatusEnable {
+			ids = append(ids, menu.ID)
+		}
+	}
+	return ids
+}
+
+// expandPackageMenuIDs 把套餐选中的目录/菜单展开为「选中项 + 其下按钮」。
+// 按钮是菜单的操作权限，必须随菜单一起授予；子菜单不隐式选中（由套餐显式勾选）。
+func expandPackageMenuIDs(menus []model.Menu, selected model.Int64List) []int64 {
+	enabled := make(map[int64]struct{}, len(menus))
+	buttonsByParent := make(map[int64][]int64)
+	for _, menu := range menus {
+		if menu.Status != model.StatusEnable {
+			continue
+		}
+		enabled[menu.ID] = struct{}{}
+		if menu.Type == model.MenuTypeButton {
+			buttonsByParent[menu.ParentID] = append(buttonsByParent[menu.ParentID], menu.ID)
+		}
+	}
+	out := make([]int64, 0, len(selected))
+	seen := make(map[int64]struct{}, len(selected))
+	add := func(id int64) {
+		if _, ok := enabled[id]; !ok {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range selected {
+		add(id)
+		for _, buttonID := range buttonsByParent[id] {
+			add(buttonID)
+		}
+	}
+	return out
 }
