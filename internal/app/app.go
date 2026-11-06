@@ -55,6 +55,9 @@ type App struct {
 	// Message 是 message 模块的 Service（issue #72）：集成测试经该字段注册
 	// provider 替身（成功/失败）；业务侧只经 HTTP 端点消费。
 	Message *messageservice.Service
+	// Social 是 system 模块的社交登录 Service（issue #76）：集成测试经该字段
+	// 注册 provider 替身并调整 state TTL；业务侧只经 HTTP 端点消费。
+	Social *systemservice.SocialService
 }
 
 // New 初始化数据库、模块与 HTTP 引擎。
@@ -98,6 +101,12 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	sysRepo := systemrepo.New(db)
 	sysSvc := systemservice.New(sysRepo, jwtManager, cfg)
 
+	// 社交登录（issue #76，spec §4.4 / ADR 0011）：与 system 共享仓储/JWT 的
+	// 独立服务；provider（微信/钉钉/企微）由 #77 实现后在下方
+	// socialSvc.RegisterSocialProvider(...) 注册，骨架期未注册 provider 时
+	// 授权/回调端点按「暂不支持」返回 400。
+	socialSvc := systemservice.NewSocialService(sysRepo, jwtManager, cfg)
+
 	infraRepo := infrarepo.New(db)
 	// 定时任务按应用时区解释 cron 表达式（spec §4.10：每日 01:00 应用时区）。
 	scheduler := infraservice.NewJobScheduler(infraRepo, cfg.Location())
@@ -123,7 +132,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return sysSvc.CleanLogsBefore(ctx, days)
 	})
 
-	sysAPI := systemapi.New(sysSvc, cfg)
+	sysAPI := systemapi.New(sysSvc, socialSvc, cfg)
 
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
 	crmRepo := crmrepo.New(db)
@@ -289,7 +298,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc}, nil
 }
 
 // Close 释放资源。

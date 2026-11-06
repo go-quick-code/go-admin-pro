@@ -29,7 +29,7 @@ func tokenWithoutTenant(t *testing.T, mgr *jwt.Manager) string {
 func TestAuthRejectsTokenWithoutTenantID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mgr := jwt.NewManager("test-secret", time.Hour, "go-admin-pro")
-	h := systemapi.New(service.New(nil, mgr, &config.Config{}), &config.Config{})
+	h := systemapi.New(service.New(nil, mgr, &config.Config{}), nil, &config.Config{})
 
 	r := gin.New()
 	r.GET("/probe", h.Auth(), func(c *gin.Context) { c.Status(http.StatusOK) })

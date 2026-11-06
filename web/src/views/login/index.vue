@@ -50,6 +50,18 @@
           <el-button type="primary" :loading="loading" class="submit" @click="handleLogin">
             登 录
           </el-button>
+
+          <!-- 社交登录按钮占位（issue #76，spec §4.4.1：登录页只展示启用的客户端）。
+               #77 落地微信/钉钉/企微 provider 后：先经
+               GET /system/social/authorize-url（web/src/api/system.ts 的
+               getSocialAuthorizeUrl）换取授权地址并整页跳转，三方重定向回
+               redirect_uri 后再由 GET /system/social/callback 用 code+state
+               换登录态。按钮列表应按启用客户端渲染。 -->
+          <div v-if="false" class="social-providers">
+            <!-- <el-button v-for="p in enabledProviders" :key="p.provider" @click="socialLogin(p.provider)">
+              {{ p.label }}
+            </el-button> -->
+          </div>
         </el-form>
 
         <div class="tips">

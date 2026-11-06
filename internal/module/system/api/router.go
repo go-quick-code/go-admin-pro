@@ -7,6 +7,13 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	auth := rg.Group("/system/auth")
 	auth.POST("/login", h.Login)
 	auth.GET("/captcha", h.Captcha)
+
+	// 社交登录（issue #76，spec §4.4/§5.3）：授权地址签发与三方回调均为
+	// 公开端点；安全靠服务端一次性 state（10 分钟 TTL）校验，回调失败
+	// 一律 400/409，不泄露内部错误（spec §4.11.3）。
+	social := rg.Group("/system/social")
+	social.GET("/authorize-url", h.SocialAuthorizeURL)
+	social.GET("/callback", h.SocialCallback)
 }
 
 // RegisterProtected 注册需要登录的接口，rg 上应已挂载 Auth 中间件。
@@ -108,6 +115,20 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	tenantPackage.PUT("", h.RequirePermission("system:tenant-package:update"), h.UpdateTenantPackage)
 	tenantPackage.PUT("/status", h.RequirePermission("system:tenant-package:update"), h.UpdateTenantPackageStatus)
 	tenantPackage.DELETE("/:id", h.RequirePermission("system:tenant-package:delete"), h.DeleteTenantPackage)
+
+	// 社交登录（issue #76，spec §5.3）：绑定发起登录即可；绑定用户查询/解绑
+	// 按权限码收口；客户端 CRUD 仅平台租户（平台级资源，同租户管理面）。
+	social := rg.Group("/system/social")
+	social.POST("/bind", h.SocialBind)
+	socialUser := rg.Group("/system/social/user")
+	socialUser.GET("/page", h.RequirePermission("system:social-user:query"), h.PageSocialUsers)
+	socialUser.DELETE("/:id", h.RequirePermission("system:social-user:delete"), h.DeleteSocialUser)
+	socialClient := rg.Group("/system/social/client")
+	socialClient.Use(h.RequirePlatformTenant())
+	socialClient.GET("/page", h.RequirePermission("system:social:query"), h.PageSocialClients)
+	socialClient.POST("", h.RequirePermission("system:social:create"), h.CreateSocialClient)
+	socialClient.PUT("", h.RequirePermission("system:social:update"), h.UpdateSocialClient)
+	socialClient.DELETE("/:id", h.RequirePermission("system:social:delete"), h.DeleteSocialClient)
 
 	// 登录日志
 	loginLog := rg.Group("/system/login-log")
