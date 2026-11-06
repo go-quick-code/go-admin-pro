@@ -177,8 +177,14 @@ func TestWSOversizedMessageClosed(t *testing.T) {
 	if err := conn.Ping(pctx); err == nil {
 		t.Fatal("超限后连接应已关闭：Ping 不应成功")
 	}
-	if got := env.hub.Subscribers(1, 1); got != 0 {
-		t.Fatalf("超限断开后订阅数 = %d, want 0", got)
+	// 服务端读循环的断连与 hub 注销是异步的：客户端观测到关闭不代表服务端
+	// 已完成簿记（基线偶发失败），与 TestWSDisconnectCleansUp 同款轮询等待归零。
+	deadline := time.Now().Add(2 * time.Second)
+	for env.hub.Subscribers(1, 1) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("超限断开后订阅数 = %d, want 0", env.hub.Subscribers(1, 1))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	// 服务端无恙：新票据仍可正常握手。
 	ticket2, _ := env.tickets.Issue(1, 1)
