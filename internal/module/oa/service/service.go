@@ -44,6 +44,9 @@ type SystemGateway interface {
 	ListActiveUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	// ListActiveUserIDs 返回租户内启用用户 ID（公告全员发布展开收件人）。
 	ListActiveUserIDs(ctx context.Context) ([]int64, error)
+	// ListEnabledTenantIDs 返回全部启用租户 ID（系统级，无租户过滤）：
+	// 考勤日结果任务按租户迭代时使用（issue #61，spec §4.10）。
+	ListEnabledTenantIDs(ctx context.Context) ([]int64, error)
 	// DeptNames 批量返回部门名称（公告受众回显）。
 	DeptNames(ctx context.Context, deptIDs []int64) (map[int64]string, error)
 	// RoleNames 批量返回角色名称（公告受众回显）。
@@ -78,6 +81,9 @@ type Service struct {
 	announcementFiles AnnouncementFileStore
 	// apiPrefix 是附件鉴权下载地址前缀（config.App.APIPrefix）。
 	apiPrefix string
+	// leaveDays 是请假天数取数接缝（issue #61 预留，#62 装配请假联动）；
+	// nil 表示无请假联动，派生时 leave_days 恒 0。
+	leaveDays LeaveDaysProvider
 	// clock 是「现在」的来源（未注入时 time.Now），单元测试可替换。
 	clock func() time.Time
 }

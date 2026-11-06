@@ -97,6 +97,32 @@ export function getPunchToday() {
 export function pageMyPunches(params: any) {
   return request.get('/oa/attendance/punch/page', { params }) as Promise<any>
 }
+
+// ---------- OA 考勤结果与校正（issue #61，spec #42 §4.10/§5） ----------
+// 管理端结果查询挂 oa:attendance:result:query（菜单 533）；校正/撤销校正/
+// 手工重算挂 oa:attendance:result:correct（按钮 5331）；员工「我的考勤」
+// 结果列表登录即可（服务端强制本人，菜单 531 页面内展示）。
+
+// 管理端结果分页：userId/日期区间/生效状态过滤（可见范围由后端收口）。
+export function pageAttendanceResults(params: any) {
+  return request.get('/oa/attendance/result/page', { params }) as Promise<any>
+}
+// 我的考勤结果分页（强制本人）。
+export function pageMyAttendanceResults(params: any) {
+  return request.get('/oa/attendance/result/mine', { params }) as Promise<any>
+}
+// 手工重算：按用户 + 日期范围（含两端，最多 366 天），幂等覆盖。
+export function recomputeAttendanceResults(data: any) {
+  return request.post('/oa/attendance/result/recompute', data) as Promise<any>
+}
+// 管理员校正：overrideStatus 0–6 + 备注（1–200 字），不覆盖原始打卡。
+export function correctAttendanceResult(id: number, data: any) {
+  return request.put(`/oa/attendance/result/${id}/correct`, data) as Promise<any>
+}
+// 撤销校正：结果回落到派生状态。
+export function clearAttendanceResultCorrection(id: number) {
+  return request.delete(`/oa/attendance/result/${id}/correct`) as Promise<any>
+}
 // ---------- OA 请假类型与额度（issue #51，spec #42 §3.5/§4.8） ----------
 // 权限模型：类型与额度的全部管理动作挂 oa:leave:manage（菜单 522）；
 // 类型列表与本人余额登录即可（员工发起请假的前置）。

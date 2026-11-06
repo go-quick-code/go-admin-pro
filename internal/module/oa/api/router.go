@@ -17,6 +17,14 @@ const (
 	announcementPublish = "oa:announcement:publish"
 )
 
+// 考勤结果权限码（菜单种子 533 段；issue #61）：
+// 533 查询、5331 校正/撤销校正/手工重算。可见范围的「全租户」判定复用
+// #43 的 oa:attendance:manage（按钮 5332 承载，供 HR/管理员授权）。
+const (
+	attendanceResultQuery   = "oa:attendance:result:query"
+	attendanceResultCorrect = "oa:attendance:result:correct"
+)
+
 // Handler 是 oa 模块的 HTTP 入口。
 // requirePermission 复用 system 模块的权限中间件（与 crm 同款装配方式）：
 // 本工单（issue #43）的可见范围探测接口是登录即可用的「我的可见范围」查询，
@@ -84,6 +92,18 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	punch.POST("/out", h.PunchOut)
 	punch.GET("/today", h.GetMyPunchToday)
 	punch.GET("/page", h.PageMyPunches)
+
+	// 考勤结果与校正（issue #61，菜单种子 533 段，spec §4.10/§5）：管理端
+	// 结果查询挂 oa:attendance:result:query；校正/撤销/手工重算挂
+	// oa:attendance:result:correct；员工「我的考勤」结果列表登录即可（强制本人）。
+	// 可见范围由 service 经 VisibilityScopeOf("attendance") 收口：
+	// oa:attendance:manage → 全租户、部门负责人 → 子树、否则本人。
+	result := oa.Group("/attendance/result")
+	result.GET("/page", h.requirePermission(attendanceResultQuery), h.PageAttendanceResults)
+	result.GET("/mine", h.PageMyAttendanceResults)
+	result.POST("/recompute", h.requirePermission(attendanceResultCorrect), h.RecomputeAttendanceResults)
+	result.PUT("/:id/correct", h.requirePermission(attendanceResultCorrect), h.CorrectAttendanceResult)
+	result.DELETE("/:id/correct", h.requirePermission(attendanceResultCorrect), h.ClearAttendanceResultCorrection)
 
 	// 请假类型与额度（issue #51，菜单种子 522 段）：类型列表与本人余额
 	// 登录即可（员工发起请假/查看余额的前置）；类型与额度的全部管理动作

@@ -1,7 +1,8 @@
 // attendance.go 承载考勤基础的管理与打卡编排（issue #60，docs/oa-mvp-spec.md
 // §3.9/§4.10）：班次 CRUD+启停、考勤组 CRUD+启停、组员物化（按用户/按部门
 // 批量添加，后续不自动同步部门变化）、Web 打卡（时间/IP/User-Agent，同日多次
-// 保留）。结果派生与校正由 #61 承接，不经本层。
+// 保留）。打卡后对当日结果重算（issue #61）：结果派生/校正与每日任务见
+// attendance_result.go。
 package service
 
 import (
@@ -461,6 +462,11 @@ func (s *Service) Punch(ctx context.Context, punchType int8, ip, userAgent strin
 		UserAgent: truncateRunes(userAgent, maxUserAgentColLen),
 	}
 	if err := s.repo.CreatePunch(ctx, row); err != nil {
+		return nil, err
+	}
+	// 打卡后立即重算当日结果（issue #61，spec §4.10 重算触发点）。重算幂等；
+	// 失败不影响已落库的打卡（每日任务/手工重算会收敛），但错误如实返回。
+	if _, err := s.RecomputeUserDate(ctx, userID, DateKey(row.PunchDate)); err != nil {
 		return nil, err
 	}
 	resp := newPunchResp(row, group)
