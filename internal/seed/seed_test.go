@@ -56,8 +56,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.Dept{}, 4, "部门")
 	assertCount(t, db, &sysmodel.Role{}, 2, "角色")
 	assertCount(t, db, &sysmodel.Post{}, 2, "岗位")
-	assertCount(t, db, &sysmodel.DictType{}, 3, "字典类型")
-	assertCount(t, db, &sysmodel.DictData{}, 11, "字典数据")
+	assertCount(t, db, &sysmodel.DictType{}, 4, "字典类型")
+	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。
+	assertCount(t, db, &sysmodel.DictData{}, 16, "字典数据")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）。
 	assertCount(t, db, &inframodel.Job{}, 3, "定时任务")

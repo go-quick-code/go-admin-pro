@@ -99,6 +99,10 @@ func (f *fakeSystemGateway) RoleNames(_ context.Context, _ []int64) (map[int64]s
 	return map[int64]string{}, nil
 }
 
+func (f *fakeSystemGateway) ListDictValues(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
 // userContext 返回带登录主体（用户 7，租户 1）的上下文。
 func userContext() context.Context {
 	return authn.With(context.Background(), authn.Principal{UserID: 7, TenantID: 1})

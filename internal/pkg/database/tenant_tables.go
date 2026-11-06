@@ -61,6 +61,18 @@ var TenantTables = []string{
 	"oa_leave_type",
 	"oa_leave_balance",
 	"oa_leave_request",
+	// 报销（issue #54，迁移 00019）：报销单 + 明细两表。明细按 claim_id 归属，
+	// 表头 total_amount 由明细求和（服务端计算）；两表都经租户插件限定，
+	// 跨租户业务 ID 一律 404（spec §4.6）。
+	"oa_expense_claim",
+	"oa_expense_item",
+	// 日程与会议室（issue #56，迁移 00020）：日程/会议室/预约三张表全量
+	// 租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。日程的
+	// 可见性谓词见 oa/repository/calendar.go（单条 SQL 谓词 + 纯函数锁定）；
+	// 会议室/预约的写入由 #57 承接，迁移已一次建全三表。
+	"oa_calendar_event",
+	"oa_meeting_room",
+	"oa_room_booking",
 	// 考勤基础（issue #60，迁移 00022）：班次/考勤组/组员/打卡/结果五张表
 	// 全量租户隔离（spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。
 	// 组员唯一键 (tenant_id, user_id)——一个用户只属于一个考勤组；

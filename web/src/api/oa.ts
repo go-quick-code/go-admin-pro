@@ -354,3 +354,109 @@ export function downloadLeaveRequestFile(url: string) {
   return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
 
+
+// ---------- OA 报销（issue #54，spec #42 §4.9/§5） ----------
+// 权限模型：列表/详情/附件查看登录即可（服务端按 §4.6 可见范围收口）；
+// 写动作逐码 oa:expense:create/update/delete；提交（oa:expense:submit）与
+// 审批回调属 #55，本工单只登记按钮码。金额一律十进制字符串（分单位由后端
+// money.Money 解析，拒绝 JSON 数字以避免浮点丢精度）。
+
+export interface ExpenseItemPayload {
+  id?: number
+  category: string
+  amount: string
+  expenseDate: string
+  remark?: string
+}
+
+export interface ExpenseClaimPayload {
+  id?: number
+  title: string
+  reason: string
+  // totalAmount 仅回显用，服务端按明细求和覆盖（spec §4.9）。
+  totalAmount?: string
+  items: ExpenseItemPayload[]
+}
+
+// 报销分页：status 精确过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回）；
+// 服务端按可见范围返回（manage → 全租户、部门负责人 → 部门子树、否则本人）。
+export function pageExpenseClaims(params?: { pageNo?: number; pageSize?: number; status?: number }) {
+  return request.get('/oa/expense/claim/page', { params }) as Promise<any>
+}
+// 报销详情：表头 + 明细 + 附件 + bpm 审批时间线（草稿 approval 为空）；范围外 404。
+export function getExpenseClaim(id: number) {
+  return request.get(`/oa/expense/claim/${id}`) as Promise<any>
+}
+// 创建草稿（明细至少一条，每条金额 > 0，类别取字典 oa_expense_category）。
+export function createExpenseClaim(data: ExpenseClaimPayload) {
+  return request.post('/oa/expense/claim', data) as Promise<any>
+}
+// 更新草稿/已驳回单据：明细行集整体替换，服务端重算合计。
+export function updateExpenseClaim(data: ExpenseClaimPayload) {
+  return request.put('/oa/expense/claim', data) as Promise<any>
+}
+// 删除草稿/已驳回单据（明细级联软删；其他状态 409）。
+export function deleteExpenseClaim(id: number) {
+  return request.delete(`/oa/expense/claim/${id}`) as Promise<any>
+}
+// 附件列表（新上传的在前）。
+export function listExpenseClaimFiles(id: number) {
+  return request.get(`/oa/expense/claim/${id}/files`) as Promise<any>
+}
+// 上传附件（multipart 字段名 file；仅草稿/已驳回）。
+export function uploadExpenseClaimFile(id: number, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/oa/expense/claim/${id}/files`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+// 删除附件（仅草稿/已驳回）。
+export function deleteExpenseClaimFile(id: number, fileId: number) {
+  return request.delete(`/oa/expense/claim/${id}/files/${fileId}`) as Promise<any>
+}
+// 鉴权下载（后端返回的 url 已含 /admin-api 前缀，baseURL: '' 原样请求）。
+export function downloadExpenseClaimFile(url: string) {
+  return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
+}
+
+
+// ---------- OA 日程（issue #56，spec #42 §4.11/§5） ----------
+// 权限模型：列表/详情挂 oa:calendar:query（菜单 524 管理入口 / 536 我的日程），
+// 可见性由服务端三态谓词收口（私有仅创建人、部门按创建时部门快照及子树、
+// 公开全租户）；创建/编辑/取消逐码 oa:calendar:create/update/delete；
+// 公开日程（visibility=2）另需 oa:calendar:public（缺失 403）。
+// 起止时间为业务时区墙钟 "YYYY-MM-DD HH:mm:ss"。
+
+export interface CalendarEventPayload {
+  id?: number
+  title: string
+  description?: string
+  startTime: string
+  endTime: string
+  allDay?: boolean
+  // 0 私有 / 1 部门 / 2 公开（公开需 oa:calendar:public）。
+  visibility: number
+}
+
+// 日程列表：按可见性返回有效日程（start_time ASC）。月/周视图传时间窗口
+// （区间语义为「与日程相交」），关键词匹配标题；已取消日程不再返回。
+export function listCalendarEvents(params?: { startTime?: string; endTime?: string; keyword?: string }) {
+  return request.get('/oa/calendar/event/list', { params }) as Promise<any>
+}
+// 日程详情（范围外/跨租户/已取消 404）。
+export function getCalendarEvent(id: number) {
+  return request.get(`/oa/calendar/event/${id}`) as Promise<any>
+}
+// 创建日程（部门可见性用当前用户部门快照；公开需 oa:calendar:public）。
+export function createCalendarEvent(data: CalendarEventPayload) {
+  return request.post('/oa/calendar/event', data) as Promise<any>
+}
+// 编辑日程（仅创建人、仅有效日程；dept_id 快照不刷新）。
+export function updateCalendarEvent(data: CalendarEventPayload) {
+  return request.put('/oa/calendar/event', data) as Promise<any>
+}
+// 取消日程（软取消，仅创建人；取消后不再展示）。
+export function cancelCalendarEvent(id: number) {
+  return request.delete(`/oa/calendar/event/${id}`) as Promise<any>
+}
