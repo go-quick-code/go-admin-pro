@@ -1,31 +1,38 @@
 //go:build integration
 
-// 实时推送 HTTP 集成测试（issue #78，spec §4.5 / ADR 0013）。
+// 实时推送 HTTP 集成测试（issue #78 SSE + issue #79 WebSocket，spec §4.5 / ADR 0013）。
 //
 // 约定的 seam：
 //  1. 票据换发 POST /notify/push/ticket（真实 router + Auth）：票据形状、
-//     一次性/过期/跨租户 401、WS 占位不消费票据。
+//     一次性/过期/跨租户 401、transports 优先级。
 //  2. SSE 流 GET /notify/push/sse?ticket=（真实 router，凭票据公开）：
 //     响应头、首字节、事件到达（确定性等待）、心跳、断开清理。
-//  3. 发布链路 env.App.Notify.Create（与生产装配同一 service 实例）：
+//  3. WS 流 GET /notify/push/ws?ticket=（issue #79）：握手、事件送达、
+//     认证矩阵、跨租户隔离、心跳（GAP_PUSH_HEARTBEAT 压缩）、断开清理。
+//  4. 发布链路 env.App.Notify.Create（与生产装配同一 service 实例）：
 //     通知创建 1 秒内在线用户收到；写入失败（回滚）不产生事件。
 //
-// 捕捉不到 hub 的多连接扇出与慢消费者丢弃计数——那在 internal/pkg/push 单测里。
+// 捕捉不到 hub 的多连接扇出与慢消费者丢弃计数——那在 internal/pkg/push 单测里；
+// WS 特有路径（读丢弃/4KB 上限/升级预检）的细粒度断言在
+// internal/module/notify/api/push_ws_test.go（不依赖 MySQL）。
 //
-// 测试库走 GAP_TEST_DATABASE_DSN（协调约定用 go_admin_pro_test_p78 后缀）：
+// 测试库走 GAP_TEST_DATABASE_DSN（协调约定用 go_admin_pro_test_p79 后缀）：
 //
-//	GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test_p78?charset=utf8mb4&parseTime=True&loc=Local' \
+//	GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test_p79?charset=utf8mb4&parseTime=True&loc=Local' \
 //	  go test -tags=integration ./internal/module/notify/...
 package notify_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/notify/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
@@ -170,8 +177,116 @@ func wantUnauthorized(tb testing.TB, status int, body, what string) {
 	}
 }
 
+// ---------- WS 辅助（issue #79）----------
+
+// wsDialURL 拼 ws:// 握手地址（票据经 query 传递，ADR 0013）。
+func wsDialURL(env *testutil.IntegrationEnv, ticket string) string {
+	return "ws" + strings.TrimPrefix(env.APIPrefixURL("/notify/push/ws"), "http") +
+		"?ticket=" + url.QueryEscape(ticket)
+}
+
+// dialWS 凭票据经真实 router 建立 WS 连接，失败即 Fatal。opts 可为 nil
+// （观测服务端心跳时传带 OnPingReceived 的选项）。
+func dialWS(tb testing.TB, env *testutil.IntegrationEnv, ticket string, opts *websocket.DialOptions) *websocket.Conn {
+	tb.Helper()
+	if opts == nil {
+		opts = &websocket.DialOptions{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsDialURL(env, ticket), opts)
+	if err != nil {
+		tb.Fatalf("WS 握手: %v", err)
+	}
+	return conn
+}
+
+// dialWSStatus 尝试握手并只返回 HTTP 状态码（预期失败场景用）。
+func dialWSStatus(tb testing.TB, env *testutil.IntegrationEnv, ticket string) int {
+	tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, wsDialURL(env, ticket), nil)
+	if err == nil {
+		conn.CloseNow()
+		tb.Fatalf("应握手失败，实际成功")
+	}
+	if resp == nil {
+		tb.Fatalf("握手失败且无 HTTP 响应: %v", err)
+	}
+	return resp.StatusCode
+}
+
+// readWSEvent 等待下一条文本事件（within 内未到即失败）。
+func readWSEvent(tb testing.TB, conn *websocket.Conn, within time.Duration) string {
+	tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), within)
+	defer cancel()
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		tb.Fatalf("WS 读事件: %v", err)
+	}
+	return string(data)
+}
+
+// wsReader 在后台持续读取 WS 消息（等价浏览器的事件循环）：消息经 channel
+// 交给测试做确定性等待，同时保证客户端库始终在处理控制帧（自动 pong）。
+// 注意不能用带短超时的 ctx 直接 conn.Read 做静默断言——库约定任何方法出错
+// （含 ctx 超时）即关闭连接，会把好端端的连接杀掉。
+type wsReader struct {
+	msgs chan []byte
+	done chan struct{}
+}
+
+func readWS(tb testing.TB, conn *websocket.Conn) *wsReader {
+	tb.Helper()
+	s := &wsReader{msgs: make(chan []byte, 16), done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer close(s.done)
+		defer cancel()
+		for {
+			_, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			select {
+			case s.msgs <- data:
+			case <-s.done:
+				return
+			}
+		}
+	}()
+	tb.Cleanup(cancel)
+	return s
+}
+
+// next 等待下一条消息（within 内未到即失败）。
+func (s *wsReader) next(tb testing.TB, what string, within time.Duration) []byte {
+	tb.Helper()
+	select {
+	case data := <-s.msgs:
+		return data
+	case <-time.After(within):
+		tb.Fatalf("WS 等待 %s 超时（%v）", what, within)
+	case <-s.done:
+		tb.Fatalf("WS 等待 %s 时连接已关闭", what)
+	}
+	return nil
+}
+
+// silent 断言窗口内没有任何消息到达（跨租户隔离用），连接保持存活。
+func (s *wsReader) silent(tb testing.TB, what string, within time.Duration) {
+	tb.Helper()
+	select {
+	case data := <-s.msgs:
+		tb.Fatalf("%s: 收到 %s", what, data)
+	case <-time.After(within):
+	}
+}
+
 // TestIntegrationPushTicket_HTTP 覆盖票据形状：43 字符 base64url、TTL 秒数、
-// transports 本期仅 sse（ws 由 #79 追加）。
+// transports 按前端优先级列出 ws/sse（issue #79）。
 func TestIntegrationPushTicket_HTTP(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	token := env.Login(t, "admin", "123456")
@@ -183,8 +298,8 @@ func TestIntegrationPushTicket_HTTP(t *testing.T) {
 	if tk.ExpiresIn != 30 {
 		t.Fatalf("expiresIn = %d, want 30（spec §4.5.2 TTL 30 秒）", tk.ExpiresIn)
 	}
-	if len(tk.Transports) != 1 || tk.Transports[0] != "sse" {
-		t.Fatalf("transports = %v, want [sse]", tk.Transports)
+	if len(tk.Transports) != 2 || tk.Transports[0] != "ws" || tk.Transports[1] != "sse" {
+		t.Fatalf("transports = %v, want [ws sse]", tk.Transports)
 	}
 }
 
@@ -503,24 +618,192 @@ func TestIntegrationPushDisconnectCleansUp_HTTP(t *testing.T) {
 	}
 }
 
-// TestIntegrationPushWSPlaceholder_HTTP 覆盖 WS 占位：501 且不消费票据
-// （票据仍可用于 SSE）。
-func TestIntegrationPushWSPlaceholder_HTTP(t *testing.T) {
+// TestIntegrationPushWS_DeliversWithinSecond_HTTP 覆盖 WS 主链路（issue #79
+// 验收第 1 条，真实 router + Auth + 生产装配）：凭票据握手成功，通知创建
+// 1 秒内经 WS 送达，事件结构与 spec §4.5.4 一致。
+func TestIntegrationPushWS_DeliversWithinSecond_HTTP(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	token := env.Login(t, "admin", "123456")
 	tk := issuePushTicket(t, env, token)
 
-	status, api := env.Request(t, http.MethodGet, "/notify/push/ws?ticket="+url.QueryEscape(tk.Ticket), "", nil)
-	if status != http.StatusNotImplemented || api.Code != http.StatusNotImplemented {
-		t.Fatalf("WS 占位: HTTP %d code %d, want 501", status, api.Code)
+	conn := dialWS(t, env, tk.Ticket, nil)
+	defer conn.CloseNow()
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
+		t.Fatalf("握手后在线订阅数 = %d, want 1", got)
 	}
 
-	// 票据未被消费：SSE 仍可正常建立。
-	resp, body := openSSE(t, env, tk.Ticket, "")
+	// 在线用户 1 秒内收到：与生产装配同一 service 实例创建通知。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: model.TypeBpmTodo, Title: "WS 实时推送", Content: "合同审批待办",
+			BizType: "bpm_task", BizID: 7, Route: "/bpm/task"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw := readWSEvent(t, conn, time.Second)
+	var ev struct {
+		Type string `json:"type"`
+		Data struct {
+			Title string `json:"title"`
+			Type  string `json:"type"`
+			BizID int64  `json:"bizId"`
+			Route string `json:"route"`
+		} `json:"data"`
+		Ts int64 `json:"ts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("解析事件 %q: %v", raw, err)
+	}
+	if ev.Type != "notification" || ev.Data.Title != "WS 实时推送" ||
+		ev.Data.Type != model.TypeBpmTodo || ev.Data.BizID != 7 || ev.Ts <= 0 {
+		t.Fatalf("事件不符: %+v", ev)
+	}
+}
+
+// TestIntegrationPushWS_AuthMatrix401_HTTP 覆盖 WS 票据认证矩阵（真实配置
+// 装配）：无票据/过期票据 401；非升级请求 400 且不消费票据（SSE 仍可用）。
+func TestIntegrationPushWS_AuthMatrix401_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	// 无票据：真实 WS 握手（升级预检通过）→ 认证失败 401。
+	status := dialWSStatus(t, env, "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("无票据: HTTP %d, want 401", status)
+	}
+
+	// 过期票据（GAP_PUSH_TICKET_TTL 走真实 config 装配）。
+	t.Setenv("GAP_PUSH_TICKET_TTL", "50ms")
+	env2 := testutil.NewIntegrationEnv(t)
+	tk := issuePushTicket(t, env2, token)
+	time.Sleep(150 * time.Millisecond)
+	respCode := dialWSStatus(t, env2, tk.Ticket)
+	if respCode != http.StatusUnauthorized {
+		t.Fatalf("过期票据: HTTP %d, want 401", respCode)
+	}
+
+	// 非升级请求：400 且票据未被消费（随后 SSE 正常建立）。
+	env3 := testutil.NewIntegrationEnv(t)
+	tk3 := issuePushTicket(t, env3, token)
+	status3, _ := env3.Request(t, http.MethodGet, "/notify/push/ws?ticket="+url.QueryEscape(tk3.Ticket), "", nil)
+	if status3 != http.StatusBadRequest {
+		t.Fatalf("非升级请求: HTTP %d, want 400", status3)
+	}
+	resp, body := openSSE(t, env3, tk3.Ticket, "")
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("WS 占位不应消费票据: HTTP %d body=%s", resp.StatusCode, body)
+		t.Fatalf("失败路径不应消费票据: HTTP %d body=%s", resp.StatusCode, body)
 	}
 	resp.Body.Close()
+}
+
+// TestIntegrationPushWSCrossTenantIsolation_HTTP 覆盖 WS 跨租户隔离（验收
+// 第 4 条）：两个租户各建一条 WS，租户 1 的事件只进租户 1 的连接，反之亦然。
+func TestIntegrationPushWSCrossTenantIsolation_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	adminToken := env.Login(t, "admin", "123456")
+
+	status, api := env.Request(t, http.MethodPost, "/system/tenant", adminToken, map[string]any{
+		"name": "推送隔离租户C", "contactName": "联系人", "status": 0,
+	})
+	mustCode0(t, status, api, "创建租户")
+	tenant2Token := loginTenant(t, env, 2)
+
+	// 两条 WS 各自建立，均起后台读（连接保持处理控制帧）。
+	conn1 := dialWS(t, env, issuePushTicket(t, env, adminToken).Ticket, nil)
+	defer conn1.CloseNow()
+	conn2 := dialWS(t, env, issuePushTicket(t, env, tenant2Token).Ticket, nil)
+	defer conn2.CloseNow()
+	stream1 := readWS(t, conn1)
+	stream2 := readWS(t, conn2)
+
+	// 租户 2 管理员的用户 ID（bootstrapTenant 自动创建）。
+	var tenant2UserID int64
+	if err := env.DB.Raw("SELECT id FROM system_user WHERE tenant_id = 2 AND username = 'admin'").Scan(&tenant2UserID).Error; err != nil || tenant2UserID == 0 {
+		t.Fatalf("查询租户 2 管理员: err=%v id=%d", err, tenant2UserID)
+	}
+
+	// 只推租户 1 的 admin：租户 2 的 WS 必须静默。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: model.TypeAnnouncement, Title: "租户 1 专属 WS"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw := string(stream1.next(t, "租户 1 事件", time.Second))
+	if !strings.Contains(raw, "租户 1 专属 WS") {
+		t.Fatalf("租户 1 收到 %q, want 租户 1 专属 WS", raw)
+	}
+	stream2.silent(t, "租户 2 不应收到租户 1 的事件", 300*time.Millisecond)
+
+	// 推租户 2 管理员：只有租户 2 的 WS 收到。
+	if err := env.App.Notify.Create(tenant.WithTenantID(t.Context(), 2), []service.Input{
+		{UserID: tenant2UserID, Type: model.TypeAnnouncement, Title: "租户 2 专属 WS"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw2 := string(stream2.next(t, "租户 2 事件", time.Second))
+	if !strings.Contains(raw2, "租户 2 专属 WS") {
+		t.Fatalf("租户 2 收到 %q, want 租户 2 专属 WS", raw2)
+	}
+	stream1.silent(t, "租户 1 不应收到租户 2 的事件", 300*time.Millisecond)
+}
+
+// TestIntegrationPushWSHeartbeat_HTTP 覆盖心跳经真实配置装配生效：
+// GAP_PUSH_HEARTBEAT 压缩后，客户端在窗口内观测到服务端主动 ping
+// （OnPingReceived），且之后连接仍可用（客户端 Ping 得到服务端 pong）。
+// 客户端必须有常驻读（readWS），否则库不处理入站 ping、无法自动回 pong。
+func TestIntegrationPushWSHeartbeat_HTTP(t *testing.T) {
+	t.Setenv("GAP_PUSH_HEARTBEAT", "150ms")
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	tk := issuePushTicket(t, env, token)
+	ponged := make(chan struct{}, 4)
+	conn := dialWS(t, env, tk.Ticket, &websocket.DialOptions{
+		OnPingReceived: func(_ context.Context, _ []byte) bool { ponged <- struct{}{}; return true },
+	})
+	defer conn.CloseNow()
+	stream := readWS(t, conn)
+
+	select {
+	case <-ponged:
+	case <-time.After(2 * time.Second):
+		t.Fatal("2 秒内未观测到服务端心跳 ping")
+	}
+	// 心跳之后连接仍可用：客户端主动 Ping 得到服务端 pong（读循环存活）。
+	pctx, pcancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pcancel()
+	if err := conn.Ping(pctx); err != nil {
+		t.Fatalf("心跳后客户端 Ping: %v（连接不应断开）", err)
+	}
+	select {
+	case <-stream.msgs:
+		t.Fatal("心跳不应产生数据消息")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestIntegrationPushWSDisconnectCleansUp_HTTP 覆盖断开清理（真实装配）：
+// 客户端断开后 hub 订阅归零，连接数不泄漏（验收第 2 条）。
+func TestIntegrationPushWSDisconnectCleansUp_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	conn := dialWS(t, env, issuePushTicket(t, env, token).Ticket, nil)
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
+		t.Fatalf("在线订阅数 = %d, want 1", got)
+	}
+	conn.CloseNow()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if env.App.PushHub.Subscribers(tenant.DefaultID, 1) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.App.PushHub.Subscribers(tenant.DefaultID, 1))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // TestIntegrationPushDisabled_HTTP 覆盖推送关闭：路由不注册（换票 404），
