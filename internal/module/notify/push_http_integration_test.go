@@ -444,7 +444,7 @@ func TestIntegrationPushCrossTenantIsolation_HTTP(t *testing.T) {
 }
 
 // TestIntegrationPushNoEventOnFailedCreate_HTTP 覆盖事务语义：写入失败
-//（校验失败整批不写）不产生任何推送事件——回滚不推送。
+// （校验失败整批不写）不产生任何推送事件——回滚不推送。
 func TestIntegrationPushNoEventOnFailedCreate_HTTP(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	token := env.Login(t, "admin", "123456")
@@ -504,7 +504,7 @@ func TestIntegrationPushDisconnectCleansUp_HTTP(t *testing.T) {
 }
 
 // TestIntegrationPushWSPlaceholder_HTTP 覆盖 WS 占位：501 且不消费票据
-//（票据仍可用于 SSE）。
+// （票据仍可用于 SSE）。
 func TestIntegrationPushWSPlaceholder_HTTP(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	token := env.Login(t, "admin", "123456")
