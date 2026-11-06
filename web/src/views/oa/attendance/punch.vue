@@ -71,6 +71,53 @@
       </el-table>
     </el-card>
 
+    <el-card shadow="never" class="summary-card">
+      <div class="records-head">
+        <span class="records-title">本月汇总</span>
+        <el-date-picker
+          v-model="summaryMonth"
+          type="month"
+          value-format="YYYY-MM"
+          :clearable="false"
+          @change="loadSummary"
+        />
+      </div>
+      <div v-loading="summaryLoading" class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-label">出勤天数</div>
+          <div class="summary-value">{{ summary.attendanceDays }}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">正常</div>
+          <div class="summary-value">{{ summary.normal }}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">迟到</div>
+          <div class="summary-value">{{ summary.late }}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">早退</div>
+          <div class="summary-value">{{ summary.early }}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">缺卡</div>
+          <div class="summary-value">{{ summary.missing }}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">迟到且早退</div>
+          <div class="summary-value">{{ summary.lateAndEarly }}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">请假天数</div>
+          <div class="summary-value">{{ summary.leaveDays }}</div>
+        </div>
+      </div>
+      <div class="summary-hint">
+        口径与每日考勤结果一致（管理员校正优先）：出勤天数 = 正常 + 迟到 + 早退 +
+        迟到且早退；请假天数含半天（0.5）。
+      </div>
+    </el-card>
+
     <el-card shadow="never" class="records-card">
       <div class="records-head">
         <span class="records-title">我的打卡记录</span>
@@ -164,13 +211,22 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { formatTime, statusTagType } from '@/utils/format'
-import { getPunchToday, punchIn, punchOut, pageMyPunches, pageMyAttendanceResults } from '@/api/oa'
+import {
+  getPunchToday,
+  punchIn,
+  punchOut,
+  pageMyPunches,
+  pageMyAttendanceResults,
+  getMyAttendanceSummary,
+} from '@/api/oa'
 
 // 我的考勤（issue #60，spec §4.10/§6）：Web 打卡卡片 + 当天打卡 + 我的打卡记录。
 // 员工自助页登录即可用（菜单 531，无权限码）；无启用考勤组时后端打卡返回
 // 明确 400，页面据 group 状态禁用按钮并提示。
 // 考勤结果列表（issue #61）：按日期区间查看派生结果（正常/迟到/早退/缺卡/休息）
 // 与管理员校正标记（校正优先，原始打卡仍完整展示）。
+// 本月汇总卡片（issue #62）：出勤/正常/迟到/早退/缺卡/请假天数，口径与每日
+// 结果一致（GET /oa/attendance/summary/mine，强制本人）。
 
 interface PunchRow {
   id: number
@@ -234,6 +290,67 @@ function formatDay(d: Date) {
 function currentMonthRange() {
   const now = new Date()
   return [formatDay(new Date(now.getFullYear(), now.getMonth(), 1)), formatDay(now)]
+}
+
+function currentMonthKey() {
+  const now = new Date()
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`
+}
+
+// 本月汇总（issue #62，spec §4.10）：出勤/正常/迟到/早退/缺卡/请假天数。
+interface SummaryRow {
+  month: string
+  days: number
+  workDays: number
+  attendanceDays: number
+  normal: number
+  late: number
+  early: number
+  lateAndEarly: number
+  missing: number
+  rest: number
+  leave: number
+  leaveDays: number
+}
+
+const summaryMonth = ref<string>(currentMonthKey())
+const summary = ref<SummaryRow>({
+  month: '',
+  days: 0,
+  workDays: 0,
+  attendanceDays: 0,
+  normal: 0,
+  late: 0,
+  early: 0,
+  lateAndEarly: 0,
+  missing: 0,
+  rest: 0,
+  leave: 0,
+  leaveDays: 0,
+})
+const summaryLoading = ref(false)
+
+async function loadSummary() {
+  summaryLoading.value = true
+  try {
+    const data = await getMyAttendanceSummary({ month: summaryMonth.value })
+    summary.value = {
+      month: data?.month || summaryMonth.value,
+      days: data?.days || 0,
+      workDays: data?.workDays || 0,
+      attendanceDays: data?.attendanceDays || 0,
+      normal: data?.normal || 0,
+      late: data?.late || 0,
+      early: data?.early || 0,
+      lateAndEarly: data?.lateAndEarly || 0,
+      missing: data?.missing || 0,
+      rest: data?.rest || 0,
+      leave: data?.leave || 0,
+      leaveDays: data?.leaveDays || 0,
+    }
+  } finally {
+    summaryLoading.value = false
+  }
 }
 
 // 结果状态标签色：正常成功、迟到/早退警告、迟到且早退/缺卡危险、休息信息、请假主色。
@@ -322,6 +439,7 @@ onMounted(() => {
   loadToday()
   loadRecords()
   loadResults()
+  loadSummary()
 })
 </script>
 
@@ -368,6 +486,41 @@ onMounted(() => {
 
 .results-card {
   margin-top: 16px;
+}
+
+.summary-card {
+  margin-bottom: 16px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+}
+
+.summary-item {
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank);
+}
+
+.summary-label {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.summary-value {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.summary-hint {
+  margin-top: 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .records-title {

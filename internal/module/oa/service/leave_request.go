@@ -410,6 +410,10 @@ func (s *Service) CancelLeaveRequest(ctx context.Context, id int64) (*dto.LeaveR
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：按请假区间重算考勤结果（重算读已提交的已取消状态，issue #62；
+	// 失败只记录，取消已生效，可由每日任务/手工重算补正）。
+	s.recomputeLeaveAttendance(ctx, cancelled.UserID,
+		DateKey(cancelled.StartDate), DateKey(cancelled.EndDate), "cancel")
 	item := leaveRequestItemOf(*cancelled, cancelledType)
 	return &item, nil
 }
@@ -640,7 +644,9 @@ func (s *Service) OnApproved(ctx context.Context, inst *bpmmodel.ProcessInstance
 	if err := repo.SaveLeaveRequest(ctx, row); err != nil {
 		return err
 	}
-	// TODO(#62): 考勤重算钩子（考勤模块上线前为空操作，spec §4.8）。
+	// 考勤重算不在此处：本回调仍在 bpm 事务内，重算经 LeaveDaysProvider 需要
+	// 读到已提交的「已通过」状态。bpm 在事务提交后调用 AfterApproved
+	//（ApprovalCommitHook，issue #62）。
 	return nil
 }
 

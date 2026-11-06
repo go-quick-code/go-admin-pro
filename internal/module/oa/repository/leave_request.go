@@ -104,3 +104,19 @@ func (r *Repository) ListActiveLeaveRequestsInRange(ctx context.Context, userID 
 // DB 返回底层 gorm 句柄：业务服务把事务句柄交给 bpm（StartInstanceInTx）与
 // 事务内回调（BusinessHandler 的 tx 入参）时使用，保证业务写与审批同事务。
 func (r *Repository) DB() *gorm.DB { return r.db }
+
+// ListApprovedLeaveRequestsCoveringDate 读某用户覆盖指定日期的**已通过**请假
+// 申请（issue #62，考勤结果派生的请假天数取数）：日期闭区间相交
+// （start_date <= date AND end_date >= date）。同一天可有多条（不同半天严格
+// 不重叠），逐日天数由纯函数 LeaveDaysOnDate 裁剪；租户条件由插件自动追加。
+func (r *Repository) ListApprovedLeaveRequestsCoveringDate(ctx context.Context, userID int64, dateKey string) ([]model.LeaveRequest, error) {
+	var rows []model.LeaveRequest
+	if err := r.db.WithContext(ctx).
+		Where("`user_id` = ? AND `status` = ?", userID, model.LeaveRequestStatusApproved).
+		Where("`start_date` <= ? AND `end_date` >= ?", dateKey, dateKey).
+		Order("`start_date` ASC, `id` ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询已通过请假: %w", err)
+	}
+	return rows, nil
+}
