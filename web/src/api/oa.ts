@@ -419,3 +419,44 @@ export function deleteExpenseClaimFile(id: number, fileId: number) {
 export function downloadExpenseClaimFile(url: string) {
   return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
+
+
+// ---------- OA 日程（issue #56，spec #42 §4.11/§5） ----------
+// 权限模型：列表/详情挂 oa:calendar:query（菜单 524 管理入口 / 536 我的日程），
+// 可见性由服务端三态谓词收口（私有仅创建人、部门按创建时部门快照及子树、
+// 公开全租户）；创建/编辑/取消逐码 oa:calendar:create/update/delete；
+// 公开日程（visibility=2）另需 oa:calendar:public（缺失 403）。
+// 起止时间为业务时区墙钟 "YYYY-MM-DD HH:mm:ss"。
+
+export interface CalendarEventPayload {
+  id?: number
+  title: string
+  description?: string
+  startTime: string
+  endTime: string
+  allDay?: boolean
+  // 0 私有 / 1 部门 / 2 公开（公开需 oa:calendar:public）。
+  visibility: number
+}
+
+// 日程列表：按可见性返回有效日程（start_time ASC）。月/周视图传时间窗口
+// （区间语义为「与日程相交」），关键词匹配标题；已取消日程不再返回。
+export function listCalendarEvents(params?: { startTime?: string; endTime?: string; keyword?: string }) {
+  return request.get('/oa/calendar/event/list', { params }) as Promise<any>
+}
+// 日程详情（范围外/跨租户/已取消 404）。
+export function getCalendarEvent(id: number) {
+  return request.get(`/oa/calendar/event/${id}`) as Promise<any>
+}
+// 创建日程（部门可见性用当前用户部门快照；公开需 oa:calendar:public）。
+export function createCalendarEvent(data: CalendarEventPayload) {
+  return request.post('/oa/calendar/event', data) as Promise<any>
+}
+// 编辑日程（仅创建人、仅有效日程；dept_id 快照不刷新）。
+export function updateCalendarEvent(data: CalendarEventPayload) {
+  return request.put('/oa/calendar/event', data) as Promise<any>
+}
+// 取消日程（软取消，仅创建人；取消后不再展示）。
+export function cancelCalendarEvent(id: number) {
+  return request.delete(`/oa/calendar/event/${id}`) as Promise<any>
+}

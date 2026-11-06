@@ -371,6 +371,21 @@ func seedMenus(db *gorm.DB) error {
 		// 不新增菜单。
 		menu(534, 500, "考勤汇总", "attendance-summary", "oa/attendance/summary", "oa:attendance:summary:query", "TrendCharts", 12),
 
+		// 日程（issue #56）：524 段（协调台账分配；grep 去重确认 524/5241–5244
+		// 未被占用）。查询码挂菜单（月/周/列表三视图入口）；创建/编辑/取消逐码，
+		// 5243 同时承载 DELETE（spec §5）与「取消」动作（软取消，取消后不再
+		// 展示）；5244 是公开日程权限码（创建/编辑可见性=2 时服务层校验，
+		// 缺失 403）。员工侧「我的日程」536 复用同一页面（500–549 空位自取：
+		// 529 我的请假/530 考勤组/531 我的考勤/532 我的公告/533 考勤结果/
+		// 534 考勤汇总/535 我的报销已占用，grep 去重取 536），查询码挂菜单本身，
+		// 普通角色授予 536 + 5241–5243 即可自建私有/部门日程。
+		menu(524, 500, "日程", "calendar", "oa/calendar/index", "oa:calendar:query", "Calendar", 14),
+		btn(5241, 524, "日程创建", "oa:calendar:create", 1),
+		btn(5242, 524, "日程编辑", "oa:calendar:update", 2),
+		btn(5243, 524, "日程取消", "oa:calendar:delete", 3),
+		btn(5244, 524, "公开日程", "oa:calendar:public", 4),
+		menu(536, 500, "我的日程", "calendar-mine", "oa/calendar/index", "oa:calendar:query", "Calendar", 15),
+
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。
@@ -519,6 +534,14 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 5232},
 		{RoleID: 2, MenuID: 5233},
 		{RoleID: 2, MenuID: 5234},
+		// 日程员工侧（issue #56，spec §7.3「内置普通角色授予…日程…的基础
+		// 菜单」）：我的日程页面（536，携带 oa:calendar:query）+ 创建/编辑/
+		// 取消按钮码；不含 524 管理菜单与 5244 公开日程码（公开日程需要
+		// 管理员另行授予 oa:calendar:public）。
+		{RoleID: 2, MenuID: 536},
+		{RoleID: 2, MenuID: 5241},
+		{RoleID: 2, MenuID: 5242},
+		{RoleID: 2, MenuID: 5243},
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }
