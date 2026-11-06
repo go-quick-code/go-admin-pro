@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/dto"
@@ -465,10 +466,12 @@ func (s *Service) Punch(ctx context.Context, punchType int8, ip, userAgent strin
 	if err := s.repo.CreatePunch(ctx, row); err != nil {
 		return nil, err
 	}
-	// 打卡后立即重算当日结果（issue #61，spec §4.10 重算触发点）。重算幂等；
-	// 失败不影响已落库的打卡（每日任务/手工重算会收敛），但错误如实返回。
+	// 打卡后立即重算当日结果（issue #61，spec §4.10 重算触发点）。打卡已
+	// 落库，重算按 best-effort 处理（PR #66 审查 P3-2）：失败只记录日志，
+	// 不把成功的打卡报成失败；结果由每日任务/手工重算收敛。
 	if _, err := s.RecomputeUserDate(ctx, userID, DateKey(row.PunchDate)); err != nil {
-		return nil, err
+		slog.Warn("recompute attendance result after punch failed",
+			"err", err, "userId", userID, "date", DateKey(row.PunchDate))
 	}
 	resp := newPunchResp(row, group)
 	return &resp, nil

@@ -45,6 +45,7 @@
       :row-key="rowKey"
       :tree-props="{ children: 'children' }"
       :default-expand-all="defaultExpandAll"
+      :row-class-name="rowClassName"
       @row-click="handleRowClick"
     >
       <el-table-column
@@ -222,6 +223,7 @@ const props = withDefaults(
     showToolbar?: boolean
     showActions?: boolean
     actionWidth?: number | string
+    rowClassName?: string | ((data: { row: any; rowIndex: number }) => string)
     beforeSubmit?: (payload: any, mode: 'create' | 'update') => any
   }>(),
   {
@@ -241,7 +243,7 @@ const props = withDefaults(
   },
 )
 
-const emit = defineEmits<{ success: []; rowClick: [row: any] }>()
+const emit = defineEmits<{ success: []; rowClick: [row: any]; loaded: [rows: any[]] }>()
 
 const userStore = useUserStore()
 const list = ref<any[]>([])
@@ -330,6 +332,8 @@ async function load() {
       list.value = Array.isArray(data) ? data : data.list || []
       total.value = list.value.length
     }
+    // 列表加载完成（通知深链定位/高亮等父页面行为依赖行数据已就绪）。
+    emit('loaded', list.value)
   } finally {
     loading.value = false
   }

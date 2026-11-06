@@ -262,7 +262,9 @@ func (s *Service) InitBalances(ctx context.Context, req *dto.BalanceInitReq) (*d
 		quotaByType[row.ID] = row.AnnualQuota
 	}
 
-	// 幂等计划：wanted（去重后的全组合）− existing = 缺失行。
+	// 幂等计划：wanted（去重后的全组合）− existing = 缺失行。读取已存在与
+	// 批量写入在同一事务内（PR #66 审查 P3-4）：中途某行失败时整批回滚，
+	// 不留下半初始化状态；并发初始化由唯一键兜底。
 	wanted := make([]BalanceKey, 0, len(userIDs)*len(typeIDs))
 	for _, uid := range userIDs {
 		for _, tid := range typeIDs {
@@ -270,31 +272,39 @@ func (s *Service) InitBalances(ctx context.Context, req *dto.BalanceInitReq) (*d
 		}
 	}
 	wanted = MissingInitKeys(wanted, nil) // 同批去重
-	existing, err := s.repo.ListBalancesCross(ctx, req.Year, userIDs, typeIDs)
+	resp := &dto.BalanceInitResp{Total: len(wanted)}
+	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		existing, err := tx.ListBalancesCross(ctx, req.Year, userIDs, typeIDs)
+		if err != nil {
+			return err
+		}
+		existingKeys := make([]BalanceKey, 0, len(existing))
+		for _, row := range existing {
+			existingKeys = append(existingKeys, BalanceKey{UserID: row.UserID, LeaveTypeID: row.LeaveTypeID, Year: row.Year})
+		}
+		missing := MissingInitKeys(wanted, existingKeys)
+
+		rows := make([]model.LeaveBalance, 0, len(missing))
+		for _, key := range missing {
+			rows = append(rows, model.LeaveBalance{
+				UserID:      key.UserID,
+				LeaveTypeID: key.LeaveTypeID,
+				Year:        key.Year,
+				Quota:       quotaByType[key.LeaveTypeID],
+			})
+		}
+		for i := range rows {
+			if err := tx.CreateLeaveBalance(ctx, &rows[i]); err != nil {
+				return err
+			}
+		}
+		resp.Created = len(rows)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	existingKeys := make([]BalanceKey, 0, len(existing))
-	for _, row := range existing {
-		existingKeys = append(existingKeys, BalanceKey{UserID: row.UserID, LeaveTypeID: row.LeaveTypeID, Year: row.Year})
-	}
-	missing := MissingInitKeys(wanted, existingKeys)
-
-	rows := make([]model.LeaveBalance, 0, len(missing))
-	for _, key := range missing {
-		rows = append(rows, model.LeaveBalance{
-			UserID:      key.UserID,
-			LeaveTypeID: key.LeaveTypeID,
-			Year:        key.Year,
-			Quota:       quotaByType[key.LeaveTypeID],
-		})
-	}
-	for i := range rows {
-		if err := s.repo.CreateLeaveBalance(ctx, &rows[i]); err != nil {
-			return nil, err
-		}
-	}
-	return &dto.BalanceInitResp{Created: len(rows), Total: len(wanted)}, nil
+	return resp, nil
 }
 
 // PageBalances 管理端额度分页（oa:leave:manage）：附类型与员工昵称，余额
