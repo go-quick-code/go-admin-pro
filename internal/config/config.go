@@ -11,14 +11,15 @@ import (
 
 // Config 是应用的完整配置，对应 configs/config.yaml 的层级结构。
 type Config struct {
-	App      AppConfig      `mapstructure:"app"`
-	Database DatabaseConfig `mapstructure:"database"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Security SecurityConfig `mapstructure:"security"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	Tenant   TenantConfig   `mapstructure:"tenant"`
-	Logger   LoggerConfig   `mapstructure:"logger"`
-	Push     PushConfig     `mapstructure:"push"`
+	App       AppConfig       `mapstructure:"app"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
+	Security  SecurityConfig  `mapstructure:"security"`
+	Storage   StorageConfig   `mapstructure:"storage"`
+	Tenant    TenantConfig    `mapstructure:"tenant"`
+	Logger    LoggerConfig    `mapstructure:"logger"`
+	Push      PushConfig      `mapstructure:"push"`
+	AccessLog AccessLogConfig `mapstructure:"access-log"`
 
 	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
 	loc *time.Location
@@ -34,6 +35,13 @@ type PushConfig struct {
 	TicketTTL time.Duration `mapstructure:"ticket-ttl"`
 	// Heartbeat SSE 心跳间隔（注释行），默认 25 秒（spec §4.5.3）。
 	Heartbeat time.Duration `mapstructure:"heartbeat"`
+}
+
+// AccessLogConfig 是 API 访问日志（issue #80，spec §4.6，ADR 0014）的配置。
+type AccessLogConfig struct {
+	// RetentionDays 是访问日志保留天数（默认 30）：cleanAccessLogs 系统级
+	// 定时任务每日 03:00 清理超过保留期的记录。
+	RetentionDays int `mapstructure:"retention-days"`
 }
 
 // DefaultTimezone 是 app.timezone 为空时的默认业务时区。
@@ -250,6 +258,10 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Push.Heartbeat <= 0 {
 		c.Push.Heartbeat = 25 * time.Second
+	}
+	// API 访问日志（issue #80）：保留期默认 30 天（spec §4.6.7）。
+	if c.AccessLog.RetentionDays <= 0 {
+		c.AccessLog.RetentionDays = 30
 	}
 }
 

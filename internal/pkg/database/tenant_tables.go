@@ -117,4 +117,11 @@ var TenantTables = []string{
 	// 隔离——不同租户可绑定同一 openid 的不同本地用户，跨租户绑定 ID 一律
 	// 404。system_social_client 是平台级表，刻意不登记。
 	"system_social_user",
+
+	// API 访问日志（issue #80，迁移 00026，spec §3.7/§4.6，ADR 0014）：租户级
+	// append-only，租户只能查/删自己的日志，跨租户业务 ID 一律 404。中间件
+	// 采集在请求上下文内（Auth 之后，插件可取到租户），异步落库在后台
+	// goroutine 无租户上下文，写入走 tenant.Skip + 行内显式 tenant_id；
+	// 保留期清理（cleanAccessLogs）同属系统级动作，显式 tenant.Skip。
+	"infra_api_log",
 }

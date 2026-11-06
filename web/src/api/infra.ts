@@ -59,3 +59,16 @@ export function deleteJob(id: number) {
 export function pageJobLogs(params: any) {
   return request.get('/infra/job/log/page', { params }) as Promise<any>
 }
+
+// ---------- 访问日志（issue #80，spec §5.5）----------
+export function pageAPILogs(params: any) {
+  return request.get('/infra/api-log/page', { params }) as Promise<any>
+}
+// 按 ids 批量删除（硬删除；含跨租户 ID 时后端 404 不删）。
+export function deleteAPILogs(ids: number[]) {
+  return request.delete('/infra/api-log', { data: { ids } }) as Promise<any>
+}
+// 清空当前租户的全部访问日志。
+export function clearAPILogs() {
+  return request.delete('/infra/api-log/clear') as Promise<any>
+}

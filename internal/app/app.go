@@ -66,6 +66,18 @@ type App struct {
 	// Create/CreateInTx——与生产装配的推送发布器是同一实例，保证「创建通知
 	// → 在线用户 1 秒内收到」走的是真实链路。
 	Notify *notifyservice.Service
+	// APILog 是访问日志异步写（issue #80）：集成测试在断言前经 FlushAPILogs
+	// 排干队列；Close 时随应用一起排干退出。
+	APILog *infraservice.APILogWriter
+}
+
+// FlushAPILogs 排干访问日志队列并等待落库（issue #80）：集成测试在断言前
+// 调用，保证「请求完成 → 日志可见」的确定性。
+func (a *App) FlushAPILogs(ctx context.Context) error {
+	if a.APILog == nil {
+		return nil
+	}
+	return a.APILog.Flush(ctx)
 }
 
 // New 初始化数据库、模块与 HTTP 引擎。
@@ -140,6 +152,29 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 			days = 30
 		}
 		return sysSvc.CleanLogsBefore(ctx, days)
+	})
+
+	// API 访问日志（issue #80，spec §4.6，ADR 0014）：进程内异步写（有界队列
+	// 4096、批量 200 条或 1 秒落库，队列满丢弃不阻塞请求）。writer 同时供
+	// infraAPI 的采集中间件、App.Flush/Close 排干（测试与优雅关闭）。
+	apiLogWriter := infraservice.NewAPILogWriter(infraRepo, infraservice.APILogWriterConfig{})
+	apiLogWriter.Run()
+
+	// 注册访问日志清理任务（spec §4.6.7）：handlerName 为 cleanAccessLogs，
+	// 种子默认行每日 03:00 启用（保留期 access-log.retention-days，默认 30，
+	// handler_param 可填天数覆盖）。清理跨租户执行（tenant.Skip，见 infra
+	// repository），属系统级处理器：只有平台租户管理员可操作。
+	scheduler.RegisterSystem("cleanAccessLogs", func(ctx context.Context, param string) error {
+		days := 0
+		if v, err := strconv.Atoi(strings.TrimSpace(param)); err == nil {
+			days = v
+		}
+		cleaned, err := infraSvc.CleanAccessLogsBefore(ctx, days)
+		if err != nil {
+			return err
+		}
+		slog.Info("access log cleanup job finished", "cleaned", cleaned)
+		return nil
 	})
 
 	sysAPI := systemapi.New(sysSvc, socialSvc, cfg)
@@ -325,19 +360,26 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil
 	})
 
-	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
+	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission, apiLogWriter)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
 	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI)
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, APILog: apiLogWriter}, nil
 }
 
 // Close 释放资源。
 func (a *App) Close() error {
 	a.Scheduler.Stop()
+	// 访问日志排干（spec §4.6.5：Flush 供优雅关闭）：限 5 秒，超时放弃剩余
+	// 条目（ADR 0014：进程内队列允许丢失），不阻塞关库。
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.APILog.Close(closeCtx); err != nil {
+		slog.Warn("flush api access log on close", "err", err)
+	}
 	sqlDB, err := a.DB.DB()
 	if err != nil {
 		return err
