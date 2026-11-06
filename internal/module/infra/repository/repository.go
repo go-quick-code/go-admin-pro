@@ -27,6 +27,11 @@ func notFound(err error) error {
 type FileFilter struct {
 	Name string
 	Type string
+	// GenericOnly 只返回 biz_type='' 的通用文件（默认分页口径）。
+	GenericOnly bool
+	// BizType/BizID 显式按业务归属过滤（服务层已做业务授权）。
+	BizType string
+	BizID   int64
 }
 
 func (r *Repository) CreateFile(ctx context.Context, f *model.File) error {
@@ -40,6 +45,15 @@ func (r *Repository) ListFiles(ctx context.Context, f FileFilter, offset, limit 
 	}
 	if f.Type != "" {
 		q = q.Where("type LIKE ?", "%"+f.Type+"%")
+	}
+	if f.GenericOnly {
+		q = q.Where("biz_type = ''")
+	}
+	if f.BizType != "" {
+		q = q.Where("biz_type = ?", f.BizType)
+		if f.BizID > 0 {
+			q = q.Where("biz_id = ?", f.BizID)
+		}
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -239,4 +253,21 @@ func (r *Repository) ListJobLogs(ctx context.Context, f JobLogFilter, offset, li
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// SoftDeleteFilesByBiz 软删除业务归属下的全部文件记录（仅置 deleted_at，
+// 不删除磁盘文件；公告草稿删除时保留附件记录，issue #48）。
+func (r *Repository) SoftDeleteFilesByBiz(ctx context.Context, bizType string, bizID int64) error {
+	return r.db.WithContext(ctx).
+		Where("biz_type = ? AND biz_id = ?", bizType, bizID).
+		Delete(&model.File{}).Error
+}
+
+// SoftDeleteFileByBiz 软删除单条业务归属文件（仅置 deleted_at，不删磁盘；
+// 文档文件软删除时同步关闭 infra 侧读取入口，issue #59）。归属不符时
+// 影响 0 行，不误删其他业务的文件。
+func (r *Repository) SoftDeleteFileByBiz(ctx context.Context, id int64, bizType string, bizID int64) error {
+	return r.db.WithContext(ctx).
+		Where("id = ? AND biz_type = ? AND biz_id = ?", id, bizType, bizID).
+		Delete(&model.File{}).Error
 }

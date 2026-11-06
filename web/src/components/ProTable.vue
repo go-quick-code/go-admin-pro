@@ -45,6 +45,7 @@
       :row-key="rowKey"
       :tree-props="{ children: 'children' }"
       :default-expand-all="defaultExpandAll"
+      :row-class-name="rowClassName"
       @row-click="handleRowClick"
     >
       <el-table-column
@@ -222,6 +223,7 @@ const props = withDefaults(
     showToolbar?: boolean
     showActions?: boolean
     actionWidth?: number | string
+    rowClassName?: string | ((data: { row: any; rowIndex: number }) => string)
     beforeSubmit?: (payload: any, mode: 'create' | 'update') => any
   }>(),
   {
@@ -241,7 +243,7 @@ const props = withDefaults(
   },
 )
 
-const emit = defineEmits<{ success: []; rowClick: [row: any] }>()
+const emit = defineEmits<{ success: []; rowClick: [row: any]; loaded: [rows: any[]] }>()
 
 const userStore = useUserStore()
 const list = ref<any[]>([])
@@ -330,6 +332,8 @@ async function load() {
       list.value = Array.isArray(data) ? data : data.list || []
       total.value = list.value.length
     }
+    // 列表加载完成（通知深链定位/高亮等父页面行为依赖行数据已就绪）。
+    emit('loaded', list.value)
   } finally {
     loading.value = false
   }
@@ -416,8 +420,10 @@ watch(
 
 onMounted(load)
 
-// query 暴露给父页面：Excel 导出需要复用当前列表筛选（issue #20）。
-defineExpose({ reload: load, openCreate, query })
+// query/openEdit 暴露给父页面：query 供 Excel 导出复用当前列表筛选（issue #20）；
+// openEdit 供自定义操作列按状态打开编辑弹窗（issue #44：仅草稿可编辑，
+// 发布/停用行的编辑入口由父页面按状态机隐藏）。
+defineExpose({ reload: load, openCreate, openEdit, query })
 </script>
 
 <style scoped>

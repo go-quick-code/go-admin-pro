@@ -88,7 +88,9 @@ func TestIntegrationCRMDemoSeed(t *testing.T) {
 		Contracts: 6, ContractProduct: 6,
 		ReceivablePlans: 6, ReceivableRecords: 5,
 		OwnerHistories: 10, Categories: 2, Products: 4,
-		Roles: 4, Users: 5,
+		// seed.Run(true) 同时写入 OA 演示数据：issue #64 review 起新增
+		// HR 演示角色/账号（hr），故在 CRM 基线上各 +1。
+		Roles: 5, Users: 6,
 	}
 	if first.Customers != want.Customers || first.Contacts != want.Contacts ||
 		first.FollowUps != want.FollowUps || first.Opportunities != want.Opportunities ||

@@ -66,12 +66,75 @@ func getContractRaw(t *testing.T, env *testutil.IntegrationEnv, token string, id
 	return env.Request(t, http.MethodGet, fmt.Sprintf("/crm/contract/%d", id), token, nil)
 }
 
-// changeContractStatus 状态流转（唯一状态入口），返回 HTTP 状态与业务响应。
+// changeContractStatus 状态流转（用户状态入口），返回 HTTP 状态与业务响应。
+//
+// issue #47 起「待审 → 已签/草稿」不再是用户状态流转：本助手对 to=3/1 且合同
+// 当前待审的调用，改为在 bpm 待办中心完成对应审批动作（与真实用户路径一致），
+// 再回读合同详情作为响应；其余状态仍走 PUT /crm/contract/status（提交/作废/
+// 非法流转）。这样既有用例继续覆盖「审批结果回写合同」的业务契约。
 func changeContractStatus(t *testing.T, env *testutil.IntegrationEnv, token string, id int64, status int8, reason string) (int, testutil.APIResponse) {
+	t.Helper()
+	if status == 3 || status == 1 {
+		st, api := getContractRaw(t, env, token, id)
+		if st != http.StatusOK || api.Code != 0 {
+			return st, api
+		}
+		var current struct {
+			Status int8 `json:"status"`
+		}
+		if err := json.Unmarshal(api.Data, &current); err == nil && current.Status == 2 {
+			task := myContractApprovalTodo(t, env, token, id)
+			if task == nil {
+				return http.StatusForbidden, testutil.APIResponse{
+					Code: 403,
+					Msg:  "审批统一在待办中心办理：当前用户没有该合同的待办任务",
+				}
+			}
+			taskID := int64(task["id"].(float64))
+			action, comment := "approve", ""
+			if status == 1 {
+				action, comment = "reject", reason
+			}
+			st, done := env.Request(t, http.MethodPost,
+				fmt.Sprintf("/bpm/task/%d/%s", taskID, action), token, map[string]any{"comment": comment})
+			if st != http.StatusOK || done.Code != 0 {
+				return st, done
+			}
+			return getContractRaw(t, env, token, id)
+		}
+	}
+	return changeContractStatusDirect(t, env, token, id, status, reason)
+}
+
+// changeContractStatusDirect 直接调用状态端点（提交/作废/非法流转语义）。
+func changeContractStatusDirect(t *testing.T, env *testutil.IntegrationEnv, token string, id int64, status int8, reason string) (int, testutil.APIResponse) {
 	t.Helper()
 	return env.Request(t, http.MethodPut, "/crm/contract/status", token, map[string]any{
 		"id": id, "status": status, "reason": reason,
 	})
+}
+
+// myContractApprovalTodo 在当前用户的待办里按合同 ID 定位 crm_contract_approval
+// 任务；没有待办/无查询权限返回 nil（调用方按 403 处理，对齐旧审批权限语义）。
+func myContractApprovalTodo(t *testing.T, env *testutil.IntegrationEnv, token string, contractID int64) map[string]any {
+	t.Helper()
+	status, api := env.Request(t, http.MethodGet, "/bpm/task/page?tab=todo&pageNo=1&pageSize=200", token, nil)
+	if status != http.StatusOK || api.Code != 0 {
+		return nil
+	}
+	var page struct {
+		List []map[string]any `json:"list"`
+	}
+	if err := json.Unmarshal(api.Data, &page); err != nil {
+		t.Fatalf("解析待办分页: %v（data=%s）", err, string(api.Data))
+	}
+	for _, row := range page.List {
+		if row["businessType"] == "crm_contract_approval" &&
+			int64(row["businessId"].(float64)) == contractID {
+			return row
+		}
+	}
+	return nil
 }
 
 // visibleContractNames 按观察者视角查合同分页，返回可见合同名称集合。
@@ -506,9 +569,15 @@ func TestIntegrationContractStatusMachine(t *testing.T) {
 	if row["status"] != float64(2) {
 		t.Fatalf("提交后状态应 2（待审），实际 %v", row["status"])
 	}
-	// 待审期重复提交 400。
+	// 待审期重复提交 400；审批通过/驳回不再走状态端点（issue #47，统一待办中心）。
 	if status, api := changeContractStatus(t, env, admin, cID, 2, ""); status != http.StatusBadRequest {
 		t.Fatalf("待审重复提交：HTTP %d code %d msg %q，期望 400", status, api.Code, api.Msg)
+	}
+	if status, api := changeContractStatusDirect(t, env, admin, cID, 3, ""); status != http.StatusBadRequest {
+		t.Fatalf("待审直通审批：HTTP %d code %d msg %q，期望 400（审批只能在待办中心）", status, api.Code, api.Msg)
+	}
+	if status, api := changeContractStatusDirect(t, env, admin, cID, 1, "直通驳回"); status != http.StatusBadRequest {
+		t.Fatalf("待审直通驳回：HTTP %d code %d msg %q，期望 400（审批只能在待办中心）", status, api.Code, api.Msg)
 	}
 
 	// 待审驳回回草稿：驳回原因落库。

@@ -49,10 +49,16 @@ type JobScheduler struct {
 	systemHandlers map[string]struct{}
 }
 
-func NewJobScheduler(repo *repository.Repository) *JobScheduler {
+// NewJobScheduler 创建调度器；loc 是应用业务时区（spec §4.10：每日任务按
+// 应用时区 01:00 执行，而不是服务器 TZ）。robfig/cron 的 WithLocation 让
+// 无 TZ= 前缀的表达式按该时区解释；loc 为空时退回 time.Local。
+func NewJobScheduler(repo *repository.Repository, loc *time.Location) *JobScheduler {
+	if loc == nil {
+		loc = time.Local
+	}
 	s := &JobScheduler{
 		repo:           repo,
-		cron:           cron.New(cron.WithSeconds()),
+		cron:           cron.New(cron.WithSeconds(), cron.WithLocation(loc)),
 		entries:        make(map[int64]cron.EntryID),
 		handlers:       make(map[string]HandlerFunc),
 		systemHandlers: make(map[string]struct{}),

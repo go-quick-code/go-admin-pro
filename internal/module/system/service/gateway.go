@@ -7,8 +7,9 @@ import (
 )
 
 // ---------- 跨模块网关方法 ----------
-// 供 crm 等业务模块消费的最小能力面：数据范围之外的归属快照与展示名称。
-// 只读、租户插件自动过滤；crm 侧通过接口依赖这些方法（见 crm/service.SystemGateway）。
+// 供 crm/oa 等业务模块消费的最小能力面：数据范围之外的归属快照与展示名称、
+// 部门子树与部门内用户解析。只读、租户插件自动过滤；消费侧通过接口依赖
+// 这些方法（见 crm/service.SystemGateway 与 oa/service.SystemGateway）。
 
 // UserDeptID 返回用户所属部门 ID；用户不存在时 ok=false。
 // crm 负责人快照用：负责人必须真实存在，部门缺失时快照为 0。
@@ -61,4 +62,123 @@ func (s *Service) ListSimpleUsers(ctx context.Context) ([]model.SimpleUser, erro
 // crm 公海自动回收 job 遍历租户用（issue #14，见 crm/service.SystemGateway）。
 func (s *Service) ListEnabledTenantIDs(ctx context.Context) ([]int64, error) {
 	return s.repo.ListEnabledTenantIDs(ctx)
+}
+
+// DeptWithChildren 返回部门及其子树的部门 ID 集合（含自身；与 datascope 引擎
+// 的 deptResolverAdapter 同源实现）。oa 可见范围 helper 按负责部门解析子树用
+// （issue #43，见 oa/service.SystemGateway）。
+func (s *Service) DeptWithChildren(ctx context.Context, deptID int64) ([]int64, error) {
+	return s.deptWithChildren(ctx, deptID)
+}
+
+// ListDeptIDsByLeader 返回用户在当前租户内担任负责人的部门 ID 集合。
+// oa 可见范围 helper 判定「部门负责人」身份用（issue #43）；dept_id 无过滤
+// 状态列条件，停用部门的负责人身份仍生效（历史单据可见性不随部门停用消失）。
+func (s *Service) ListDeptIDsByLeader(ctx context.Context, leaderUserID int64) ([]int64, error) {
+	return s.repo.ListDeptIDsByLeader(ctx, leaderUserID)
+}
+
+// ListUserIDsByDeptIDs 返回部门集合内（dept_id IN）的用户 ID 集合。
+// oa 可见范围 helper 把部门子树翻译成用户集合用（issue #43）；含停用用户
+// （停用用户的历史单据仍需对负责人可见），租户插件自动限定当前租户。
+func (s *Service) ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
+	return s.repo.ListUserIDsByDeptIDs(ctx, deptIDs)
+}
+
+// ListActiveUserIDsByDeptIDs 返回部门集合内的启用用户 ID 集合。
+// 公告发布按部门受众展开收件人用（PR #66 审查 P3-3）：停用用户不投递，
+// 与角色受众展开（ListActiveUserIDsByRole）的启用口径一致。
+func (s *Service) ListActiveUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
+	return s.repo.ListActiveUserIDsByDeptIDs(ctx, deptIDs)
+}
+
+// ListActiveUserIDsByRole 返回持有指定角色且自身启用的用户 ID 集合。
+// bpm 审批人候选池解析用（issue #46，spec #42 §4.2）：角色与用户都启用，
+// 停用用户不进候选池。
+func (s *Service) ListActiveUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error) {
+	return s.repo.ListActiveUserIDsByRole(ctx, roleID)
+}
+
+// ListActiveUserIDsByPermission 返回持有指定权限码且自身启用的用户 ID 集合：
+// 经启用角色绑定持有该权限码的启用菜单，或角色为内置超管（持全部权限码）。
+// bpm 权限码规则候选池解析用（issue #46）。
+func (s *Service) ListActiveUserIDsByPermission(ctx context.Context, permission string) ([]int64, error) {
+	return s.repo.ListActiveUserIDsByPermission(ctx, permission)
+}
+
+// DeptLeaderUserID 返回部门负责人（leader_user_id > 0）；部门不存在或未设
+// 负责人 ok=false（bpm 部门负责人规则沿部门树向上查找时空缺跳过，issue #46）。
+func (s *Service) DeptLeaderUserID(ctx context.Context, deptID int64) (int64, bool, error) {
+	dept, err := s.repo.FindDeptByID(ctx, deptID)
+	if err != nil {
+		return 0, false, err
+	}
+	if dept == nil {
+		return 0, false, nil
+	}
+	return dept.LeaderUserID, dept.LeaderUserID > 0, nil
+}
+
+// DeptParentID 返回部门父部门 ID；根部门（parent_id=0）或部门不存在
+// ok=false（bpm 部门负责人规则向上查找的终止条件，issue #46）。
+func (s *Service) DeptParentID(ctx context.Context, deptID int64) (int64, bool, error) {
+	dept, err := s.repo.FindDeptByID(ctx, deptID)
+	if err != nil {
+		return 0, false, err
+	}
+	if dept == nil {
+		return 0, false, nil
+	}
+	return dept.ParentID, dept.ParentID > 0, nil
+}
+
+// UserRoleIDs 返回用户持有的角色 ID 集合。
+// 公告受众判定用（issue #48）：查看者的角色与被选角色有交集即可见。
+func (s *Service) UserRoleIDs(ctx context.Context, userID int64) ([]int64, error) {
+	return s.repo.GetUserRoleIDs(ctx, userID)
+}
+
+// ListActiveUserIDs 返回租户内启用用户 ID（升序）。
+// 公告全员发布展开收件人用（issue #48）。
+func (s *Service) ListActiveUserIDs(ctx context.Context) ([]int64, error) {
+	return s.repo.ListActiveUserIDs(ctx)
+}
+
+// RoleNames 批量返回角色名称，缺失的 ID 不在返回集合中。
+// 公告受众回显用（issue #48）。
+func (s *Service) RoleNames(ctx context.Context, roleIDs []int64) (map[int64]string, error) {
+	roles, err := s.repo.FindRolesByIDs(ctx, roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[int64]string, len(roles))
+	for i := range roles {
+		names[roles[i].ID] = roles[i].Name
+	}
+	return names, nil
+}
+
+// ListDictValues 返回系统字典类型的启用值集合（按 sort、id 升序；重复值
+// 只返回一次）。报销类别取字典 oa_expense_category 的启用值（issue #54，
+// spec §4.9）。字典表是平台级配置（不带 tenant_id），所有租户看到同一份。
+func (s *Service) ListDictValues(ctx context.Context, dictType string) ([]string, error) {
+	status := int8(model.StatusEnable)
+	rows, err := s.repo.ListDictData(ctx, dictType, "", &status)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for i := range rows {
+		value := rows[i].Value
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values, nil
 }

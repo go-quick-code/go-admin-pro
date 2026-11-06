@@ -3,6 +3,8 @@ package dto
 import (
 	"time"
 
+	bpmdto "github.com/go-quick-code/go-admin-pro/internal/module/bpm/dto"
+	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
@@ -65,16 +67,28 @@ type ContractPageReq struct {
 }
 
 // ContractStatusReq 状态流转（PUT /crm/contract/status，唯一状态入口）：
-//   - 1 草稿 ← 2 待审：驳回（reason 为驳回原因，可空），须 crm:contract:approve；
-//   - 2 待审 ← 1 草稿：提交审批；
-//   - 3 已签 ← 2 待审：审批通过，须 crm:contract:approve；
-//   - 4 作废：草稿/待审/已签均可进入（#18 将接「有回款记录禁止作废」守卫）。
+//   - 2 待审 ← 1 草稿：提交审批（同事务启动 bpm 实例）；
+//   - 4 作废：草稿/待审/已签均可进入（#18 接「有回款记录禁止作废」守卫）；
+//     待审合同作废时同事务终止运行中的审批实例。
 //
+// 审批通过与驳回不在此端点：审批统一在 bpm 待办中心办理（issue #47，
+// spec §4.5），结果由 BusinessHandler 在同一事务内回写合同。
 // 非法流转与重复操作 400；并发冲突（状态已被他人变更）409。
 type ContractStatusReq struct {
 	ID     int64  `json:"id" binding:"required"`
 	Status int8   `json:"status" binding:"required"`
 	Reason string `json:"reason" binding:"max=500"`
+}
+
+// ContractDetail 是合同详情响应：合同本体 + 历次审批实例的时间线与
+// 当前待办（issue #47；spec §4.3 每次重新提交创建新实例。approvals 倒序，
+// current 标记最新实例；approval 保留为当前实例的便捷引用，从未发起审批时
+// 二者均为空）。
+// 嵌入 model.Contract 保持既有字段平铺，新增 approval 不破坏旧调用方。
+type ContractDetail struct {
+	model.Contract
+	Approvals []bpmdto.InstanceDetail `json:"approvals,omitempty"`
+	Approval  *bpmdto.InstanceDetail  `json:"approval,omitempty"`
 }
 
 // ContractFileResp 是合同附件的展示视图（issue #17：复用 infra_file，

@@ -22,6 +22,10 @@ type Repository struct {
 // New 创建 crm Repository。
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
+// DB 返回底层 gorm 句柄（事务内调用跨模块服务时需要传递同一事务，
+// issue #47：合同提交/回调复用 bpm 的 StartInstanceInTx/CancelInstanceInTx）。
+func (r *Repository) DB() *gorm.DB { return r.db }
+
 func notFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil

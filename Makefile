@@ -7,12 +7,12 @@ version ?= 1
 # 刻意不用 GAP_DATABASE_DSN：那个名字会被 config.Load 读取，泄漏进其他包的测试。
 GAP_TEST_DATABASE_DSN ?= root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset=utf8mb4&parseTime=True
 
-.PHONY: help run run-demo build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build web-type-check build-all docker-up docker-down docker-logs clean
+.PHONY: help run run-demo build test test-integration check vet fmt fmt-check tidy migrate-up migrate-down migrate-reset migrate-status migrate-stamp migrate-create verify-migration web-install web-dev web-build web-type-check build-all backfill-contract-approval docker-up docker-down docker-logs clean
 
 help:
 	@echo "go-admin-pro 常用命令："
 	@echo "  make run          启动后端（go run）"
-	@echo "  make run-demo     启动后端并写入 CRM 演示数据（GAP_SEED_DEMO=true）"
+	@echo "  make run-demo     启动后端并写入 CRM + OA 演示数据（GAP_SEED_DEMO=true）"
 	@echo "  make build        构建后端二进制到 $(BIN)"
 	@echo "  make migrate-up   执行全部待执行迁移"
 	@echo "  make migrate-down 回滚一个迁移版本"
@@ -23,6 +23,7 @@ help:
 	@echo "  make verify-migration 空库迁移往返 + 启动/登录冒烟（需要 GAP_DATABASE_DSN）"
 	@echo "  make test         运行 Go 测试"
 	@echo "  make test-integration 运行集成测试（构建标签 integration）"
+	@echo "  make backfill-contract-approval 为存量待审合同补建 bpm 审批实例（幂等）"
 	@echo "  make check        fmt-check + build + vet + test"
 	@echo "  make vet          go vet 静态检查"
 	@echo "  make fmt          gofmt 格式化"
@@ -38,7 +39,7 @@ help:
 run:
 	go run ./cmd/server -c $(CONFIG)
 
-# CRM 演示环境（#21 一条命令路径）：演示数据默认关闭，这里显式开启。
+# CRM + OA 演示环境（#21/#63 一条命令路径）：演示数据默认关闭，这里显式开启。
 run-demo:
 	GAP_SEED_DEMO=true go run ./cmd/server -c $(CONFIG)
 
@@ -48,6 +49,10 @@ build:
 
 test:
 	go test ./...
+
+# 存量待审合同的 bpm 审批实例补建（issue #47）：幂等，重复执行不会重复创建。
+backfill-contract-approval:
+	go run ./cmd/backfill-contract-approval -c $(CONFIG)
 
 # 集成测试基座在 #3 落地；没有 integration 用例时明确失败，避免假绿。
 test-integration:

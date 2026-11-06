@@ -1,11 +1,14 @@
 package seed
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -26,6 +29,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedMenus(db); err != nil {
 		return err
 	}
+	if err := seedBPMDefinitions(db); err != nil {
+		return err
+	}
 	if err := seedDepts(db); err != nil {
 		return err
 	}
@@ -38,7 +44,13 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedUsers(db); err != nil {
 		return err
 	}
+	if err := seedAttendanceDefaults(db); err != nil {
+		return err
+	}
 	if err := seedDicts(db); err != nil {
+		return err
+	}
+	if err := seedExpenseCategoryDict(db); err != nil {
 		return err
 	}
 	if err := seedConfigs(db); err != nil {
@@ -50,9 +62,16 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedJobs(db); err != nil {
 		return err
 	}
-	if withDemo && seedCRMDemoFunc != nil {
-		if err := seedCRMDemoFunc(db); err != nil {
-			return err
+	if withDemo {
+		if seedCRMDemoFunc != nil {
+			if err := seedCRMDemoFunc(db); err != nil {
+				return err
+			}
+		}
+		if seedOADemoFunc != nil {
+			if err := seedOADemoFunc(db); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -63,6 +82,11 @@ func Run(db *gorm.DB, withDemo bool) error {
 // 产品实体及其消费者）可以在不携带 crm_demo.go 的副本上继续编译 seed 包；
 // 正常构建里 crm_demo.go 始终存在，行为等价于直接调用。
 var seedCRMDemoFunc func(*gorm.DB) error
+
+// seedOADemoFunc 是 OA 演示数据的写入入口，由 oa_demo.go 的 init 注册。
+// OA 演示数据依赖 CRM 演示组织（sales1/sales2/manager）与基础种子（默认
+// 班次/考勤组、默认审批流程、报销类别字典），因此固定排在 CRM 演示数据之后。
+var seedOADemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64
@@ -234,8 +258,8 @@ func seedMenus(db *gorm.DB) error {
 		btn(4084, 4080, "商机删除", "crm:opportunity:delete", 4),
 		btn(4085, 4080, "商机阶段推进", "crm:opportunity:stage", 5),
 		// 合同（issue #16）：菜单 ID 从 4100 起（4060–4070 产品、4080–4085 商机已占用，
-		// grep 去重确认）。审批通过与驳回挂独立按钮码 crm:contract:approve
-		//（ApprovalService v1 直通实现据此放行，bpm 上线后同码走流程）。
+		// grep 去重确认）。crm:contract:approve 自 issue #47 起是默认流程
+		// crm_contract_approval 的审批人规则权限码（候选池由 bpm 物化待办）。
 		menu(4100, 400, "合同管理", "contract", "crm/contract/index", "crm:contract:query", "Tickets", 5),
 		btn(4101, 4100, "合同查询", "crm:contract:query", 1),
 		btn(4102, 4100, "合同新增", "crm:contract:create", 2),
@@ -262,6 +286,180 @@ func seedMenus(db *gorm.DB) error {
 		btn(4164, 4061, "产品导出", "crm:product:export", 6),
 		btn(4165, 4100, "合同导出", "crm:contract:export", 6),
 		btn(4166, 4120, "回款导出", "crm:receivable:export", 5),
+
+		// OA（issue #43）：业务套件根目录（spec §7.2 菜单段 500，权限码为空——
+		// 目录不可授权动作）。子菜单与按钮码由各域工单按 500 段号段落地
+		//（501 公告、503 请假、504 报销、505 考勤、506 日程、507 会议室、
+		// 508 文档），开工前先 grep 本文件去重再取号。
+		// OA 业务记录的共享可见范围见 oa/service.VisibilityScopeOf（spec §4.6）。
+		dir(500, 0, "OA", "/oa", "Calendar", 50),
+
+		// 公告（issue #48）：521 段（协调台账分配；grep 去重确认 521/5211–5215
+		// 未被占用）。查询码挂菜单（管理列表与草稿预览入口），创建/编辑/删除/
+		// 发布撤回逐码；5215 已读统计由 #49 承载（码先登记，接口由 #49 落地）。
+		menu(521, 500, "公告", "announcement", "oa/announcement/index", "oa:announcement:query", "Notification", 3),
+		btn(5211, 521, "公告新增", "oa:announcement:create", 1),
+		btn(5212, 521, "公告修改", "oa:announcement:update", 2),
+		btn(5213, 521, "公告删除", "oa:announcement:delete", 3),
+		btn(5214, 521, "公告发布", "oa:announcement:publish", 4),
+		btn(5215, 521, "已读统计", "oa:announcement:read-stats", 5),
+		// 我的公告（issue #48）：员工侧页面，权限码为空——登录即可（分配了
+		// 菜单的角色可见；后端 GET /oa/announcement/my/page 与已发布详情同为
+		// 登录即可，可见性由受众判定收口）。532 在 500–549 空位自取（#52 占
+		// 529 我的请假、#60 占 530 考勤组管理/531 我的考勤），grep 去重确认
+		// 532 未被占用。
+		menu(532, 500, "我的公告", "announcement-mine", "oa/announcement/mine", "", "Bell", 10),
+
+		// 工作日历（issue #50）：520 段（协调台账分配），按钮段 5201+（菜单ID×10+n，
+		// grep 去重确认 520/5201–5203 未被占用）。查询码挂菜单（月视图入口），
+		// 单日/批量/恢复默认三个维护动作各挂独立按钮码。
+		menu(520, 500, "工作日历", "workday", "oa/workday/index", "oa:workday:query", "AlarmClock", 1),
+		btn(5201, 520, "单日设置", "oa:workday:set", 1),
+		btn(5202, 520, "批量设置", "oa:workday:batch", 2),
+		btn(5203, 520, "恢复默认", "oa:workday:delete", 3),
+
+		// 请假类型与额度（issue #51）：522 段（协调台账分配，grep 去重确认
+		// 522/528 未被占用）。本工单所有管理动作（类型 CRUD/启停/删除、额度
+		// 初始化/调整/分页）共用单一管理码 oa:leave:manage（#43 helper 登记、
+		// 默认审批流 oa_leave_approval 节点 2 的 HR/管理员码，spec §7.3），
+		// 挂菜单本身，无独立按钮码；类型列表与本人余额登录即可（不经权限码）。
+		menu(522, 500, "请假类型与额度", "leave", "oa/leave/index", "oa:leave:manage", "List", 2),
+		// 我的额度（issue #51）：员工侧页面，权限码为空——登录即可（分配了
+		// 菜单的角色可见；后端 GET /oa/leave/balance/mine 同为登录即可）。
+		// 我的请假页（含额度入口）由 #52 建立（下方菜单 529）；撤回/取消与
+		// 部门可见范围由 #53 扩展。
+		menu(528, 500, "我的额度", "leave-mine", "oa/leave/mine", "", "User", 8),
+
+		// 我的请假（issue #52/#53）：529 段（500–549 员工侧空位自取，grep 去重
+		// 确认 529/5291–5296 未被占用；522 管类型与额度、528 管本人额度，勿重复建）。
+		// 页面本身登录即可（后端列表/详情按 §4.6 可见范围收口），写动作逐码：
+		// 创建/编辑/删除/提交/撤回/取消（按钮码 = 菜单 ID×10+n）。审批动作走
+		// 通用待办 512 段；#53 的撤回/取消仅发起人可见（前端按 userId + 状态显隐）。
+		menu(529, 500, "我的请假", "leave-request", "oa/leave/request/index", "", "Calendar", 9),
+		btn(5291, 529, "请假申请", "oa:leave:create", 1),
+		btn(5292, 529, "请假编辑", "oa:leave:update", 2),
+		btn(5293, 529, "请假删除", "oa:leave:delete", 3),
+		btn(5294, 529, "请假提交", "oa:leave:submit", 4),
+		btn(5295, 529, "请假撤回", "oa:leave:withdraw", 5),
+		btn(5296, 529, "请假取消", "oa:leave:cancel", 6),
+		// 请假查询码（issue #64 review，spec §5）：列表/详情接口的查询门槛；
+		// 菜单本身无权限码，员工侧页面必须显式授予本按钮才可读列表/详情。
+		btn(5297, 529, "请假查询", "oa:leave:query", 7),
+
+		// 报销（issue #54）：523 报销（管理/财务入口，查询码挂菜单；spec §7.2 的
+		// 504 段在本仓库协调台账改为 523 段）+ 535 我的报销（员工侧空位自取：
+		// 529 我的请假/530 考勤组/531 我的考勤/532 我的公告/533 考勤结果/
+		// 534 考勤汇总已占用，合并 #62 后 grep 去重取 535）。两页面共用同一
+		// 视图，可见范围由后端 §4.6 收口。
+		// 按钮码 = 菜单 ID×10+n：5231 创建/5232 编辑/5233 删除/5234 提交
+		//（提交逻辑属 #55，码先登记，路由由 #55 落地）/5235 管理（财务/管理
+		// 可见范围，spec §4.6/§4.9 默认审批流节点 2）。
+		menu(523, 500, "报销", "expense", "oa/expense/index", "oa:expense:query", "Money", 4),
+		btn(5231, 523, "报销申请", "oa:expense:create", 1),
+		btn(5232, 523, "报销编辑", "oa:expense:update", 2),
+		btn(5233, 523, "报销删除", "oa:expense:delete", 3),
+		btn(5234, 523, "报销提交", "oa:expense:submit", 4),
+		btn(5235, 523, "报销管理", "oa:expense:manage", 5),
+		// 报销查询码（issue #64 review，spec §5）：员工侧 535 菜单无权限码，
+		// 列表/详情接口挂 oa:expense:query，需显式授予本按钮（管理菜单 523
+		// 本身也携带该码，供财务/管理员使用）。
+		btn(5236, 523, "报销查询", "oa:expense:query", 6),
+		menu(535, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 13),
+
+		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
+		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
+		// 530/531）。权限码按 spec §5/§7.2：
+		// 班次 oa:attendance:shift:manage、考勤组 oa:attendance:group:manage
+		//（码挂在菜单上，授予菜单即授予该域全部维护动作）；我的考勤为员工自助页，
+		// 登录即可用（权限码为空，与仪表盘同款；打卡动作以登录身份收口）。
+		menu(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 5),
+		menu(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 6),
+		menu(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 7),
+
+		// 考勤结果与校正（issue #61）：533 段（500–549 空位自取，grep 去重确认
+		// 533/5331–5332 未被占用）。533 查询码挂菜单（结果查询页入口）；5331
+		// 校正/撤销校正/手工重算共用 oa:attendance:result:correct；5332 挂 #43
+		// helper 登记的全租户可见范围码 oa:attendance:manage（super_admin "*" 直接
+		// 命中，HR 角色授予本按钮即获得全租户结果可见）。员工侧结果列表追加在
+		// 「我的考勤」531 页面，登录即可，不新增菜单。
+		menu(533, 500, "考勤结果", "attendance-result", "oa/attendance/result", "oa:attendance:result:query", "DataAnalysis", 11),
+		btn(5331, 533, "考勤校正", "oa:attendance:result:correct", 1),
+		btn(5332, 533, "全租户可见", "oa:attendance:manage", 2),
+
+		// 考勤月度汇总（issue #62）：534 段（500–549 空位自取，grep 去重确认
+		// 534 未被占用）。查询码挂菜单（汇总页入口）；可见范围复用 #43 helper——
+		// oa:attendance:manage（5332 按钮承载）看全租户、部门负责人看子树、
+		// 否则仅本人。员工「本月汇总」卡片在「我的考勤」531 页面内登录即可，
+		// 不新增菜单。
+		menu(534, 500, "考勤汇总", "attendance-summary", "oa/attendance/summary", "oa:attendance:summary:query", "TrendCharts", 12),
+
+		// 日程（issue #56）：524 段（协调台账分配；grep 去重确认 524/5241–5244
+		// 未被占用）。查询码挂菜单（月/周/列表三视图入口）；创建/编辑/取消逐码，
+		// 5243 同时承载 DELETE（spec §5）与「取消」动作（软取消，取消后不再
+		// 展示）；5244 是公开日程权限码（创建/编辑可见性=2 时服务层校验，
+		// 缺失 403）。员工侧「我的日程」536 复用同一页面（500–549 空位自取：
+		// 529 我的请假/530 考勤组/531 我的考勤/532 我的公告/533 考勤结果/
+		// 534 考勤汇总/535 我的报销已占用，grep 去重取 536），查询码挂菜单本身，
+		// 普通角色授予 536 + 5241–5243 即可自建私有/部门日程。
+		menu(524, 500, "日程", "calendar", "oa/calendar/index", "oa:calendar:query", "Calendar", 14),
+		btn(5241, 524, "日程创建", "oa:calendar:create", 1),
+		btn(5242, 524, "日程编辑", "oa:calendar:update", 2),
+		btn(5243, 524, "日程取消", "oa:calendar:delete", 3),
+		btn(5244, 524, "公开日程", "oa:calendar:public", 4),
+		menu(536, 500, "我的日程", "calendar-mine", "oa/calendar/index", "oa:calendar:query", "Calendar", 15),
+
+		// 会议室与预约（issue #57）：525 段（协调台账分配；grep 去重确认
+		// 525/5251–5252 未被占用）。会议室查询/详情与预约列表挂
+		// oa:room:query；会议室 CRUD/启停/删除挂 oa:room:manage（按钮 5251，
+		// 有未来有效预约时删除返回 409，只能停用）；创建预约挂
+		// oa:room:booking（按钮 5252）。管理端预约视图 538 与员工入口
+		// 「我的会议」539 从 500–549 空位自取（523/524/526/529–537 已占用，
+		// 其中 537 是 #58 我的文档；grep 去重取 538/539）；两页复用同一
+		// oa/room/booking 组件——无 oa:room:manage 的查看者由后端强制只看
+		// 本人预约。普通角色授予 539 + 5252 即可预约并查看自己的会议。
+		menu(525, 500, "会议室管理", "room", "oa/room/index", "oa:room:query", "OfficeBuilding", 18),
+		btn(5251, 525, "会议室维护", "oa:room:manage", 1),
+		btn(5252, 525, "预约会议", "oa:room:booking", 2),
+		menu(538, 500, "会议室预约", "room-booking", "oa/room/booking", "oa:room:query", "Calendar", 19),
+		menu(539, 500, "我的会议", "room-mine", "oa/room/booking", "oa:room:query", "Clock", 20),
+
+		// 文档目录与 ACL（issue #58，spec §3.8/§4.12）：526 段（协调台账分配；
+		// grep 去重确认 525/526/5261–5263/537 未被占用）。查询码挂菜单（目录树
+		// 入口）；5261 创建目录（顶层必须带显式 ACL）；5262 是管理旁路码
+		//（owner 之外的全目录可见/可管理，服务层判定 403/404）；5263 文件上传
+		// 按钮码由 #59 沿用（后端上传/删除只校验目录管理权，不强制该码）。
+		// 员工侧「我的文档」537 复用
+		// 同一页面（500–549 空位自取：523 报销/524 日程/529 我的请假/530 考勤组/
+		// 531 我的考勤/532 我的公告/533 考勤结果/534 考勤汇总/535 我的报销/
+		// 536 我的日程/538 会议室预约/539 我的会议已占用，grep 去重取 537），
+		// 只挂查询码，可见目录按 ACL 过滤。
+		menu(526, 500, "文档", "document", "oa/document/index", "oa:document:query", "FolderOpened", 16),
+		btn(5261, 526, "目录创建", "oa:document:create", 1),
+		btn(5262, 526, "目录管理", "oa:document:manage", 2),
+		btn(5263, 526, "文件上传", "oa:document:upload", 3),
+		menu(537, 500, "我的文档", "document-mine", "oa/document/index", "oa:document:query", "FolderOpened", 17),
+
+		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
+		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
+		// 发布与停用共用 bpm:definition:publish。
+		dir(510, 0, "流程中心", "/bpm", "SetLike", 51),
+		menu(511, 510, "流程定义", "definition", "bpm/definition/index", "bpm:definition:query", "List", 1),
+		btn(5111, 511, "流程新增", "bpm:definition:create", 1),
+		btn(5112, 511, "流程修改", "bpm:definition:update", 2),
+		btn(5113, 511, "流程删除", "bpm:definition:delete", 3),
+		btn(5114, 511, "流程发布", "bpm:definition:publish", 4),
+
+		// 通用待办（issue #46，spec §7.2：512 待办任务，按钮段 5121+，grep 去重
+		// 确认 512/5121–5123 未被占用）：页面三 tab（待办/已办/我发起），页面与
+		// 查询共用 bpm:task:query；办理按钮 bpm:task:handle 供前端显隐（动作接口
+		// 以「当前办理人/发起人」身份收口，不设权限码门槛，spec §5）；实例查询
+		// bpm:instance:query 挂管理视图与实例详情的第三类访问者；通知查询
+		// notify:message:query 补挂在 512 段——普通用户经角色授权即可用顶栏
+		// 铃铛与通知列表（notify 无独立菜单，#45 遗留接点）。
+		menu(512, 510, "待办任务", "task", "bpm/task/index", "bpm:task:query", "Ticket", 2),
+		btn(5121, 512, "任务办理", "bpm:task:handle", 1),
+		btn(5122, 512, "实例查询", "bpm:instance:query", 2),
+		btn(5123, 512, "通知查询", "notify:message:query", 3),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
@@ -278,6 +476,48 @@ func seedMenus(db *gorm.DB) error {
 		return err
 	}
 	slog.Info("seed menus created", "count", len(menus))
+	return nil
+}
+
+// seedAttendanceDefaults 写入默认班次与默认考勤组（spec §7.3：默认班次
+// 09:00–18:00、宽限 5 分钟；默认考勤组绑定该班次）。仅当班次与考勤组都为空时
+// 写入——管理员删掉/改名后重复启动不复活，保持幂等。默认组不写组员：新用户
+// 仍需管理员按用户或部门物化入组（spec §4.10）。
+func seedAttendanceDefaults(db *gorm.DB) error {
+	var shiftCount, groupCount int64
+	if err := tenant.Skip(db).Model(&oamodel.AttendanceShift{}).Count(&shiftCount).Error; err != nil {
+		return err
+	}
+	if err := tenant.Skip(db).Model(&oamodel.AttendanceGroup{}).Count(&groupCount).Error; err != nil {
+		return err
+	}
+	if shiftCount > 0 || groupCount > 0 {
+		return nil
+	}
+	shift := &oamodel.AttendanceShift{
+		BaseEntity:   oamodel.BaseEntity{ID: 1},
+		TenantID:     1,
+		Name:         "标准班",
+		StartTime:    "09:00",
+		EndTime:      "18:00",
+		GraceMinutes: 5,
+		Status:       oamodel.AttendanceStatusEnabled,
+		Sort:         0,
+	}
+	if err := tenant.Skip(db).Create(shift).Error; err != nil {
+		return err
+	}
+	group := &oamodel.AttendanceGroup{
+		BaseEntity: oamodel.BaseEntity{ID: 1},
+		TenantID:   1,
+		Name:       "默认考勤组",
+		ShiftID:    shift.ID,
+		Status:     oamodel.AttendanceStatusEnabled,
+	}
+	if err := tenant.Skip(db).Create(group).Error; err != nil {
+		return err
+	}
+	slog.Info("seed attendance defaults created", "shift", shift.Name, "group", group.Name)
 	return nil
 }
 
@@ -332,6 +572,67 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 1014},
 		{RoleID: 2, MenuID: 1024},
 		{RoleID: 2, MenuID: 1054},
+		// OA 员工侧基础菜单（issue #48，spec §7.3「内置普通角色授予公告查看」）：
+		// OA 根目录 + 我的公告（登录即可的只读页面，不含公告管理菜单 521）。
+		// 我的考勤（531，issue #61 起含打卡与考勤结果列表）同为员工自助页，
+		// 登录即可，纳入内置普通角色。
+		{RoleID: 2, MenuID: 500},
+		{RoleID: 2, MenuID: 532},
+		{RoleID: 2, MenuID: 531},
+		// 报销员工侧（issue #54，spec §7.3「内置普通角色授予…报销…的基础菜单」）：
+		// 我的报销页面 + 草稿创建/编辑/删除/提交按钮码 + 查询码 5236
+		//（issue #64 review：列表/详情接口挂 oa:expense:query，535 菜单本身
+		// 无权限码）；不含管理菜单 523 与 oa:expense:manage（财务/管理员）。
+		{RoleID: 2, MenuID: 535},
+		{RoleID: 2, MenuID: 5231},
+		{RoleID: 2, MenuID: 5232},
+		{RoleID: 2, MenuID: 5233},
+		{RoleID: 2, MenuID: 5234},
+		{RoleID: 2, MenuID: 5236},
+		// 日程员工侧（issue #56，spec §7.3「内置普通角色授予…日程…的基础
+		// 菜单」）：我的日程页面（536，携带 oa:calendar:query）+ 创建/编辑/
+		// 取消按钮码；不含 524 管理菜单与 5244 公开日程码（公开日程需要
+		// 管理员另行授予 oa:calendar:public）。
+		{RoleID: 2, MenuID: 536},
+		{RoleID: 2, MenuID: 5241},
+		{RoleID: 2, MenuID: 5242},
+		{RoleID: 2, MenuID: 5243},
+		// 会议室员工侧（issue #57）：我的会议页面（539，携带 oa:room:query）
+		// + 预约按钮码 5252（oa:room:booking）；不含 525 管理菜单与
+		// oa:room:manage（会议室维护与全租户预约查看）。
+		{RoleID: 2, MenuID: 539},
+		{RoleID: 2, MenuID: 5252},
+		// 文档员工侧（issue #58，spec §7.3「内置普通角色授予…文档…的基础
+		// 菜单」）：我的文档页面（537，携带 oa:document:query），可见目录由
+		// 目录 ACL 过滤；不含 526 管理菜单、5261 创建与 5262 管理码
+		//（顶层目录创建与全租户管理由管理员另行授予）。
+		{RoleID: 2, MenuID: 537},
+		// 请假员工侧（issue #63 收口）：我的额度（528）与我的请假（529）+
+		// 创建/编辑/删除/提交/撤回/取消按钮码 + 查询码 5297（issue #64
+		// review：列表/详情接口挂 oa:leave:query）。
+		{RoleID: 2, MenuID: 528},
+		{RoleID: 2, MenuID: 529},
+		{RoleID: 2, MenuID: 5291},
+		{RoleID: 2, MenuID: 5292},
+		{RoleID: 2, MenuID: 5293},
+		{RoleID: 2, MenuID: 5294},
+		{RoleID: 2, MenuID: 5295},
+		{RoleID: 2, MenuID: 5296},
+		{RoleID: 2, MenuID: 5297},
+		// 通用待办（PR #66 审查 P1-2）：部门负责人/普通员工经通知深链或菜单
+		// 进入 /bpm/task 需要 512 菜单（bpm:task:query）与 5121 办理按钮
+		// （bpm:task:handle）；缺少时页面 403、动态路由不注册、通知深链 404。
+		// 办理动作本身仍以「当前办理人/发起人」身份收口（spec §5），
+		// bpm:task:handle 只控制前端按钮显隐。
+		{RoleID: 2, MenuID: 512},
+		{RoleID: 2, MenuID: 5121},
+		// 顶栏通知铃铛（issue #64 review）：notify:message:query 挂在 5123
+		// 按钮，此前未授予普通角色，NotifyBell 轮询 403；普通角色需要读本人通知。
+		{RoleID: 2, MenuID: 5123},
+		// 注意（issue #64 review，spec §7.3「普通角色只授基础菜单」）：
+		// 考勤结果页 533 与校正/全租户 5331/5332 是管理面，不再授予内置普通角色；
+		// 员工自助页 531（含本人结果与本月汇总）已在上方授予。演示环境需要 HR
+		// 视角时使用 seed-demo 创建的内置 hr 角色（见 internal/seed/oa_demo.go）。
 	}
 	return tenant.Skip(db).Create(&roleMenus).Error
 }
@@ -422,6 +723,51 @@ func seedDicts(db *gorm.DB) error {
 	return tenant.Skip(db).Create(&data).Error
 }
 
+// seedExpenseCategoryDict 写入报销类别字典（issue #54，spec §4.9/§7.3：
+// 交通、餐饮、住宿、办公、其他）。与 seedDicts 的「整表为空才写」不同，
+// 这里按字典类型与字典项逐行幂等：既有库升级时会补齐缺失的字典/字典项，
+// 重复启动不重复插入；管理员改过的名称/排序不会被覆盖。
+func seedExpenseCategoryDict(db *gorm.DB) error {
+	const dictType = "oa_expense_category"
+	var typ sysmodel.DictType
+	err := tenant.Skip(db).Where("`type` = ?", dictType).First(&typ).Error
+	switch {
+	case err == nil:
+		// 已存在，保持管理员的修改。
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		row := sysmodel.DictType{
+			TenantID: 1, Name: "报销类别", Type: dictType,
+			Status: sysmodel.StatusEnable, Remark: "报销明细的费用类别（OA v1 默认值）",
+		}
+		if err := tenant.Skip(db).Create(&row).Error; err != nil {
+			return fmt.Errorf("seed expense category dict type: %w", err)
+		}
+	default:
+		return fmt.Errorf("seed expense category dict type: %w", err)
+	}
+
+	values := []string{"交通", "餐饮", "住宿", "办公", "其他"}
+	for i, value := range values {
+		var count int64
+		if err := tenant.Skip(db).Model(&sysmodel.DictData{}).
+			Where("`dict_type` = ? AND `value` = ?", dictType, value).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("seed expense category dict data: %w", err)
+		}
+		if count > 0 {
+			continue
+		}
+		row := sysmodel.DictData{
+			TenantID: 1, DictType: dictType, Label: value, Value: value,
+			Sort: i + 1, Status: sysmodel.StatusEnable,
+		}
+		if err := tenant.Skip(db).Create(&row).Error; err != nil {
+			return fmt.Errorf("seed expense category dict data: %w", err)
+		}
+	}
+	return nil
+}
+
 func seedConfigs(db *gorm.DB) error {
 	var count int64
 	if err := tenant.Skip(db).Model(&inframodel.Config{}).Count(&count).Error; err != nil {
@@ -469,8 +815,53 @@ func seedJobs(db *gorm.DB) error {
 			Status:         inframodel.JobStatusPaused,
 			Remark:         "每天 03:00 按租户公海配置回收超期未跟进的客户（清空负责人并写历史），默认暂停：请先确认各租户回收天数配置",
 		},
+		{
+			TenantID:       1,
+			Name:           "考勤日结果生成",
+			HandlerName:    "oaAttendanceDailyResult",
+			CronExpression: "0 0 1 * * *",
+			RetryCount:     0,
+			// 默认启用（spec §4.10「infra_job 每天 01:00 生成前一日结果」）：
+			// 派生幂等且只写本租户结果，非破坏性；handler_param 可填 YYYY-MM-DD
+			// 回填指定日期。
+			Status: inframodel.JobStatusRunning,
+			Remark: "每天 01:00 生成前一日考勤结果（按启用租户迭代）；handler_param 可填 YYYY-MM-DD 回填指定日期",
+		},
+		// 会议提醒（issue #57，spec §4.11）：每 5 分钟扫描 (now, now+15m]
+		// 内开始的有效预约，向预约人写 meeting_reminder 通知；reminded_at
+		// 条件更新保证只发一次。默认启用（非破坏性）。
+		{
+			TenantID:       1,
+			Name:           "会议提醒",
+			HandlerName:    "oaRoomBookingReminder",
+			CronExpression: "0 */5 * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每 5 分钟扫描 15 分钟内开始的会议室预约，向预约人发送 meeting_reminder 通知（reminded_at 保证只发一次）；handler_param 可填 YYYY-MM-DD HH:mm:ss 固定现在",
+		},
 	}
-	return tenant.Skip(db).Create(&jobs).Error
+	// Create 会把带 default 标签的零值列回写成数据库默认值（1 暂停），
+	// 因此在插入前先快照种子的意图状态，再逐条用 Exec 显式回写。
+	statusByHandler := make(map[string]int8, len(jobs))
+	for _, job := range jobs {
+		statusByHandler[job.HandlerName] = job.Status
+	}
+	if err := tenant.Skip(db).Create(&jobs).Error; err != nil {
+		return err
+	}
+	// GORM 对带 `default:1` 标签的零值 Status 会走「省略列 → 落库默认值」，
+	// 导致「默认启用」的任务实际以暂停状态入库（issue #63 收口 #57 遗留）。
+	// 逐条用 Exec 显式回写种子意图的状态：无论 0（启用）还是 1（暂停）都以
+	// 种子为准，避免 ORM 对带 default 标签列的省略行为影响最终状态。
+	for handlerName, status := range statusByHandler {
+		if err := tenant.Skip(db).Exec(
+			"UPDATE `infra_job` SET `status` = ? WHERE `tenant_id` = ? AND `handler_name` = ?",
+			status, 1, handlerName,
+		).Error; err != nil {
+			return fmt.Errorf("seed job status %s: %w", handlerName, err)
+		}
+	}
+	return nil
 }
 
 // seedPoolConfigs 写入租户 1 的公海配置默认行（issue #14）：

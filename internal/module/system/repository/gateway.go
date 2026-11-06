@@ -65,3 +65,14 @@ func (r *Repository) ListSimpleUsers(ctx context.Context) ([]model.SimpleUser, e
 		Find(&users).Error
 	return users, err
 }
+
+// ListActiveUserIDs 返回租户内启用用户 ID（升序）。
+// 公告全员发布展开收件人用（issue #48）：停用用户不投递站内通知。
+func (r *Repository) ListActiveUserIDs(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("status = ?", model.StatusEnable).
+		Order("id ASC").
+		Pluck("id", &ids).Error
+	return ids, err
+}
