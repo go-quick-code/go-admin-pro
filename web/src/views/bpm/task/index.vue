@@ -302,15 +302,17 @@ function instanceStatusTag(status: number): string {
 }
 
 // 业务详情入口：业务类型 → 前端路由（业务工单落地页面后在此登记）。
-// 合同审批直达合同详情抽屉（/crm/contract?id=<合同ID>，issue #47）。
+// 合同审批 / 报销审批直达业务详情抽屉（?id=<业务ID>，issue #47/#55）。
 function businessRouteOf(businessType: string, businessId?: number): string {
   const routes: Record<string, string> = {
     crm_contract_approval: '/crm/contract',
     oa_leave_approval: '/oa/leave/request',
+    oa_expense_approval: '/oa/expense',
   }
   const base = routes[businessType]
   if (!base) return ''
-  if (businessType === 'crm_contract_approval' && businessId) {
+  // 请假页在列表内定位（无 ?id= 约定），合同与报销按 query.id 打开抽屉。
+  if (businessType !== 'oa_leave_approval' && businessId) {
     return `${base}?id=${businessId}`
   }
   return base
