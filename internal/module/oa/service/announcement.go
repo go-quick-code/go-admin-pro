@@ -208,10 +208,14 @@ func (s *Service) PageAnnouncementReadStats(ctx context.Context, id int64, req *
 // ---------- 创建/编辑/删除 ----------
 
 // CreateAnnouncement 创建公告（草稿）：content 经 bluemonday 清洗后入库，
-// 自定义受众目标去重校验并与主表同事务写入。
+// 自定义受众目标去重校验并与主表同事务写入。落库前做敏感词检查（标题+正文，
+// issue #81，spec §4.7.4）：命中 400 且不写任何数据。
 func (s *Service) CreateAnnouncement(ctx context.Context, req *dto.AnnouncementCreateReq) (*dto.AnnouncementDetailResp, error) {
 	title, content, audienceType, err := validateAnnouncementFields(req.Title, req.Content, req.AudienceType)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkSensitiveWords(ctx, title, content); err != nil {
 		return nil, err
 	}
 	targets, err := buildAnnouncementTargets(0, audienceType, req.Targets)
@@ -241,10 +245,13 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req *dto.AnnouncementC
 }
 
 // UpdateAnnouncement 编辑公告（仅草稿）：受众目标整体替换；发布后不可编辑
-// （spec §5：PUT 仅草稿）。
+// （spec §5：PUT 仅草稿）。落库前做敏感词检查（标题+正文，issue #81）。
 func (s *Service) UpdateAnnouncement(ctx context.Context, req *dto.AnnouncementUpdateReq) (*dto.AnnouncementDetailResp, error) {
 	title, content, audienceType, err := validateAnnouncementFields(req.Title, req.Content, req.AudienceType)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkSensitiveWords(ctx, title, content); err != nil {
 		return nil, err
 	}
 	targets, err := buildAnnouncementTargets(0, audienceType, req.Targets)

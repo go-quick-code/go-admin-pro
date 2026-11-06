@@ -55,6 +55,9 @@ type Service struct {
 	// quotaGateway 是存储配额限额来源（issue #71，窄接口见 quota_gateway.go），
 	// 由 internal/app 装配注入；未注入时上传不做配额校验。
 	quotaGateway QuotaGateway
+	// monitorStats 是监控面板跨模块统计来源（issue #84，窄接口见 monitor.go），
+	// 由 internal/app 装配注入；未注入时 overview 的租户/用户/消息统计为 0。
+	monitorStats MonitorStatsGateway
 }
 
 func New(repo *repository.Repository, cfg *config.Config, scheduler *JobScheduler) *Service {

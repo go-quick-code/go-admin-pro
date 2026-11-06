@@ -221,6 +221,28 @@ export function unbindMySocialUser(id: number) {
   return request.delete(`/system/social/my/${id}`) as Promise<any>
 }
 
+// ---------- 敏感词（issue #81） ----------
+// 词库为租户级资源：CRUD 与检测文本框（检测复用 query 权限码）。
+export function pageSensitiveWords(params: any) {
+  return request.get('/system/sensitive-word/page', { params }) as Promise<any>
+}
+export function createSensitiveWord(data: any) {
+  return request.post('/system/sensitive-word', data) as Promise<any>
+}
+export function updateSensitiveWord(data: any) {
+  return request.put('/system/sensitive-word', data) as Promise<any>
+}
+export function deleteSensitiveWord(id: number) {
+  return request.delete(`/system/sensitive-word/${id}`) as Promise<any>
+}
+// 检测文本：返回去重命中词（按首现位置排序）与打码文本。
+export function checkSensitiveWord(text: string) {
+  return request.post('/system/sensitive-word/check', { text }) as Promise<{
+    words: string[]
+    masked: string
+  }>
+}
+
 // ---------- 日志 ----------
 export function pageLoginLogs(params: any) {
   return request.get('/system/login-log/page', { params }) as Promise<any>

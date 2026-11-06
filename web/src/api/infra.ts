@@ -84,3 +84,13 @@ export function getDBTable(name: string) {
 export function exportDBDoc() {
   return request.get('/infra/db-doc/export', { responseType: 'blob' }) as Promise<any>
 }
+
+// ---------- 监控面板（issue #84，仅平台租户） ----------
+// 监控总览：应用/运行期/连接池/调度器/租户规模/近 24h 流量/消息统计。
+export function getMonitorOverview() {
+  return request.get('/infra/monitor/overview') as Promise<any>
+}
+// 按小时分桶聚合访问日志；hours 取值 1–168，后端越界收敛，缺省 24。
+export function getMonitorRequests(hours = 24) {
+  return request.get('/infra/monitor/requests', { params: { hours } }) as Promise<any>
+}

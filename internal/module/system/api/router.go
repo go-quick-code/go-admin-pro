@@ -145,6 +145,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	area.GET("/children", h.ListAreaChildren)
 	area.POST("/import", h.RequirePlatformTenant(), h.RequirePermission("system:area:import"), h.ImportAreas)
 
+	// 敏感词（issue #81，spec §5.6）：租户级词库 CRUD 与检测，
+	// 权限码 system:sensitive-word:*（菜单 112，按钮 1121–1123）。
+	sensitiveWord := rg.Group("/system/sensitive-word")
+	sensitiveWord.GET("/page", h.RequirePermission("system:sensitive-word:query"), h.PageSensitiveWords)
+	sensitiveWord.POST("/check", h.RequirePermission("system:sensitive-word:query"), h.CheckSensitiveWord)
+	sensitiveWord.POST("", h.RequirePermission("system:sensitive-word:create"), h.CreateSensitiveWord)
+	sensitiveWord.PUT("", h.RequirePermission("system:sensitive-word:update"), h.UpdateSensitiveWord)
+	sensitiveWord.DELETE("/:id", h.RequirePermission("system:sensitive-word:delete"), h.DeleteSensitiveWord)
+
 	// 登录日志
 	loginLog := rg.Group("/system/login-log")
 	loginLog.GET("/page", h.RequirePermission("system:login-log:query"), h.PageLoginLogs)

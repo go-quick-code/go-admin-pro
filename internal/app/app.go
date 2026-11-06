@@ -136,6 +136,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	socialSvc.RegisterSocialProvider(systemservice.NewDingTalkProvider())
 	socialSvc.RegisterSocialProvider(systemservice.NewWeComProvider())
 
+	// 敏感词（issue #81，spec §4.7）：租户级词库 CRUD/检测与按租户的匹配
+	// 缓存；同时经 sensitiveWordChecker 适配器注入 OA 公告与 CRM 跟进
+	// 的落库前检查（未注入不检查，集成测试可显式关闭）。
+	sensitiveSvc := systemservice.NewSensitiveWordService(sysRepo)
+
 	infraRepo := infrarepo.New(db)
 	// 定时任务按应用时区解释 cron 表达式（spec §4.10：每日 01:00 应用时区）。
 	scheduler := infraservice.NewJobScheduler(infraRepo, cfg.Location())
@@ -184,7 +189,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil
 	})
 
-	sysAPI := systemapi.New(sysSvc, socialSvc, cfg)
+	sysAPI := systemapi.New(sysSvc, socialSvc, sensitiveSvc, cfg)
 
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
 	crmRepo := crmrepo.New(db)
@@ -203,6 +208,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 作废合同不拦截。替换 v1 空实现（恒「无合同」，见
 	// crmservice.ContractChecker 接口注释与 pool_recycle.go）。
 	crmSvc.SetContractChecker(crmservice.NewContractChecker(crmRepo))
+	// 跟进内容敏感词检查（issue #81，spec §4.7.4）：创建/修改落库前检查，
+	// 命中 400 不落库。
+	crmSvc.SetSensitiveWordChecker(sensitiveWordChecker{svc: sensitiveSvc})
 	// 作废/删除合同的回款拦截（issue #18 接入 #16 预留守卫）：
 	// 合同存在未删除回款记录时禁止作废/删除（spec §4.5），替换 v1 空实现
 	//（接缝见 crmservice.VoidContractGuard 接口注释）。
@@ -274,6 +282,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	quotaAdapter.message = messageSvc
 	sysSvc.SetQuotaProvider(quotaAdapter)
 	messageSvc.SetQuotaGateway(quotaAdapter)
+	// 监控统计装配（issue #84，spec §4.10）：适配器组合 system（租户数/
+	// 用户数）与 message（发送成功/失败数），满足 infra 的
+	// MonitorStatsGateway 窄接口；infra 不直接读 system/message 表
+	//（ADR 模块边界，同 quotaGateway 模式）。message 装配在此完成，
+	// 适配器一次注入（值类型，注入后不得再改字段）。
+	monitorAdapter := monitorGateway{sys: sysSvc, message: messageSvc}
+	infraSvc.SetMonitorStatsGateway(monitorAdapter)
 	messageAPI := messageapi.New(messageSvc, sysAPI.RequirePermission)
 
 	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
@@ -295,6 +310,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 文档文件（issue #59）：归属行 oa_document_file + 文件本体 infra_file
 	//（biz_type=oa_document、biz_id=目录 ID）；下载经 OA 鉴权端点，不走公开直链。
 	oaSvc.SetDocumentFileStore(newDocumentFileStore(infraSvc))
+	// 公告标题/正文敏感词检查（issue #81，spec §4.7.4）：创建/修改落库前
+	// 检查，命中 400 不落库。
+	oaSvc.SetSensitiveWordChecker(sensitiveWordChecker{svc: sensitiveSvc})
 	// 通用 infra 文件端点（下载/删除/分页）的业务授权（PR #66 安全审计
 	// finding 1）：infra 只保留注册表，OA 四类附件在此按 biz_type 接线；
 	// 未注册的业务类型（如 CRM 合同附件）在通用端点上一律 404（fail-closed）。

@@ -94,6 +94,9 @@ type Service struct {
 	// documentFiles 是文档文件（oa_document_file）的存储依赖面（issue #59，
 	// biz_type=oa_document、biz_id=目录 ID）；与其他附件字段分开，避免合并覆盖。
 	documentFiles DocumentFileStore
+	// sensitive 是敏感词检查依赖面（issue #81，spec §4.7.4，由 internal/app
+	// 装配 system 实现；未注入时公告创建/修改跳过检查，见 sensitive_word.go）。
+	sensitive SensitiveWordChecker
 	// apiPrefix 是附件鉴权下载地址前缀（config.App.APIPrefix）。
 	apiPrefix string
 	// leaveDays 是请假天数取数接缝（issue #61 预留，#62 装配请假联动）；

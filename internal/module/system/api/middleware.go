@@ -21,11 +21,14 @@ import (
 type Handler struct {
 	svc    *service.Service
 	social *service.SocialService // 社交登录（issue #76），New 注入
-	cfg    *config.Config
+	// sensitive 是敏感词服务（issue #81），New 注入；测试传 nil 时只影响
+	// 敏感词端点（不经过这些端点的用例无感）。
+	sensitive *service.SensitiveWordService
+	cfg       *config.Config
 }
 
-func New(svc *service.Service, social *service.SocialService, cfg *config.Config) *Handler {
-	return &Handler{svc: svc, social: social, cfg: cfg}
+func New(svc *service.Service, social *service.SocialService, sensitive *service.SensitiveWordService, cfg *config.Config) *Handler {
+	return &Handler{svc: svc, social: social, sensitive: sensitive, cfg: cfg}
 }
 
 // ---------- 中间件 ----------

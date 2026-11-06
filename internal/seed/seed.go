@@ -178,6 +178,12 @@ func seedMenus(db *gorm.DB) error {
 		btn(1113, 111, "客户端删除", "system:social:delete", 3),
 		btn(1114, 111, "绑定用户查询", "system:social-user:query", 4),
 		btn(1115, 111, "绑定用户解绑", "system:social-user:delete", 5),
+		// 敏感词（issue #81，spec §7.2）：112 段。租户级词库管理 + 检测文本框；
+		// 按钮码 1121–1123（菜单 ID×10+n，grep 去重确认空闲）。
+		menu(112, 100, "敏感词", "sensitive-word", "system/sensitive-word/index", "system:sensitive-word:query", "Key", 12),
+		btn(1121, 112, "敏感词新增", "system:sensitive-word:create", 1),
+		btn(1122, 112, "敏感词修改", "system:sensitive-word:update", 2),
+		btn(1123, 112, "敏感词删除", "system:sensitive-word:delete", 3),
 
 		btn(1011, 101, "用户新增", "system:user:create", 1),
 		btn(1012, 101, "用户修改", "system:user:update", 2),
@@ -225,6 +231,10 @@ func seedMenus(db *gorm.DB) error {
 		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
 		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
 		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
+		// 监控面板（issue #84，spec §7.2）：206 段（grep 去重确认 206/2060 空闲）。
+		// overview/requests 共用 infra:monitor:query（spec §5.8 无其他权限码，
+		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		menu(206, 200, "监控面板", "monitor", "infra/monitor/index", "infra:monitor:query", "Monitor", 6),
 
 		btn(2011, 201, "文件上传", "infra:file:upload", 1),
 		btn(2012, 201, "文件删除", "infra:file:delete", 2),
