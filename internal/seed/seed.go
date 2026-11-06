@@ -6,6 +6,7 @@ import (
 
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -36,6 +37,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 		return err
 	}
 	if err := seedUsers(db); err != nil {
+		return err
+	}
+	if err := seedAttendanceDefaults(db); err != nil {
 		return err
 	}
 	if err := seedDicts(db); err != nil {
@@ -300,6 +304,16 @@ func seedMenus(db *gorm.DB) error {
 		btn(5293, 529, "请假删除", "oa:leave:delete", 3),
 		btn(5294, 529, "请假提交", "oa:leave:submit", 4),
 
+		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
+		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
+		// 530/531）。权限码按 spec §5/§7.2：
+		// 班次 oa:attendance:shift:manage、考勤组 oa:attendance:group:manage
+		//（码挂在菜单上，授予菜单即授予该域全部维护动作）；我的考勤为员工自助页，
+		// 登录即可用（权限码为空，与仪表盘同款；打卡动作以登录身份收口）。
+		menu(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 5),
+		menu(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 6),
+		menu(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 7),
+
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。
@@ -337,6 +351,48 @@ func seedMenus(db *gorm.DB) error {
 		return err
 	}
 	slog.Info("seed menus created", "count", len(menus))
+	return nil
+}
+
+// seedAttendanceDefaults 写入默认班次与默认考勤组（spec §7.3：默认班次
+// 09:00–18:00、宽限 5 分钟；默认考勤组绑定该班次）。仅当班次与考勤组都为空时
+// 写入——管理员删掉/改名后重复启动不复活，保持幂等。默认组不写组员：新用户
+// 仍需管理员按用户或部门物化入组（spec §4.10）。
+func seedAttendanceDefaults(db *gorm.DB) error {
+	var shiftCount, groupCount int64
+	if err := tenant.Skip(db).Model(&oamodel.AttendanceShift{}).Count(&shiftCount).Error; err != nil {
+		return err
+	}
+	if err := tenant.Skip(db).Model(&oamodel.AttendanceGroup{}).Count(&groupCount).Error; err != nil {
+		return err
+	}
+	if shiftCount > 0 || groupCount > 0 {
+		return nil
+	}
+	shift := &oamodel.AttendanceShift{
+		BaseEntity:   oamodel.BaseEntity{ID: 1},
+		TenantID:     1,
+		Name:         "标准班",
+		StartTime:    "09:00",
+		EndTime:      "18:00",
+		GraceMinutes: 5,
+		Status:       oamodel.AttendanceStatusEnabled,
+		Sort:         0,
+	}
+	if err := tenant.Skip(db).Create(shift).Error; err != nil {
+		return err
+	}
+	group := &oamodel.AttendanceGroup{
+		BaseEntity: oamodel.BaseEntity{ID: 1},
+		TenantID:   1,
+		Name:       "默认考勤组",
+		ShiftID:    shift.ID,
+		Status:     oamodel.AttendanceStatusEnabled,
+	}
+	if err := tenant.Skip(db).Create(group).Error; err != nil {
+		return err
+	}
+	slog.Info("seed attendance defaults created", "shift", shift.Name, "group", group.Name)
 	return nil
 }
 
