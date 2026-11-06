@@ -208,10 +208,13 @@ func seedMenus(db *gorm.DB) error {
 		menu(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),
 		menu(202, 200, "参数配置", "config", "infra/config/index", "infra:config:query", "SetUp", 2),
 		menu(203, 200, "定时任务", "job", "infra/job/index", "infra:job:query", "Timer", 3),
+		// 访问日志（issue #80，spec §7.2）：204 段，按钮码 2041（菜单 ID×10+n，
+		// grep 去重确认 204/2041 未被占用）。
+		menu(204, 200, "访问日志", "api-log", "infra/api-log/index", "infra:api-log:query", "Document", 4),
 		// 数据库文档（issue #83，spec §7.2）：205 段（grep 去重确认 205 空闲）。
 		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
 		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
-		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 4),
+		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
 
 		btn(2011, 201, "文件上传", "infra:file:upload", 1),
 		btn(2012, 201, "文件删除", "infra:file:delete", 2),
@@ -221,6 +224,8 @@ func seedMenus(db *gorm.DB) error {
 		btn(2031, 203, "任务新增", "infra:job:create", 1),
 		btn(2032, 203, "任务修改", "infra:job:update", 2),
 		btn(2033, 203, "任务删除", "infra:job:delete", 3),
+		// 批量删除与清空共用删除码（spec §5.5：删除/清空均为 infra:api-log:delete）。
+		btn(2041, 204, "日志删除", "infra:api-log:delete", 1),
 
 		menu(300, 0, "代码生成", "/codegen", "infra/codegen/index", "infra:codegen:query", "MagicStick", 30),
 		btn(3001, 300, "生成代码", "infra:codegen:generate", 1),
@@ -1010,6 +1015,19 @@ func seedJobs(db *gorm.DB) error {
 			RetryCount:     0,
 			Status:         inframodel.JobStatusRunning,
 			Remark:         "每 5 分钟扫描 15 分钟内开始的会议室预约，向预约人发送 meeting_reminder 通知（reminded_at 保证只发一次）；handler_param 可填 YYYY-MM-DD HH:mm:ss 固定现在",
+		},
+		// 访问日志清理（issue #80，spec §4.6.7）：每日 03:00 按保留期清理
+		// 跨租户的 infra_api_log（tenant.Skip）。保留期取配置
+		// access-log.retention-days（默认 30），handler_param 可填天数覆盖；
+		// 只删过期日志，按保留期例行清理，默认启用。
+		{
+			TenantID:       1,
+			Name:           "访问日志清理",
+			HandlerName:    "cleanAccessLogs",
+			CronExpression: "0 0 3 * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每天 03:00 清理超过保留期（access-log.retention-days，默认 30 天）的 API 访问日志（跨租户）；handler_param 可填天数覆盖保留期",
 		},
 	}
 	// Create 会把带 default 标签的零值列回写成数据库默认值（1 暂停），

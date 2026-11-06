@@ -71,8 +71,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 默认「标准版」套餐（issue #69）：全部启用目录/菜单，配额不限。
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
-	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
-	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
+	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
+	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）。
+	assertCount(t, db, &inframodel.Job{}, 5, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
 	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
@@ -88,6 +89,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertJobStatus(t, db, "recyclePoolCustomers", inframodel.JobStatusPaused)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -119,6 +121,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertDefaultExpenseDefinition(t, db)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")

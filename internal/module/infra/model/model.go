@@ -84,3 +84,26 @@ type JobLog struct {
 }
 
 func (JobLog) TableName() string { return "infra_job_log" }
+
+// APILog 是 API 访问日志（issue #80，spec §3.7/§4.6，ADR 0014）。
+//
+// append-only（同 message_log 的取舍）：不设 updated_at/deleted_at/creator/
+// updater，管理员删除/清空为硬删除。字段在采集时刻（请求完成后）定格，
+// 异步落库只补 id，避免批量写入延迟拉长 created_at。
+type APILog struct {
+	ID             int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	CreatedAt      time.Time `json:"createTime"`
+	TenantID       int64     `gorm:"not null;default:1" json:"tenantId"`
+	UserID         int64     `gorm:"not null;default:0" json:"userId"`
+	Username       string    `gorm:"size:64;not null;default:''" json:"username"`
+	RequestMethod  string    `gorm:"size:16;not null" json:"requestMethod"`
+	RequestPath    string    `gorm:"size:255;not null" json:"requestPath"`
+	RequestQuery   string    `gorm:"size:1024" json:"requestQuery"`
+	ResponseStatus int       `gorm:"not null;default:0" json:"responseStatus"`
+	DurationMs     int64     `gorm:"not null;default:0" json:"durationMs"`
+	ClientIP       string    `gorm:"size:64;not null;default:''" json:"clientIp"`
+	UserAgent      string    `gorm:"size:500" json:"userAgent"`
+	RequestID      string    `gorm:"size:64;not null;default:''" json:"requestId"`
+}
+
+func (APILog) TableName() string { return "infra_api_log" }
