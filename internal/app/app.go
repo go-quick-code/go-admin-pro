@@ -34,6 +34,7 @@ import (
 	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/push"
 	"github.com/go-quick-code/go-admin-pro/internal/router"
 	"github.com/go-quick-code/go-admin-pro/internal/seed"
 	"gorm.io/gorm"
@@ -58,6 +59,13 @@ type App struct {
 	// Social 是 system 模块的社交登录 Service（issue #76）：集成测试经该字段
 	// 注册 provider 替身并调整 state TTL；业务侧只经 HTTP 端点消费。
 	Social *systemservice.SocialService
+	// PushHub 是实时推送 hub（issue #78）：push.enabled=false 时为 nil。
+	// 集成测试经 Subscribers 观察断开清理；业务侧只经 HTTP 端点消费。
+	PushHub *push.Hub
+	// Notify 是 notify 模块的 Service（issue #78）：集成测试经该字段调用
+	// Create/CreateInTx——与生产装配的推送发布器是同一实例，保证「创建通知
+	// → 在线用户 1 秒内收到」走的是真实链路。
+	Notify *notifyservice.Service
 }
 
 // New 初始化数据库、模块与 HTTP 引擎。
@@ -186,7 +194,31 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 无业务依赖、不反向依赖业务模块；bpm/公告/会议室等生产者经 notifySvc 的
 	// CreateInTx seam 把通知写进各自的事务（同生共死），读取侧走 /notify/message/*。
 	notifySvc := notifyservice.New(notifyrepo.New(db))
-	notifyAPI := notifyapi.New(notifySvc, sysAPI.RequirePermission)
+
+	// 实时推送（issue #78，spec §4.5 / ADR 0013）：hub 按 (tenant, user) 订阅、
+	// 一次性票据 30s TTL、SSE 25s 心跳。hub 与票据都在进程内——单实例限制，
+	// 多实例需要外部 pub/sub（本轮不实现，见 ADR 0013）。推送关闭时路由不注册，
+	// 前端换票失败自动降级 60 秒轮询。
+	var pushHub *push.Hub
+	var pushHandler *notifyapi.PushHandler
+	if cfg.Push.Enabled {
+		pushHub = push.NewHub()
+		pushTickets := push.NewTicketManager(cfg.Push.TicketTTL)
+		// SSE 请求带 Bearer 时做第二身份比对（票据与 Bearer 必须同人，
+		// 防脚本拿 A 的票据配 B 的 token 跨租户订阅）；浏览器不带该头。
+		resolvePrincipal := func(token string) (int64, int64, bool) {
+			claims, err := sysSvc.ParseToken(token)
+			if err != nil || claims.TenantID <= 0 || claims.UserID <= 0 {
+				return 0, 0, false
+			}
+			return claims.TenantID, claims.UserID, true
+		}
+		pushHandler = notifyapi.NewPushHandler(pushHub, pushTickets, cfg.Push.Heartbeat, resolvePrincipal)
+		// *push.Hub 满足 notifyservice.PushPublisher（Publish 不阻塞、不报错）：
+		// Create 提交后发布；生产者在事务提交后经 PublishInputs 显式发布。
+		notifySvc.SetPushPublisher(pushHub)
+	}
+	notifyAPI := notifyapi.New(notifySvc, sysAPI.RequirePermission, pushHandler)
 
 	// message 模块（issue #72，spec §4.3 / ADR 0010）：渠道/模板是平台级配置，
 	// 发送日志走租户插件；provider 注册表在 New 内先注册内置 log provider，
@@ -300,7 +332,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc}, nil
 }
 
 // Close 释放资源。

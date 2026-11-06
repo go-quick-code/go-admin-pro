@@ -60,3 +60,15 @@ tenant:
 logger:
   level: info
   format: text
+
+push:
+  # 实时推送（issue #78，spec §4.5 / ADR 0013）：SSE 事件流 + 一次性票据。
+  # hub 与票据都在进程内——单实例限制：多实例部署时其他实例的连接收不到
+  # 事件（需要 Redis/NATS pub/sub，本轮不实现）。关闭时推送路由不注册，
+  # 前端自动降级 60 秒轮询。
+  enabled: true
+  # 一次性票据有效期（秒级时长）。票据由 Bearer 换取，绑定 tenant/user，
+  # 一次性消费，防止 JWT 进入 EventSource 的 URL。
+  ticket-ttl: 30s
+  # SSE 心跳间隔（注释行 : ping），保持中间层不 idle 断连。
+  heartbeat: 25s

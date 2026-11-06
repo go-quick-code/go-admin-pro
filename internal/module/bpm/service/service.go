@@ -49,6 +49,9 @@ type NotifyGateway interface {
 	// MarkBizReadInTx 在调用方事务内把用户名下指定业务实体的未读通知置已读
 	//（按 biz_type + biz_id 命中，索引 idx_notify_message_tenant_biz 已预留）。
 	MarkBizReadInTx(ctx context.Context, tx *gorm.DB, userID int64, bizType string, bizIDs []int64) error
+	// PublishInputs 在事务提交后发布实时推送（issue #78，spec §4.5.5）：
+	// best-effort，不阻塞不报错；推送关闭时为 no-op。
+	PublishInputs(ctx context.Context, inputs []notifyservice.Input)
 }
 
 // BusinessHandler 是业务回调接口（spec §4.4，ADR 0008）：实例通过/驳回/撤回

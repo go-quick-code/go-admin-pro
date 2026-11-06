@@ -38,6 +38,16 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 
 	api := engine.Group(cfg.App.APIPrefix)
 	sysAPI.RegisterPublic(api)
+	// 实时推送流（issue #78，spec §4.5.3 / §5.4）：凭票据的公开端点
+	//（GET /notify/push/sse|ws）。票据即凭证；浏览器 EventSource 不能带
+	// 请求头，公开路由是设计使然（ADR 0013），推送关闭时注册为 no-op。
+	notifyAPI.RegisterPublic(api)
+
+	// 换票端点（POST /notify/push/ticket）：只需登录，不挂操作日志——
+	// 每次建流都会换票，属读语义，避免写操作日志被连接心跳灌满。
+	streams := api.Group("")
+	streams.Use(sysAPI.Auth())
+	notifyAPI.RegisterStream(streams)
 
 	protected := api.Group("")
 	protected.Use(sysAPI.Auth(), sysAPI.OperateLog())

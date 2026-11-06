@@ -65,6 +65,9 @@ type SystemGateway interface {
 type NotifyGateway interface {
 	// CreateInTx 在调用方事务内批量投递（与 notify.Service.CreateInTx 同形）。
 	CreateInTx(ctx context.Context, tx *gorm.DB, inputs []notifyservice.Input) error
+	// PublishInputs 在事务提交后发布实时推送（issue #78，spec §4.5.5）：
+	// best-effort，不阻塞不报错；推送关闭时为 no-op。
+	PublishInputs(ctx context.Context, inputs []notifyservice.Input)
 }
 
 // Service 汇聚 oa 模块的业务能力。
