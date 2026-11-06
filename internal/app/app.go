@@ -181,6 +181,19 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	oaSvc.SetLeaveFileStore(leaveFileStore{infra: infraSvc})
 	bpmSvc.RegisterBusinessHandler(oaservice.LeaveApprovalBusinessType, oaSvc)
 
+	// 考勤日结果任务（issue #61，spec §4.10）：系统级 handler（跨租户迭代，
+	// tenant.Skip 列启用租户后逐租户派生），infra_job 种子默认行每天 01:00。
+	// handler_param 可填 YYYY-MM-DD 回填指定日期；留空取业务时区前一日。
+	scheduler.RegisterSystem(oaservice.AttendanceDailyResultHandlerName, func(ctx context.Context, param string) error {
+		summary, err := oaSvc.RunDailyAttendanceResult(ctx, param)
+		if err != nil {
+			return err
+		}
+		slog.Info("attendance daily result job finished",
+			"date", summary.Date, "tenants", summary.Tenants, "users", summary.Users)
+		return nil
+	})
+
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 

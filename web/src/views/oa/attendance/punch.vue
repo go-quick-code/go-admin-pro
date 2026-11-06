@@ -105,18 +105,72 @@
         @current-change="loadRecords"
       />
     </el-card>
+
+    <el-card shadow="never" class="results-card">
+      <div class="records-head">
+        <span class="records-title">我的考勤结果</span>
+        <el-date-picker
+          v-model="resultRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          :clearable="true"
+          @change="searchResults"
+        />
+      </div>
+      <el-table v-loading="resultsLoading" :data="results" border stripe size="small">
+        <el-table-column prop="workDate" label="日期" width="110" />
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="resultTagType(row.status)" size="small">{{ row.statusName }}</el-tag>
+            <el-tag v-if="row.corrected" type="warning" size="small" class="ml8">已校正</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="inTime" label="上班打卡" min-width="150">
+          <template #default="{ row }">{{ formatTime(row.inTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="outTime" label="下班打卡" min-width="150">
+          <template #default="{ row }">{{ formatTime(row.outTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="lateMinutes" label="迟到(分)" width="90" />
+        <el-table-column prop="earlyMinutes" label="早退(分)" width="90" />
+        <el-table-column label="缺卡" width="110">
+          <template #default="{ row }">
+            {{ row.missingIn ? '缺上班卡' : '' }}{{ row.missingIn && row.missingOut ? '、' : ''
+            }}{{ row.missingOut ? '缺下班卡' : '' }}{{ !row.missingIn && !row.missingOut ? '-' : '' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="leaveDays" label="请假(天)" width="90" />
+        <el-table-column prop="overrideRemark" label="校正备注" min-width="160">
+          <template #default="{ row }">{{ row.overrideRemark || '-' }}</template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        v-model:current-page="resultQuery.pageNo"
+        v-model:page-size="resultQuery.pageSize"
+        :total="resultTotal"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
+        class="pager"
+        @size-change="loadResults"
+        @current-change="loadResults"
+      />
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { formatTime } from '@/utils/format'
-import { getPunchToday, punchIn, punchOut, pageMyPunches } from '@/api/oa'
+import { formatTime, statusTagType } from '@/utils/format'
+import { getPunchToday, punchIn, punchOut, pageMyPunches, pageMyAttendanceResults } from '@/api/oa'
 
 // 我的考勤（issue #60，spec §4.10/§6）：Web 打卡卡片 + 当天打卡 + 我的打卡记录。
 // 员工自助页登录即可用（菜单 531，无权限码）；无启用考勤组时后端打卡返回
 // 明确 400，页面据 group 状态禁用按钮并提示。
+// 考勤结果列表（issue #61）：按日期区间查看派生结果（正常/迟到/早退/缺卡/休息）
+// 与管理员校正标记（校正优先，原始打卡仍完整展示）。
 
 interface PunchRow {
   id: number
@@ -145,6 +199,76 @@ const dateRange = ref<string[]>([])
 const records = ref<PunchRow[]>([])
 const total = ref(0)
 const recordsLoading = ref(false)
+
+// 考勤结果列表：默认查询当月，避免首屏扫全表。
+interface ResultRow {
+  id: number
+  workDate: string
+  status: number
+  statusName: string
+  corrected: boolean
+  inTime: string
+  outTime: string
+  lateMinutes: number
+  earlyMinutes: number
+  missingIn: boolean
+  missingOut: boolean
+  leaveDays: number
+  overrideRemark: string
+}
+
+const resultQuery = reactive({ pageNo: 1, pageSize: 10 })
+const resultRange = ref<string[]>(currentMonthRange())
+const results = ref<ResultRow[]>([])
+const resultTotal = ref(0)
+const resultsLoading = ref(false)
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function formatDay(d: Date) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function currentMonthRange() {
+  const now = new Date()
+  return [formatDay(new Date(now.getFullYear(), now.getMonth(), 1)), formatDay(now)]
+}
+
+// 结果状态标签色：正常成功、迟到/早退警告、迟到且早退/缺卡危险、休息信息、请假主色。
+function resultTagType(status: number) {
+  return statusTagType(status, {
+    0: 'success',
+    1: 'warning',
+    2: 'warning',
+    3: 'danger',
+    4: 'danger',
+    5: 'info',
+    6: 'primary',
+  })
+}
+
+async function loadResults() {
+  resultsLoading.value = true
+  try {
+    const data = await pageMyAttendanceResults({
+      pageNo: resultQuery.pageNo,
+      pageSize: resultQuery.pageSize,
+      startDate: resultRange.value?.[0] || '',
+      endDate: resultRange.value?.[1] || '',
+    })
+    results.value = data?.list || []
+    resultTotal.value = data?.total || 0
+  } finally {
+    resultsLoading.value = false
+  }
+}
+
+function searchResults() {
+  resultQuery.pageNo = 1
+  loadResults()
+}
 
 const punchable = computed(() => !!today.value.group && today.value.group.status === 0)
 
@@ -197,6 +321,7 @@ function searchRecords() {
 onMounted(() => {
   loadToday()
   loadRecords()
+  loadResults()
 })
 </script>
 
@@ -239,6 +364,10 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.results-card {
+  margin-top: 16px;
 }
 
 .records-title {
