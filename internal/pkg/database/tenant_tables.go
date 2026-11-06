@@ -77,7 +77,8 @@ var TenantTables = []string{
 	// （spec §4.6：跨租户业务 ID 一律 404，不泄露存在性）。目录树为租户级
 	// 共享资源；读权限按最近一个有显式 ACL 的祖先判定（递归 CTE 谓词见
 	// oa/repository/document.go，纯函数镜像见 oa/service/document_rule.go）。
-	// 文件表本工单只建 schema，写入由 #59 承接。
+	// 文件表读写（上传/列表/下载/软删）由 #59 承接，归属行按 (tenant_id,
+	// folder_id) 限定，跨租户/跨目录一律 404。
 	"oa_document_folder",
 	"oa_document_folder_acl",
 	"oa_document_file",

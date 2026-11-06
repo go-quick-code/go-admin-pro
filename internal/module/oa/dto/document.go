@@ -6,8 +6,16 @@
 //   - 改名：仅 name/sort（parentId 不可变，不做跨目录移动）；
 //   - ACL 设置：entries 整体替换；顶层目录不允许清空（400）；
 //   - ACL 视图：own 为目录自身显式条目（编辑回显），effective 为最近祖先的
-//     有效条目（含来源目录），sourceFolderId=0 表示链上无 ACL。
+//     有效条目（含来源目录），sourceFolderId=0 表示链上无 ACL；
+//   - 文件（issue #59）：归属行 oa_document_file + 鉴权下载地址，不暴露
+//     静态公开直链。
 package dto
+
+import (
+	"io"
+
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
+)
 
 // DocumentACLTargetReq 是一条 ACL 主体（targetType 0 全员 / 1 部门 /
 // 2 角色 / 3 用户；全员固定 targetId=0）。
@@ -81,4 +89,40 @@ type DocumentFolderACLResp struct {
 	SourceFolderName string            `json:"sourceFolderName"`
 	Entries          []DocumentACLItem `json:"entries"`
 	EffectiveEntries []DocumentACLItem `json:"effectiveEntries"`
+}
+
+// DocumentFilePageReq 是目录内文件分页请求（GET /oa/document/file/page）：
+// folderId 必填；目录读权限由服务层校验（不可读 404）。
+type DocumentFilePageReq struct {
+	web.PageQuery
+	FolderID int64 `form:"folderId" binding:"required"`
+}
+
+// DocumentFileItem 是目录内文件的展示视图（issue #59，
+// GET /oa/document/file/page、POST /oa/document/file/upload）：
+//   - ID 是 oa_document_file.id（下载/删除路径上的 fileId）；
+//   - FileID 是 infra_file.id（文件本体，仅展示/排障，前端不把它当下载入口）；
+//   - URL 是鉴权下载地址（GET /oa/document/file/:id/download），不暴露
+//     静态公开直链；
+//   - UploaderName 由 system 网关注入（上传人昵称，缺失时为空）。
+type DocumentFileItem struct {
+	ID           int64  `json:"id"`
+	FolderID     int64  `json:"folderId"`
+	FileID       int64  `json:"fileId"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	Type         string `json:"type"`
+	UploaderID   int64  `json:"uploaderId"`
+	UploaderName string `json:"uploaderName"`
+	CreateTime   string `json:"createTime"`
+	URL          string `json:"url"`
+}
+
+// DocumentFileContent 是文件下载内容（已通过目录读权限与文件归属校验）。
+// Reader 由调用方负责关闭（API 层流式写出后关闭）。
+type DocumentFileContent struct {
+	Name        string
+	ContentType string
+	Size        int64
+	Reader      io.ReadCloser
 }

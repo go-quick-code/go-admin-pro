@@ -6,8 +6,8 @@
 // ACL 主体四类：0 全员 / 1 部门（含子树）/ 2 角色 / 3 用户；全员固定
 // target_id=0。
 //
-// 文件本体存 infra_file（file_id），本表只存归属与展示字段；写入（上传/
-// 下载/删除）由 #59 承接，本工单只建 schema 与模型。
+// 文件本体存 infra_file（file_id），本表只存归属与展示字段；上传/列表/
+// 下载/软删除的编排在 service/document_file.go（issue #59）。
 package model
 
 import "time"
@@ -62,7 +62,8 @@ type DocumentFolderACL struct {
 func (DocumentFolderACL) TableName() string { return "oa_document_folder_acl" }
 
 // DocumentFile 是目录内文件的归属与展示行（spec §3.8）。文件本体存
-// infra_file（file_id）；本工单只建 schema 与模型，写入由 #59 承接。
+// infra_file（file_id）；删除为软删除（BaseEntity.DeletedAt），软删行不再
+// 参与列表/下载/目录删除计数（issue #59）。
 type DocumentFile struct {
 	BaseEntity
 	TenantID int64 `gorm:"not null;default:1" json:"tenantId"`

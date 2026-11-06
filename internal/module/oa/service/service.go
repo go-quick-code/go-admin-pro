@@ -85,6 +85,9 @@ type Service struct {
 	// announcementFiles 是公告附件的存储依赖面（由 internal/app 装配 infra
 	// 适配器，issue #48）；与请假附件字段分开，避免同一工单合并时互相覆盖。
 	announcementFiles AnnouncementFileStore
+	// documentFiles 是文档文件（oa_document_file）的存储依赖面（issue #59，
+	// biz_type=oa_document、biz_id=目录 ID）；与其他附件字段分开，避免合并覆盖。
+	documentFiles DocumentFileStore
 	// apiPrefix 是附件鉴权下载地址前缀（config.App.APIPrefix）。
 	apiPrefix string
 	// leaveDays 是请假天数取数接缝（issue #61 预留，#62 装配请假联动）；

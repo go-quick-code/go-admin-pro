@@ -233,6 +233,59 @@ func TestDocumentFolderCanManage(t *testing.T) {
 	}
 }
 
+// TestDocumentFileAccessGuards 锁定文件上传/删除的守卫语义（issue #59）：
+// 上传与删除复用目录管理权（owner 或 oa:document:manage），列表/下载复用
+// 目录读可见性；未登录/非 owner 普通用户一律不通过。
+func TestDocumentFileAccessGuards(t *testing.T) {
+	folder := docFolder(7, 0, 10)
+	effective := EffectiveDocumentACL{
+		FolderID: folder.ID,
+		OwnerID:  folder.OwnerID,
+		SourceID: folder.ID,
+		Explicit: true,
+		Entries:  []DocumentACLTarget{docACL(model.DocumentACLTargetUser, 42)},
+	}
+	cases := []struct {
+		name        string
+		viewer      DocumentViewer
+		wantManage  bool
+		wantVisible bool
+	}{
+		{name: "owner 可上传/删除且可读", viewer: docViewer(10, nil, nil, false), wantManage: true, wantVisible: true},
+		{name: "管理员可上传/删除且可读", viewer: docViewer(99, nil, nil, true), wantManage: true, wantVisible: true},
+		{name: "ACL 命中用户只读不可管理", viewer: docViewer(42, nil, nil, false), wantManage: false, wantVisible: true},
+		{name: "其他用户不可读不可管理", viewer: docViewer(99, nil, nil, false), wantManage: false, wantVisible: false},
+		{name: "未登录不可读不可管理", viewer: DocumentViewerOf(0, nil, nil, true), wantManage: false, wantVisible: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DocumentFolderCanManage(folder, tc.viewer); got != tc.wantManage {
+				t.Fatalf("上传/删除管理权 = %v，期望 %v", got, tc.wantManage)
+			}
+			if got := DocumentFolderVisible(tc.viewer, folder, effective); got != tc.wantVisible {
+				t.Fatalf("文件列表/下载读权限 = %v，期望 %v", got, tc.wantVisible)
+			}
+		})
+	}
+}
+
+// TestValidateDocumentFileName 锁定文件展示名长度/空白校验（issue #59）。
+func TestValidateDocumentFileName(t *testing.T) {
+	if got, err := ValidateDocumentFileName("  季度报告.pdf  "); err != nil || got != "季度报告.pdf" {
+		t.Fatalf("去空白失败: got=%q err=%v", got, err)
+	}
+	if _, err := ValidateDocumentFileName("   "); err == nil || !isBadRequest(err) {
+		t.Fatalf("空文件名应 400，得到 %v", err)
+	}
+	long := make([]rune, MaxDocumentFileNameLen+1)
+	for i := range long {
+		long[i] = '文'
+	}
+	if _, err := ValidateDocumentFileName(string(long)); err == nil || !isBadRequest(err) {
+		t.Fatalf("超长文件名应 400，得到 %v", err)
+	}
+}
+
 // TestNormalizeDocumentACLTargets 锁定 ACL 入参归一化与校验。
 func TestNormalizeDocumentACLTargets(t *testing.T) {
 	got, err := NormalizeDocumentACLTargets([]DocumentACLTarget{

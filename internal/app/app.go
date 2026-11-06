@@ -171,6 +171,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// （issue #53）都按 app.timezone 取「今天」。
 	oaSvc.SetLocation(cfg.Location())
 	oaSvc.SetAnnouncementFileStore(announcementFileStore{infra: infraSvc})
+	// 文档文件（issue #59）：归属行 oa_document_file + 文件本体 infra_file
+	//（biz_type=oa_document、biz_id=目录 ID）；下载经 OA 鉴权端点，不走公开直链。
+	oaSvc.SetDocumentFileStore(documentFileStore{infra: infraSvc})
 	oaAPI := oaapi.New(oaSvc, sysAPI.RequirePermission)
 
 	// bpm 模块（issue #44 定义管理，#46 运行引擎）：BusinessHandler 注册表在
