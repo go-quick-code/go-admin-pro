@@ -9,7 +9,9 @@
           :extra-query="{ tab: 'todo' }"
           :show-toolbar="false"
           :show-actions="false"
+          :row-class-name="taskRowClassName"
           title=""
+          @loaded="onTodoLoaded"
         >
           <template #cell-actions="{ row }">
             <el-button link type="success" @click.stop="openApprove(row)">通过</el-button>
@@ -174,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { useUserStore } from '@/stores/user'
@@ -211,6 +213,30 @@ function reloadCurrent() {
   if (tab.value === 'todo') todoTableRef.value?.reload()
   if (tab.value === 'done') doneTableRef.value?.reload()
   if (tab.value === 'initiated') initiatedTableRef.value?.reload()
+}
+
+// 通知深链定位（PR #66 审查 P3-1）：bpm_todo 通知的 routeParams 带
+// {"taskId":N}，待办列表加载完成后高亮并滚动到该行。只高亮首屏命中行
+//（任务通常刚到，位于第一页；未命中时不打扰用户）。
+const highlightTaskId = ref(0)
+const highlightedOnce = ref(false)
+
+function taskRowClassName({ row }: { row: any }): string {
+  return highlightTaskId.value > 0 && Number(row?.id) === highlightTaskId.value
+    ? 'task-row-highlight'
+    : ''
+}
+
+function onTodoLoaded(rows: any[]) {
+  if (highlightedOnce.value || highlightTaskId.value <= 0 || !Array.isArray(rows)) return
+  const hit = rows.some((row) => Number(row?.id) === highlightTaskId.value)
+  if (!hit) return
+  highlightedOnce.value = true
+  nextTick(() => {
+    document
+      .querySelector('.task-row-highlight')
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
 }
 
 const todoApi = { page: (params: any) => pageTasks({ ...params, tab: 'todo' }) }
@@ -420,13 +446,24 @@ async function doWithdraw(row: any) {
 }
 
 onMounted(() => {
-  // 路由 query 支持（通知跳转）：/bpm/task?tab=initiated
-  const q = router.currentRoute.value.query.tab
+  // 路由 query 支持（通知跳转）：/bpm/task?tab=initiated；
+  // bpm_todo 通知深链 /bpm/task?taskId=N 定位到待办 tab 并高亮该任务。
+  const route = router.currentRoute.value
+  const q = route.query.tab
   if (q === 'done' || q === 'initiated') tab.value = q as string
+  const taskId = Number(route.query.taskId)
+  if (Number.isInteger(taskId) && taskId > 0) {
+    tab.value = 'todo'
+    highlightTaskId.value = taskId
+  }
 })
 </script>
 
 <style scoped>
+/* 通知深链命中的待办行高亮（el-table 的行 class 由 row-class-name 注入）。 */
+:deep(.task-row-highlight > td.el-table__cell) {
+  background-color: var(--el-color-warning-light-7, #fdf6ec) !important;
+}
 .detail-title {
   margin: 0 0 8px;
 }

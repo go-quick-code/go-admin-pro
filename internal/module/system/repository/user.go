@@ -130,6 +130,21 @@ func (r *Repository) ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) 
 	return ids, err
 }
 
+// ListActiveUserIDsByDeptIDs 返回部门集合内（dept_id IN）的**启用**用户 ID
+// 集合。公告发布按部门受众展开收件人用（PR #66 审查 P3-3）：与角色受众
+// 展开的启用口径一致，停用用户不再投递。租户插件自动限定当前租户。
+func (r *Repository) ListActiveUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
+	if len(deptIDs) == 0 {
+		return nil, nil
+	}
+	var ids []int64
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("dept_id IN ?", deptIDs).
+		Where("status = ?", model.StatusEnable).
+		Order("id ASC").Pluck("id", &ids).Error
+	return ids, err
+}
+
 func (r *Repository) CreateUser(ctx context.Context, u *model.User) error {
 	return r.db.WithContext(ctx).Create(u).Error
 }

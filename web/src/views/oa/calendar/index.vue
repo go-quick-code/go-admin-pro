@@ -132,7 +132,7 @@
         <el-tag size="small" type="warning" effect="plain">部门</el-tag>
         <el-tag size="small" type="success" effect="plain">公开</el-tag>
         <span class="legend-hint">
-          私有仅创建人可见；部门按创建时部门快照及子树可见；公开全租户可见（创建需 oa:calendar:public）。
+          私有仅创建人可见；部门按创建时部门快照对本部门及子部门可见；公开全租户可见（创建需 oa:calendar:public）。
         </span>
       </div>
     </el-card>

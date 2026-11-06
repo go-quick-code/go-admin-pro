@@ -6,12 +6,15 @@
 //
 //	status = 0 AND (
 //	  creator_id = 查看者
-//	  OR (visibility = 1 AND dept_id IN 查看者部门子树)
+//	  OR (visibility = 1 AND dept_id IN 查看者部门祖先链)
 //	  OR visibility = 2
 //	)
 //
-// 与 service.CalendarViewer.Permits 的内存语义逐条对应（纯函数表驱动锁定）。
-// 租户条件由插件自动追加；跨租户业务 ID 一律未命中（service 层表现为 404）。
+// 部门日程对创建者部门及其子树可见；查看者侧等价表达是「日程 dept_id 属于
+// 查看者部门的祖先链（含自身）」——子部门用户能看到祖先部门创建的日程，
+// 祖先部门用户看不到子部门创建的日程。与 service.CalendarViewer.Permits 的
+// 内存语义逐条对应（纯函数表驱动锁定）。租户条件由插件自动追加；跨租户业务
+// ID 一律未命中（service 层表现为 404）。
 package repository
 
 import (
@@ -29,7 +32,7 @@ import (
 //   - StartTime/EndTime 可选，区间语义为「日程与查询窗口相交」：
 //     end_time > start AND start_time < end；
 //   - Keyword 可选，标题模糊匹配（LIKE，转义通配符）；
-//   - UserID/DeptIDs 是查看者上下文（部门子树含自身；空集合时只可能命中
+//   - UserID/DeptIDs 是查看者上下文（部门祖先链含自身；空集合时只可能命中
 //     本人与公开日程）；
 //   - Limit 结果上限（<=0 时取 500）。
 type CalendarListFilter struct {

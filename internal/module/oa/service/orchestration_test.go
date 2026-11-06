@@ -50,6 +50,12 @@ func (f *fakeSystemGateway) ListUserIDsByDeptIDs(_ context.Context, deptIDs []in
 	return ids, nil
 }
 
+// ListActiveUserIDsByDeptIDs 与 ListUserIDsByDeptIDs 同源（测试替身不区分
+// 启用状态；公告发布的停用过滤由带真库的集成用例覆盖，PR #66 审查 P3-3）。
+func (f *fakeSystemGateway) ListActiveUserIDsByDeptIDs(_ context.Context, deptIDs []int64) ([]int64, error) {
+	return f.ListUserIDsByDeptIDs(context.Background(), deptIDs)
+}
+
 // ListSimpleUsers 返回空启用用户集（可见范围编排不消费，issue #60 仅为满足接口）。
 func (f *fakeSystemGateway) ListSimpleUsers(_ context.Context) ([]systemmodel.SimpleUser, error) {
 	return nil, nil

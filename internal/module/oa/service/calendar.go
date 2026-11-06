@@ -6,7 +6,7 @@
 //   - 编辑：仅创建人、仅有效日程；可见性改为公开同样需要 oa:calendar:public；
 //   - 取消：软取消（status=1），仅创建人；取消后列表/详情一律不再展示；
 //   - 列表/详情：按三条可见性谓词读取（私有仅创建人、部门按创建时快照及
-//     子树、公开全租户），范围外/跨租户/已取消一律 404，不泄露存在性。
+//     查看者祖先链、公开全租户），范围外/跨租户/已取消一律 404，不泄露存在性。
 //
 // 判定规则全部在 calendar_rule.go 的纯函数里（CalendarViewer.Permits 与
 // repository 的单条 SQL 谓词语义一致）；本文件只做取数编排与落库。
@@ -76,7 +76,8 @@ func (s *Service) CreateCalendarEvent(ctx context.Context, req *dto.CalendarEven
 
 // UpdateCalendarEvent 编辑日程（PUT /oa/calendar/event）：仅创建人、仅有效
 // 日程；dept_id 保留创建时快照（用户调部门后历史日程仍归属原部门）。
-// 可见性改为公开同样要求 oa:calendar:public。
+// 可见性改为公开同样要求 oa:calendar:public；source=room_booking 的日程
+// 由会议室预约联动维护，日历接口编辑返回 409（PR #66 审查 P2-5）。
 func (s *Service) UpdateCalendarEvent(ctx context.Context, req *dto.CalendarEventSaveReq) (*dto.CalendarEventItem, error) {
 	if req.ID <= 0 {
 		return nil, xerr.BadRequest("日程 ID 不能为空")
@@ -120,6 +121,10 @@ func (s *Service) UpdateCalendarEvent(ctx context.Context, req *dto.CalendarEven
 		if row == nil || row.CreatorID != userID || row.Status != model.CalendarEventStatusActive {
 			return xerr.NotFound("日程不存在")
 		}
+		// 会议室预约生成的日程只允许经预约取消路径联动修改（P2-5）。
+		if err := ValidateCalendarEventMutable(*row); err != nil {
+			return err
+		}
 		row.Title = title
 		row.Description = description
 		row.StartTime = start
@@ -143,6 +148,7 @@ func (s *Service) UpdateCalendarEvent(ctx context.Context, req *dto.CalendarEven
 // CancelCalendarEvent 取消日程（DELETE/POST /oa/calendar/event/{id}/cancel）：
 // 仅创建人、仅有效日程；软取消写 status=1，取消后列表/详情不再展示
 // （spec §4.11/任务验收：软取消）。重复取消按 404 处理（已不可见）。
+// source=room_booking 的日程只能经 CancelRoomBooking 联动取消，本接口 409。
 func (s *Service) CancelCalendarEvent(ctx context.Context, id int64) error {
 	userID := CurrentUserID(ctx)
 	if userID <= 0 {
@@ -155,6 +161,10 @@ func (s *Service) CancelCalendarEvent(ctx context.Context, id int64) error {
 		}
 		if row == nil || row.CreatorID != userID || row.Status != model.CalendarEventStatusActive {
 			return xerr.NotFound("日程不存在")
+		}
+		// 会议室预约生成的日程由 CancelRoomBooking 联动取消（P2-5）。
+		if err := ValidateCalendarEventMutable(*row); err != nil {
+			return err
 		}
 		row.Status = model.CalendarEventStatusCancelled
 		return tx.SaveCalendarEvent(ctx, row)
@@ -218,9 +228,11 @@ func (s *Service) GetCalendarEvent(ctx context.Context, id int64) (*dto.Calendar
 
 // ---------- 内部：取数与映射 ----------
 
-// calendarViewer 组装查看者可见性上下文：本人部门 + 部门子树（含自身）。
-// 部门取数走 SystemGateway（租户插件已限定本租户）；无部门时子树为空，
-// 查看者仍能看到本人的私有/部门日程与公开日程。
+// calendarViewer 组装查看者可见性上下文：本人部门及其**祖先链**（含自身）。
+// 部门日程的语义是「对创建者部门及其子树可见」（spec §4.11），对查看者而言
+// 即 event.dept_id ∈ 查看者部门的祖先链：子部门用户能看到祖先部门创建的日程，
+// 祖先部门用户看不到子部门创建的日程。部门取数走 SystemGateway（租户插件已
+// 限定本租户）；无部门时祖先链为空，查看者仍能看到本人的私有/部门日程与公开日程。
 func (s *Service) calendarViewer(ctx context.Context) (CalendarViewer, error) {
 	userID := CurrentUserID(ctx)
 	if userID <= 0 {
@@ -230,14 +242,17 @@ func (s *Service) calendarViewer(ctx context.Context) (CalendarViewer, error) {
 	if err != nil {
 		return CalendarViewer{}, err
 	}
-	var subtree []int64
-	if ok && deptID > 0 {
-		subtree, err = s.sys.DeptWithChildren(ctx, deptID)
+	// 向上构造祖先链（含自身，最多 64 层防环），与公告受众判定同源。
+	var ancestors []int64
+	for depth := 0; ok && deptID > 0 && depth < 64; depth++ {
+		ancestors = append(ancestors, deptID)
+		parent, has, err := s.sys.DeptParentID(ctx, deptID)
 		if err != nil {
 			return CalendarViewer{}, err
 		}
+		deptID, ok = parent, has
 	}
-	return CalendarViewerOf(userID, deptID, subtree), nil
+	return CalendarViewerOf(userID, 0, ancestors), nil
 }
 
 // calendarCreatorDeptID 返回创建人当前部门（用于创建时快照）；无部门返回 0。

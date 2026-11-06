@@ -58,14 +58,33 @@ func (s *Service) RecomputeUserDate(ctx context.Context, userID int64, date stri
 }
 
 // RecomputeUserRange 按用户 + 日期范围重算（管理端手工重算，spec §4.10）：
-// 含两端，最多 MaxAttendanceResultRangeDays 天；返回写入行数。
+// 含两端，最多 MaxAttendanceResultRangeDays 天；返回写入行数。可见范围按
+// §4.6（本人 / 部门负责人子树 / oa:attendance:manage 全租户），范围外 404。
 func (s *Service) RecomputeUserRange(ctx context.Context, req *dto.AttendanceRecomputeReq) (int, error) {
+	return s.recomputeUserRange(ctx, req, true)
+}
+
+// recomputeUserRange 是重算的公共实现；enforceVisibility=false 供系统触发的
+// 联动路径使用（请假通过/取消后的考勤重算：动作本人/审批人未必持有考勤
+// 可见范围，重算对象由请假单本身限定，PR #66 审查 P2-4）。
+func (s *Service) recomputeUserRange(ctx context.Context, req *dto.AttendanceRecomputeReq, enforceVisibility bool) (int, error) {
 	if req == nil || req.UserID <= 0 {
 		return 0, xerr.BadRequest("请选择要重算的用户")
 	}
 	startKey, endKey, err := normalizeResultRange(req.StartDate, req.EndDate)
 	if err != nil {
 		return 0, err
+	}
+	if enforceVisibility {
+		// 可见范围（PR #66 审查 P2-4）：手工重算与结果列表/校正同一口径，
+		// 本人或管辖子树之外的用户一律 404，不泄露存在性。
+		scope, err := s.VisibilityScopeOf(ctx, "attendance")
+		if err != nil {
+			return 0, err
+		}
+		if !scope.Permits(req.UserID) {
+			return 0, xerr.NotFound("用户不存在")
+		}
 	}
 	// 用户必须存在于当前租户（跨租户/已删 404，不泄露存在性）：昵称映射只含
 	// 本租户用户，缺席即不存在。未入组用户仍允许重算（先补算、后补建组）。

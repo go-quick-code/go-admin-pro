@@ -32,10 +32,10 @@ func TestCalendarViewerPermits(t *testing.T) {
 		deptA     = int64(102)
 		deptB     = int64(103)
 	)
-	// 查看者：用户 22，部门 102 的子树 = {101, 102}。
-	viewer := CalendarViewerOf(otherID, deptA, []int64{101, 102})
-	// 创建者视角：用户 11，部门 103（后来调岗），子树 = {103}。
-	creatorMoved := CalendarViewerOf(creatorID, deptB, []int64{103})
+	// 查看者：用户 22，部门 102，部门祖先链 = {100, 102}。
+	viewer := CalendarViewerOf(otherID, deptA, []int64{100, 102})
+	// 创建者视角：用户 11，部门 103（后来调岗），祖先链 = {100, 103}。
+	creatorMoved := CalendarViewerOf(creatorID, deptB, []int64{100, 103})
 
 	tests := []struct {
 		name  string
@@ -53,12 +53,17 @@ func TestCalendarViewerPermits(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "部门_快照部门子树内可见",
+			name:  "部门_本部门快照可见",
 			event: calendarTestEvent(creatorID, model.CalendarVisibilityDept, deptA, model.CalendarEventStatusActive),
 			want:  true,
 		},
 		{
-			name:  "部门_快照部门子树外不可见",
+			name:  "部门_祖先部门快照可见",
+			event: calendarTestEvent(creatorID, model.CalendarVisibilityDept, 100, model.CalendarEventStatusActive),
+			want:  true,
+		},
+		{
+			name:  "部门_兄弟部门快照不可见",
 			event: calendarTestEvent(creatorID, model.CalendarVisibilityDept, deptB, model.CalendarEventStatusActive),
 			want:  false,
 		},
@@ -86,7 +91,7 @@ func TestCalendarViewerPermits(t *testing.T) {
 	if !creatorMoved.Permits(calendarTestEvent(creatorID, model.CalendarVisibilityDept, deptA, model.CalendarEventStatusActive)) {
 		t.Fatalf("创建人调岗后应仍能看到自己创建的部门日程（creator_id 命中）")
 	}
-	newDeptViewer := CalendarViewerOf(otherID, deptB, []int64{103})
+	newDeptViewer := CalendarViewerOf(otherID, deptB, []int64{100, 103})
 	if newDeptViewer.Permits(calendarTestEvent(creatorID, model.CalendarVisibilityDept, deptA, model.CalendarEventStatusActive)) {
 		t.Fatalf("创建者新部门的用户不应看到按原部门快照（102）归属的日程")
 	}
@@ -115,6 +120,48 @@ func TestCalendarViewerPermits(t *testing.T) {
 	// 未知可见性 fail-closed。
 	if viewer.Permits(calendarTestEvent(creatorID, 9, deptA, model.CalendarEventStatusActive)) {
 		t.Fatalf("未知可见性应 fail-closed")
+	}
+}
+
+// TestCalendarViewerPermitsDeptAncestorChain 种子部门树 100 总公司 →
+// 101/102/103 的部门日程方向（PR #66 审查 P1-1）：日程对创建者部门及子树
+// 可见，查看者侧按祖先链匹配。
+func TestCalendarViewerPermitsDeptAncestorChain(t *testing.T) {
+	const creatorID = int64(11)
+	deptEvent := func(deptID int64) model.CalendarEvent {
+		return calendarTestEvent(creatorID, model.CalendarVisibilityDept, deptID, model.CalendarEventStatusActive)
+	}
+	// 查看者 → 其部门祖先链（含自身）。
+	viewers := map[string]CalendarViewer{
+		"100 总公司": CalendarViewerOf(1, 0, []int64{100}),
+		"101 研发部": CalendarViewerOf(2, 0, []int64{100, 101}),
+		"102 市场部": CalendarViewerOf(3, 0, []int64{100, 102}),
+		"103 财务部": CalendarViewerOf(4, 0, []int64{100, 103}),
+		"101 子部门": CalendarViewerOf(5, 0, []int64{100, 101, 104}),
+	}
+	cases := []struct {
+		name        string
+		viewer      string
+		eventDeptID int64
+		want        bool
+	}{
+		{"101 日程_101 可见", "101 研发部", 101, true},
+		{"101 日程_101 子部门可见", "101 子部门", 101, true},
+		{"101 日程_102 不可见", "102 市场部", 101, false},
+		{"101 日程_103 不可见", "103 财务部", 101, false},
+		{"101 日程_100 祖先不可见", "100 总公司", 101, false},
+		{"100 日程_100 可见", "100 总公司", 100, true},
+		{"100 日程_101 可见", "101 研发部", 100, true},
+		{"100 日程_102 可见", "102 市场部", 100, true},
+		{"100 日程_103 可见", "103 财务部", 100, true},
+		{"102 日程_101 子部门不可见", "101 子部门", 102, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := viewers[tc.viewer].Permits(deptEvent(tc.eventDeptID)); got != tc.want {
+				t.Fatalf("%s.Permits(dept=%d) = %v，期望 %v", tc.viewer, tc.eventDeptID, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -150,6 +197,21 @@ func TestResolveCalendarDeptSnapshot(t *testing.T) {
 	existing := &model.CalendarEvent{DeptID: 102}
 	if got := ResolveCalendarDeptSnapshot(existing, 103); got != 102 {
 		t.Fatalf("编辑后快照 = %d，期望保留 102（创建者已调部门 103）", got)
+	}
+}
+
+// TestValidateCalendarEventMutable 会议室预约生成的日程不得经日历接口
+// 编辑/取消（PR #66 审查 P2-5）：手动日程放行，预约来源 409。
+func TestValidateCalendarEventMutable(t *testing.T) {
+	manual := calendarTestEvent(1, model.CalendarVisibilityDept, 101, model.CalendarEventStatusActive)
+	if err := ValidateCalendarEventMutable(manual); err != nil {
+		t.Fatalf("手动日程应可编辑/取消：%v", err)
+	}
+	booking := manual
+	booking.Source = model.CalendarSourceRoomBooking
+	err := ValidateCalendarEventMutable(booking)
+	if e, ok := xerr.As(err); !ok || e.Status != 409 {
+		t.Fatalf("预约生成的日程应 409，得到 %v", err)
 	}
 }
 

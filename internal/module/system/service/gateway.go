@@ -85,6 +85,13 @@ func (s *Service) ListUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]
 	return s.repo.ListUserIDsByDeptIDs(ctx, deptIDs)
 }
 
+// ListActiveUserIDsByDeptIDs 返回部门集合内的启用用户 ID 集合。
+// 公告发布按部门受众展开收件人用（PR #66 审查 P3-3）：停用用户不投递，
+// 与角色受众展开（ListActiveUserIDsByRole）的启用口径一致。
+func (s *Service) ListActiveUserIDsByDeptIDs(ctx context.Context, deptIDs []int64) ([]int64, error) {
+	return s.repo.ListActiveUserIDsByDeptIDs(ctx, deptIDs)
+}
+
 // ListActiveUserIDsByRole 返回持有指定角色且自身启用的用户 ID 集合。
 // bpm 审批人候选池解析用（issue #46，spec #42 §4.2）：角色与用户都启用，
 // 停用用户不进候选池。

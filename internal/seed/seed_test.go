@@ -56,10 +56,11 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.Dept{}, 4, "部门")
 	assertCount(t, db, &sysmodel.Role{}, 2, "角色")
 	assertCount(t, db, &sysmodel.Post{}, 2, "岗位")
-	// 内置普通角色只授基础菜单（spec §7.3，issue #64 review）：
-	//   - 请假/报销查询码（5297/5236）与通知查询（5123）必须授予；
+	// 内置普通角色只授基础菜单（spec §7.3，issue #64 review / PR #66 review）：
+	//   - 待办菜单 512 与办理按钮 5121（部门负责人打开 /bpm/task 不再 403）、
+	//     请假/报销查询码（5297/5236）与通知查询（5123）必须授予；
 	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
-	assertRoleMenus(t, db, 2, []int64{5297, 5236, 5123}, true, "普通角色")
+	assertRoleMenus(t, db, 2, []int64{512, 5121, 5297, 5236, 5123}, true, "普通角色")
 	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
 	assertCount(t, db, &sysmodel.DictType{}, 4, "字典类型")
 	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。

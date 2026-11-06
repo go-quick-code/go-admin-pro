@@ -267,7 +267,7 @@ func TestIntegrationRoomBookingCalendarAndCancelSync(t *testing.T) {
 	admin := env.Login(t, "admin", "123456")
 
 	roleID := createRoleWithMenus(t, env, admin, "room_staff", []int64{
-		menuRoomMine, btnRoomBooking, 536, // 我的会议 + 预约 + 我的日程查询
+		menuRoomMine, btnRoomBooking, 536, calendarUpdate, calendarDelete, // 我的会议 + 预约 + 日程查询/编辑/取消
 	})
 	ownerID := createUser(t, env, admin, "room_owner", 102)
 	sameDeptID := createUser(t, env, admin, "room_same_dept", 102)
@@ -312,8 +312,23 @@ func TestIntegrationRoomBookingCalendarAndCancelSync(t *testing.T) {
 		t.Fatalf("外部门用户不应看到部门日程")
 	}
 
+	// 日历接口不得编辑/取消预约生成的日程（PR #66 审查 P2-5）：创建人
+	// 即使持有 oa:calendar:update/delete 也返回 409，只允许会议室取消路径。
+	status, api := env.Request(t, http.MethodPut, "/oa/calendar/event", owner, map[string]any{
+		"id": event.ID, "title": "越权改名", "description": "",
+		"startTime": "2030-01-10 14:00:00", "endTime": "2030-01-10 15:00:00",
+		"allDay": false, "visibility": 0,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("日历接口编辑预约日程: HTTP %d code %d msg %q，期望 409", status, api.Code, api.Msg)
+	}
+	status, api = env.Request(t, http.MethodDelete, fmt.Sprintf("/oa/calendar/event/%d", event.ID), owner, nil)
+	if status != http.StatusConflict {
+		t.Fatalf("日历接口取消预约日程: HTTP %d code %d msg %q，期望 409", status, api.Code, api.Msg)
+	}
+
 	// 取消预约：预约状态取消，日程同步取消（列表空、详情 404）。
-	status, api := env.Request(t, http.MethodPost, fmt.Sprintf("/oa/room/booking/%d/cancel", booking.ID), owner, nil)
+	status, api = env.Request(t, http.MethodPost, fmt.Sprintf("/oa/room/booking/%d/cancel", booking.ID), owner, nil)
 	mustOK(t, "取消预约", status, api)
 	if events := listRoomCalendarEvents(t, env, owner); len(events) != 0 {
 		t.Fatalf("取消预约后日程列表应为空，得到 %+v", events)

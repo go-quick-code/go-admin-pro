@@ -272,12 +272,27 @@ func (s *Service) UpdateContract(ctx context.Context, req *dto.ContractUpdateReq
 // 并发保护（PR #39 审查 P1）：整个「锁定 → 复核最新状态 → 流转/守卫计数 →
 // 更新」在同一事务内完成，合同行是最先也唯一被锁的行（锁序：合同 → 计划）。
 // 条件更新仍是第二道保险：状态被非本路径并发变更时 0 行报 409。
+//
+// 作废的锁序（PR #66 审查 P2-2）：bpm 审批动作的锁序是「实例 → 合同」
+// （lockForAction 先锁实例，OnApproved 回调再锁合同）；若作废先锁合同再终止
+// 实例，会与其形成反向锁序并可能触发 MySQL 1213 死锁。因此作废路径先无锁
+// 预读合同做数据范围校验，待审时先终止运行中实例（CancelInstanceInTx 先锁
+// 实例，OnWithdrawn 回调再锁合同），最后才锁合同行。
 func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractStatusReq) (*dto.ContractDetail, error) {
 	if err := ValidateContractStatus(req.Status); err != nil {
 		return nil, err
 	}
 	var id int64
 	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		// 作废：先按「实例 → 合同」锁序终止运行中审批，再锁合同（P2-2）。
+		previouslyPending := false
+		if req.Status == model.ContractStatusVoid {
+			pending, err := s.cancelApprovalBeforeVoid(ctx, tx, req.ID)
+			if err != nil {
+				return err
+			}
+			previouslyPending = pending
+		}
 		c, err := tx.LockContractByID(ctx, req.ID)
 		if err != nil {
 			return err
@@ -306,19 +321,12 @@ func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractSta
 			}
 			err = s.approvals.Submit(ctx, tx, c)
 		case model.ContractStatusVoid:
-			// 待审合同作废：先在同一事务内终止运行中的审批实例（实例 → 合同
-			// 锁序与 bpm 回调一致；回调把合同置草稿），再按最新状态落作废。
-			if c.Status == model.ContractStatusPending {
-				if err = s.cancelRunningContractApproval(ctx, tx, c.ID); err != nil {
-					return err
-				}
-				latest, err := tx.LockContractByID(ctx, c.ID)
-				if err != nil {
-					return err
-				}
-				if latest != nil {
-					c.Status = latest.Status
-				}
+			// 运行中实例已在锁合同前终止（实例 → 合同锁序）。锁定后仍为待审
+			// 且预读时不是待审，说明预检之后有并发提交；此时本事务尚未持有
+			// 实例锁，继续终止会反向加锁实例，按冲突让客户端重试（重试会走
+			// 上面的实例 → 合同顺序）。
+			if c.Status == model.ContractStatusPending && !previouslyPending {
+				return xerr.Conflict("合同状态已变化，请刷新后重试")
 			}
 			// 守卫在同一事务、合同行锁内计数回款记录：并发登记回款会在
 			// LockContractByID 上排队，作废提交后读到作废态被拒绝，反之
@@ -345,6 +353,34 @@ func (s *Service) ChangeContractStatus(ctx context.Context, req *dto.ContractSta
 	}
 	// 状态/驳回原因已在库上变更，重读返回最新态（含名称与审批时间线）。
 	return s.GetContract(ctx, id)
+}
+
+// cancelApprovalBeforeVoid 在作废锁定合同之前按数据范围预读合同，待审时
+// 终止运行中的审批实例（PR #66 审查 P2-2）：锁序为实例 → 合同，与 bpm
+// 审批回调一致，避免「作废锁合同等实例、审批锁实例等合同」的死锁。
+// 返回预读时合同是否待审；无运行中实例（历史直通审批/测试替身）时静默跳过。
+func (s *Service) cancelApprovalBeforeVoid(ctx context.Context, tx *repository.Repository, contractID int64) (bool, error) {
+	pre, err := tx.FindContractByID(ctx, contractID)
+	if err != nil {
+		return false, err
+	}
+	if pre == nil {
+		return false, xerr.NotFound("合同不存在")
+	}
+	ok, err := s.contractPermitted(ctx, pre)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, xerr.NotFound("合同不存在")
+	}
+	if pre.Status != model.ContractStatusPending {
+		return false, nil
+	}
+	if err := s.cancelRunningContractApproval(ctx, tx, contractID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // cancelRunningContractApproval 在调用方事务内终止合同的运行中审批实例；
