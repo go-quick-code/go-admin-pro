@@ -248,3 +248,12 @@ func (r *Repository) SoftDeleteFilesByBiz(ctx context.Context, bizType string, b
 		Where("biz_type = ? AND biz_id = ?", bizType, bizID).
 		Delete(&model.File{}).Error
 }
+
+// SoftDeleteFileByBiz 软删除单条业务归属文件（仅置 deleted_at，不删磁盘；
+// 文档文件软删除时同步关闭 infra 侧读取入口，issue #59）。归属不符时
+// 影响 0 行，不误删其他业务的文件。
+func (r *Repository) SoftDeleteFileByBiz(ctx context.Context, id int64, bizType string, bizID int64) error {
+	return r.db.WithContext(ctx).
+		Where("id = ? AND biz_type = ? AND biz_id = ?", id, bizType, bizID).
+		Delete(&model.File{}).Error
+}

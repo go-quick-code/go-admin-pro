@@ -345,3 +345,15 @@ func (s *Service) SoftDeleteFilesByBiz(ctx context.Context, bizType string, bizI
 	}
 	return s.repo.SoftDeleteFilesByBiz(ctx, bizType, bizID)
 }
+
+// SoftDeleteFileByBiz 软删除单条业务归属文件（仅置 deleted_at，不删磁盘）：
+// 文档文件软删除时同步关闭 infra 侧读取入口（issue #59）；归属不符时不命中。
+func (s *Service) SoftDeleteFileByBiz(ctx context.Context, bizType string, bizID, fileID int64) error {
+	if err := validateFileBiz(bizType, bizID); err != nil {
+		return err
+	}
+	if fileID <= 0 {
+		return xerr.BadRequest("文件 ID 必须大于 0")
+	}
+	return s.repo.SoftDeleteFileByBiz(ctx, fileID, bizType, bizID)
+}

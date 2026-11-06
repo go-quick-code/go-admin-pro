@@ -73,6 +73,27 @@
               <el-descriptions-item label="创建时间">{{ selected.createTime }}</el-descriptions-item>
             </el-descriptions>
 
+            <!-- 文件（issue #59）：共用 OaFileUpload 组件；上传/删除仅目录
+                 管理权可见，列表/下载由后端按目录读权限收口。 -->
+            <div class="file-section">
+              <h4>文件</h4>
+              <OaFileUpload
+                :files="folderFiles"
+                :loading="filesLoading"
+                :can-upload="canManageFolder(selected)"
+                :can-delete="canManageFolder(selected)"
+                :upload-handler="uploadSelectedFile"
+                :download-handler="downloadSelectedFile"
+                :delete-handler="deleteSelectedFile"
+                upload-text="上传文件"
+                empty-text="该目录还没有文件"
+                show-uploader
+                show-create-time
+                @uploaded="reloadSelectedFiles"
+                @deleted="reloadSelectedFiles"
+              />
+            </div>
+
             <div class="acl-summary">
               <h4>可见性</h4>
               <p v-if="aclLoading" class="muted">正在加载 ACL…</p>
@@ -149,23 +170,30 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import AclEditor from './AclEditor.vue'
+import OaFileUpload from '@/components/OaFileUpload.vue'
 import {
   createDocumentFolder,
+  deleteDocumentFile,
   deleteDocumentFolder,
+  downloadDocumentFile,
   getDocumentFolderACL,
   getDocumentFolderTree,
+  pageDocumentFiles,
   setDocumentFolderACL,
   updateDocumentFolder,
+  uploadDocumentFile,
 } from '@/api/oa'
 import type { DocumentACLPayload } from '@/api/oa'
+import type { OaFileItem } from '@/components/OaFileUpload.vue'
 
-// 文档目录页（issue #58，spec §3.8/§4.12）：
+// 文档目录页（issue #58 目录/ACL + issue #59 文件，spec §3.8/§4.12）：
 //   - 目录树只展示当前用户有读权限的目录（ACL 由后端过滤），父目录不可见时
 //     子目录作为根节点出现；
 //   - 创建目录挂 oa:document:create；顶层目录必须至少一条 ACL；
 //   - 改名/删除/ACL 设置要求目录管理权（owner 或 oa:document:manage）；
 //   - 有子目录或文件的目录删除返回 409，错误消息由请求拦截器提示；
-//   - 文件上传/下载由 #59 落地，本页暂不展示文件列表。
+//   - 文件列表/上传/鉴权下载/软删除统一走共用 OaFileUpload 组件；
+//     上传/删除按钮仅对目录 owner 或管理码可见（后端仍会二次校验）。
 
 interface DocumentFolderRow {
   id: number
@@ -206,6 +234,10 @@ const keyword = ref('')
 const selected = ref<DocumentFolderRow | null>(null)
 const aclInfo = ref<DocumentFolderACLInfo | null>(null)
 const aclLoading = ref(false)
+const folderFiles = ref<OaFileItem[]>([])
+const filesLoading = ref(false)
+// filesRequestSeq 丢弃切换目录后的过期列表响应（快速点选目录时防串台）。
+let filesRequestSeq = 0
 
 const formVisible = ref(false)
 const saving = ref(false)
@@ -283,7 +315,11 @@ async function load() {
     if (selected.value) {
       const still = findFolder(tree.value, selected.value.id)
       selected.value = still
-      if (still) await loadAclInfo(still)
+      if (still) {
+        await Promise.all([loadAclInfo(still), loadFiles(still)])
+      } else {
+        resetFiles()
+      }
     }
   } finally {
     loading.value = false
@@ -303,9 +339,52 @@ async function loadAclInfo(folder: DocumentFolderRow) {
   }
 }
 
+// loadFiles 读取所选目录的文件分页（后端按目录读权限收口；不可读 404）。
+async function loadFiles(folder: DocumentFolderRow) {
+  const seq = ++filesRequestSeq
+  filesLoading.value = true
+  try {
+    const page = await pageDocumentFiles(folder.id)
+    if (seq === filesRequestSeq) folderFiles.value = page?.list || []
+  } catch {
+    if (seq === filesRequestSeq) folderFiles.value = []
+  } finally {
+    if (seq === filesRequestSeq) filesLoading.value = false
+  }
+}
+
+// resetFiles 清空文件区（目录被删除/选择失效时调用）。
+function resetFiles() {
+  filesRequestSeq++
+  folderFiles.value = []
+  filesLoading.value = false
+}
+
+// reloadSelectedFiles 上传/删除成功后由组件事件触发，刷新当前目录文件。
+function reloadSelectedFiles() {
+  if (selected.value) void loadFiles(selected.value)
+}
+
+// uploadSelectedFile 共用组件的上传适配：把当前目录 ID 绑到上传接口。
+function uploadSelectedFile(file: File) {
+  if (!selected.value) return Promise.reject(new Error('未选择目录'))
+  return uploadDocumentFile(selected.value.id, file)
+}
+
+// downloadSelectedFile 共用组件的下载适配：后端 url 是鉴权下载端点。
+function downloadSelectedFile(file: OaFileItem) {
+  return downloadDocumentFile(file.url || '')
+}
+
+// deleteSelectedFile 共用组件的删除适配（软删除，需要文件所属目录管理权）。
+function deleteSelectedFile(file: OaFileItem) {
+  return deleteDocumentFile(file.id)
+}
+
 function selectFolder(folder: DocumentFolderRow) {
   selected.value = folder
   void loadAclInfo(folder)
+  void loadFiles(folder)
 }
 
 function openCreate(parentId: number) {
@@ -393,7 +472,10 @@ async function removeFolder(folder: DocumentFolderRow) {
   try {
     await deleteDocumentFolder(folder.id)
     ElMessage.success('已删除')
-    if (selected.value?.id === folder.id) selected.value = null
+    if (selected.value?.id === folder.id) {
+      selected.value = null
+      resetFiles()
+    }
     await load()
   } catch {
     // 409/403 等业务错误已由请求拦截器提示。
@@ -460,9 +542,11 @@ onMounted(load)
 .detail-title {
   margin: 0 0 12px;
 }
+.file-section,
 .acl-summary {
   margin-top: 20px;
 }
+.file-section h4,
 .acl-summary h4 {
   margin: 0 0 8px;
 }

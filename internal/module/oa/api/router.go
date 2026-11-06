@@ -232,7 +232,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 创建挂 oa:document:create（5261）。改名/删除/ACL 设置只要求「目录管理权」
 	//（owner 或 oa:document:manage），因此不在路由上挂独立权限码——owner 可能
 	// 没有管理按钮码；服务层区分 403（可见无管理权）/404（不可见）。
-	// 文件上传/下载由 #59 承接（file 表 schema 已在 00021 建全）。
+	// 文件（issue #59，spec §5）：分页/下载挂查询码，服务层再按文件所属目录
+	// 的读权限收口（不可读 404，文件 ID 不能绕过 ACL）；上传/删除只要求目录
+	// 管理权，与目录写动作一致，不额外挂按钮码（5263 oa:document:upload
+	// 保留给前端按钮展示）。
 	document := oa.Group("/document")
 	folder := document.Group("/folder")
 	folder.GET("/tree", h.requirePermission(documentQuery), h.ListDocumentFolderTree)
@@ -242,6 +245,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	folder.PUT("", h.UpdateDocumentFolder)
 	folder.PUT("/:id/acl", h.SetDocumentFolderACL)
 	folder.DELETE("/:id", h.DeleteDocumentFolder)
+	file := document.Group("/file")
+	file.GET("/page", h.requirePermission(documentQuery), h.PageDocumentFiles)
+	file.POST("/upload", h.UploadDocumentFile)
+	file.GET("/:id/download", h.requirePermission(documentQuery), h.DownloadDocumentFile)
+	file.DELETE("/:id", h.DeleteDocumentFile)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。

@@ -473,7 +473,7 @@ export function cancelCalendarEvent(id: number) {
 // 不可见目录不出现在树里、详情 404；创建挂 oa:document:create（5261），
 // 顶层目录必须带显式 ACL；改名/删除/ACL 设置只要求目录管理权（目录 owner 或
 // oa:document:manage），服务层对「可见无管理权」返回 403、不可见返回 404；
-// 有子目录或文件的目录删除返回 409。文件上传/下载由 #59 落地（码 5263）。
+// 有子目录或文件的目录删除返回 409。文件读写见下方 #59 段。
 
 // ACL 主体：0 全员（targetId=0）/ 1 部门（含子树）/ 2 角色 / 3 用户。
 export interface DocumentACLPayload {
@@ -517,6 +517,36 @@ export function getDocumentFolderACL(id: number) {
 // 整体替换目录 ACL：顶层目录不允许清空（400）；子目录清空表示继承父目录。
 export function setDocumentFolderACL(id: number, entries: DocumentACLPayload[]) {
   return request.put(`/oa/document/folder/${id}/acl`, { entries }) as Promise<any>
+}
+
+// ---------- OA 文档文件（issue #59，spec #42 §3.8/§4.12/§5） ----------
+// 权限模型：列表/下载挂 oa:document:query，服务层再按目录读权限收口
+//（不可读 404，文件 ID 不能绕过 ACL）；上传/删除要求目录管理权（owner 或
+// oa:document:manage），与目录改名/删除一致。文件本体存 infra_file，
+// 下载只走鉴权端点（后端返回的 url），不暴露静态公开直链；删除为软删除。
+
+// 目录内文件分页（新上传的在前；只含未软删文件）。返回 { list, total }。
+export function pageDocumentFiles(folderId: number, params?: { pageNo?: number; pageSize?: number }) {
+  return request.get('/oa/document/file/page', {
+    params: { folderId, pageNo: 1, pageSize: 200, ...params },
+  }) as Promise<any>
+}
+// 上传文件（multipart 字段 file + folderId；需要目录管理权）。
+export function uploadDocumentFile(folderId: number, file: File) {
+  const form = new FormData()
+  form.append('folderId', String(folderId))
+  form.append('file', file)
+  return request.post('/oa/document/file/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<any>
+}
+// 删除文件（软删除；需要文件所属目录的管理权）。
+export function deleteDocumentFile(fileId: number) {
+  return request.delete(`/oa/document/file/${fileId}`) as Promise<any>
+}
+// 鉴权下载（后端返回的 url 已含 /admin-api 前缀，baseURL 置空原样请求）。
+export function downloadDocumentFile(url: string) {
+  return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
 
 // ---------- OA 会议室与预约（issue #57，spec #42 §4.11/§4.14/§5） ----------

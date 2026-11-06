@@ -34,14 +34,19 @@ const (
 	DocumentPermissionCreate = "oa:document:create"
 	// DocumentPermissionManage 全租户可见与目录管理旁路（owner 之外的管理员码）。
 	DocumentPermissionManage = "oa:document:manage"
-	// DocumentPermissionUpload 文件上传/删除（#59 使用，本工单先种码）。
+	// DocumentPermissionUpload 文件上传按钮码（菜单 5263，issue #59 沿用）。
+	// 后端上传/删除只校验目录管理权（owner 或 Manage），不强制该码：owner
+	// 可能没有管理员授予的按钮码（与目录改名/删除一致，spec §4.12）。
 	DocumentPermissionUpload = "oa:document:upload"
 )
 
-// 目录字段边界。
+// 目录/文件字段边界。
 const (
 	// MaxDocumentFolderNameLen 是目录名长度上限（oa_document_folder.name 列宽）。
 	MaxDocumentFolderNameLen = 100
+	// MaxDocumentFileNameLen 是文件名长度上限（oa_document_file.name 列宽，
+	// issue #59）。
+	MaxDocumentFileNameLen = 200
 	// MaxDocumentACLEntries 是单个目录显式 ACL 的条目上限（防止误配过大）。
 	MaxDocumentACLEntries = 200
 	// documentFolderDepthLimit 是祖先链解析的梯度上限（防御脏数据成环）。
@@ -238,6 +243,20 @@ func NormalizeDocumentACLTargets(entries []DocumentACLTarget) ([]DocumentACLTarg
 		return out[i].TargetID < out[j].TargetID
 	})
 	return out, nil
+}
+
+// ValidateDocumentFileName 校验文件展示名（issue #59）：去首尾空白后
+// 1–MaxDocumentFileNameLen 字。上传时文件名来自 multipart 的 base name，
+// 超长直接 400，避免截断后与磁盘文件不一致。
+func ValidateDocumentFileName(name string) (string, error) {
+	name = trimSpace(name)
+	if name == "" {
+		return "", xerr.BadRequest("文件名不能为空")
+	}
+	if len([]rune(name)) > MaxDocumentFileNameLen {
+		return "", xerr.BadRequest(fmt.Sprintf("文件名不能超过 %d 字", MaxDocumentFileNameLen))
+	}
+	return name, nil
 }
 
 // ValidateDocumentFolderACL 校验 ACL 是否允许落库（spec §4.12）：
