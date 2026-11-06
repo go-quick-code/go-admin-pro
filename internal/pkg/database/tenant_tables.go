@@ -124,4 +124,10 @@ var TenantTables = []string{
 	// goroutine 无租户上下文，写入走 tenant.Skip + 行内显式 tenant_id；
 	// 保留期清理（cleanAccessLogs）同属系统级动作，显式 tenant.Skip。
 	"infra_api_log",
+
+	// 敏感词（issue #81，迁移 00027，spec §3.8/§4.7）：租户级词库，唯一键
+	// (tenant_id, word, deleted_at)，软删后同一词可重新添加。词库读写经租户
+	// 插件隔离，跨租户业务 ID 一律 404；匹配缓存按租户快照构建
+	//（system/service sensitive_word.go），CRUD 后失效。
+	"system_sensitive_word",
 }
