@@ -1,10 +1,12 @@
-// leave_request.go 是请假申请的 HTTP 入口（issue #52，docs/oa-mvp-spec.md
-// §4.8/§5）：草稿创建/编辑/删除、提交、本人列表/详情（审批时间线）与附件。
+// leave_request.go 是请假申请的 HTTP 入口（issue #52/#53，
+// docs/oa-mvp-spec.md §4.8/§5）：草稿创建/编辑/删除、提交、撤回、取消、
+// 可见范围内的列表/详情（审批时间线）与附件。
 //
 // 权限模型：
-//   - 本人列表/详情/附件查看登录即可（服务层按本人收口，非本人 404）；
+//   - 列表/详情/附件查看登录即可（服务层按 §4.6 可见范围收口，范围外 404）；
 //   - 写动作逐码：oa:leave:create（创建草稿）、oa:leave:update（编辑/附件）、
-//     oa:leave:delete（删除）、oa:leave:submit（提交审批）；
+//     oa:leave:delete（删除）、oa:leave:submit（提交审批）、
+//     oa:leave:withdraw（撤回，button 5295）、oa:leave:cancel（取消，button 5296）；
 //   - 审批动作走通用待办（/bpm/task/*），不在此重复造审批 UI/接口。
 package api
 
@@ -85,14 +87,15 @@ func (h *Handler) SubmitLeaveRequest(c *gin.Context) {
 	response.OK(c, item)
 }
 
-// PageMyLeaveRequests 本人请假分页（GET /oa/leave/request/page，登录即可）：
-// status 可选过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回/5 已取消）。
-func (h *Handler) PageMyLeaveRequests(c *gin.Context) {
+// PageLeaveRequests 请假分页（GET /oa/leave/request/page，登录即可）：
+// status 可选过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回/5 已取消）；按
+// §4.6 可见范围返回（manage → 全租户、部门负责人 → 子树、否则本人）。
+func (h *Handler) PageLeaveRequests(c *gin.Context) {
 	var req dto.LeaveRequestPageReq
 	if !bindQuery(c, &req) {
 		return
 	}
-	items, total, err := h.svc.PageMyLeaveRequests(c.Request.Context(), &req)
+	items, total, err := h.svc.PageLeaveRequests(c.Request.Context(), &req)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -100,14 +103,14 @@ func (h *Handler) PageMyLeaveRequests(c *gin.Context) {
 	response.Page(c, items, total)
 }
 
-// GetMyLeaveRequest 本人请假详情（GET /oa/leave/request/:id，登录即可）：
-// 申请行 + 附件 + bpm 审批时间线。
-func (h *Handler) GetMyLeaveRequest(c *gin.Context) {
+// GetLeaveRequestDetail 请假详情（GET /oa/leave/request/:id，登录即可）：
+// 申请行 + 附件 + bpm 审批时间线；按 §4.6 可见范围读取，范围外/跨租户 404。
+func (h *Handler) GetLeaveRequestDetail(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
 		return
 	}
-	detail, err := h.svc.GetMyLeaveRequest(c.Request.Context(), id)
+	detail, err := h.svc.GetLeaveRequestDetail(c.Request.Context(), id)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -115,8 +118,39 @@ func (h *Handler) GetMyLeaveRequest(c *gin.Context) {
 	response.OK(c, detail)
 }
 
+// WithdrawLeaveRequest 撤回待审申请（POST /oa/leave/request/:id/withdraw，
+// oa:leave:withdraw，button 5295）：仅发起人、首个审批动作前；状态迁移由
+// bpm 撤回入口 + OnWithdrawn 完成，额度不变。
+func (h *Handler) WithdrawLeaveRequest(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	item, err := h.svc.WithdrawLeaveRequest(c.Request.Context(), id)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, item)
+}
+
+// CancelLeaveRequest 取消已通过申请（POST /oa/leave/request/:id/cancel，
+// oa:leave:cancel，button 5296）：仅发起人、开始日期前；事务内返还额度。
+func (h *Handler) CancelLeaveRequest(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	item, err := h.svc.CancelLeaveRequest(c.Request.Context(), id)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, item)
+}
+
 // ListLeaveRequestFiles 附件列表（GET /oa/leave/request/:id/files，登录即可，
-// 仅本人申请）。
+// 按 §4.6 可见范围）。
 func (h *Handler) ListLeaveRequestFiles(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {

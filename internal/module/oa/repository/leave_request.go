@@ -58,10 +58,18 @@ func (r *Repository) DeleteLeaveRequest(ctx context.Context, id int64) (bool, er
 	return result.RowsAffected > 0, nil
 }
 
-// PageLeaveRequestsByUser 本人申请分页（start_date 倒序）：status 可选精确
-// 过滤（员工「我的请假」页；部门可见范围由 #53 扩展）。
-func (r *Repository) PageLeaveRequestsByUser(ctx context.Context, userID int64, status *int8, offset, limit int) ([]model.LeaveRequest, int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.LeaveRequest{}).Where("`user_id` = ?", userID)
+// PageLeaveRequestsByScope 按可见范围分页（start_date 倒序，issue #53）：
+// userIDs 为 nil 表示全租户（oa:leave:manage）；非 nil 时按 user_id IN
+// 过滤（部门负责人子树 ∪ 本人），空集合直接返回空页（fail-closed）。
+// status 可选精确过滤。租户条件由插件自动追加，跨租户行不会命中。
+func (r *Repository) PageLeaveRequestsByScope(ctx context.Context, userIDs []int64, status *int8, offset, limit int) ([]model.LeaveRequest, int64, error) {
+	if userIDs != nil && len(userIDs) == 0 {
+		return []model.LeaveRequest{}, 0, nil
+	}
+	q := r.db.WithContext(ctx).Model(&model.LeaveRequest{})
+	if userIDs != nil {
+		q = q.Where("`user_id` IN ?", userIDs)
+	}
 	if status != nil {
 		q = q.Where("`status` = ?", *status)
 	}

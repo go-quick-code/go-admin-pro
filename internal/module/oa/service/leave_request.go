@@ -1,12 +1,19 @@
 // leave_request.go 承接请假申请的完整流程（issue #52，docs/oa-mvp-spec.md
 // §4.8）：草稿创建/编辑/删除、提交（事务内 StartInstanceInTx 生成 bpm 实例）、
-// 本人列表/详情（审批时间线）、附件（infra_file，biz_type='oa_leave'）与
-// bpm 回调（通过扣额度、驳回/撤回只改状态）。
+// 可见范围内的列表/详情（审批时间线）、附件（infra_file，biz_type='oa_leave'）
+// 与 bpm 回调（通过扣额度、驳回/撤回只改状态）。
+//
+// issue #53 扩展：
+//   - 撤回：仅发起人、仅首个审批动作前；状态迁移由 bpm.WithdrawInstance 与
+//     OnWithdrawn 完成，业务侧不重复写状态；
+//   - 取消：仅发起人、已通过且开始日期未到（业务时区）；事务内返还 used；
+//   - 列表/详情/附件读取按 §4.6 可见范围（manage → 部门负责人子树 → 本人），
+//     范围外与跨租户一律 404。
 //
 // 一致性约定（ADR 0008）：
 //   - 提交时「落申请状态 + 发起审批」在同一事务内完成（StartInstanceInTx）；
 //   - 审批回调在 bpm 的事务内执行，业务写一律使用回调入参 tx（失败整笔回滚）；
-//   - 额度扣减只在 OnApproved 发生；驳回/撤回不动额度（spec §4.8）。
+//   - 额度扣减只在 OnApproved 发生；驳回/撤回不动额度；取消返还（spec §4.8）。
 //
 // 时长与重叠判定全部复用纯函数：槽位来自 #50 ResolveWorkdaySlots，
 // 区间/方向/重叠来自 leave_application_rule.go。
@@ -302,18 +309,137 @@ func (s *Service) SubmitLeaveRequest(ctx context.Context, id int64) (*dto.LeaveR
 	return &item, nil
 }
 
-// ---------- 查询 ----------
+// ---------- 撤回 / 取消（issue #53） ----------
 
-// PageMyLeaveRequests 本人请假分页（登录即可，仅本人数据）：status 可选过滤，
-// start_date 倒序；附类型编码/名称。
-func (s *Service) PageMyLeaveRequests(ctx context.Context, req *dto.LeaveRequestPageReq) ([]dto.LeaveRequestItem, int64, error) {
+// WithdrawLeaveRequest 发起人撤回待审申请（spec §4.8/§5）：
+//   - 仅本人可撤回（非本人/跨租户一律 404，不泄露存在性）；
+//   - 业务状态必须是待审；「首个审批动作前」由 bpm.WithdrawInstance 在实例
+//     事务内权威判定（已通过/驳回过则 409），业务侧不重复实现审批事实；
+//   - 状态迁移与 OnWithdrawn 回调由 bpm 完成，额度不变；本方法只做入口校验
+//     与回读最新申请行，不写业务状态。
+func (s *Service) WithdrawLeaveRequest(ctx context.Context, id int64) (*dto.LeaveRequestItem, error) {
+	if CurrentUserID(ctx) <= 0 {
+		return nil, xerr.Unauthorized("")
+	}
+	row, err := s.findOwnedLeaveRequest(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateLeaveAction(LeaveActionWithdraw, row.Status, time.Time{}, time.Time{}, nil); err != nil {
+		return nil, err
+	}
+	if row.ApprovalInstanceID == nil {
+		return nil, xerr.Conflict("请假申请未关联审批实例，不能撤回")
+	}
+	if s.bpm == nil {
+		return nil, xerr.Internal(errors.New("oa: 审批引擎未装配"))
+	}
+	if _, err := s.bpm.WithdrawInstance(ctx, *row.ApprovalInstanceID, ""); err != nil {
+		return nil, err
+	}
+	// bpm 的事务已提交（含 OnWithdrawn 置撤回态），回读最新行作为响应。
+	updated, err := s.repo.FindLeaveRequest(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, xerr.NotFound("请假申请不存在")
+	}
+	typeByID, err := s.typeMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	item := leaveRequestItemOf(*updated, typeByID[updated.LeaveTypeID])
+	return &item, nil
+}
+
+// CancelLeaveRequest 发起人取消已通过的申请（spec §4.8/§5）：
+//   - 仅本人可取消（非本人/跨租户一律 404）；
+//   - 状态必须是已通过，且业务时区下的今天严格早于开始日期；开始当天及
+//     之后返回可读 400（提示联系管理员调整记录）；
+//   - 事务内行锁申请与额度行，`used -= duration`（RefundDays，夹零）并置
+//     已取消；重复取消在第二次状态校验时 409，不会重复返还。
+func (s *Service) CancelLeaveRequest(ctx context.Context, id int64) (*dto.LeaveRequestItem, error) {
 	userID := CurrentUserID(ctx)
 	if userID <= 0 {
+		return nil, xerr.Unauthorized("")
+	}
+	var cancelled *model.LeaveRequest
+	var cancelledType *model.LeaveType
+	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		row, err := tx.FindLeaveRequestForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if row == nil || row.UserID != userID {
+			return xerr.NotFound("请假申请不存在")
+		}
+		if err := ValidateLeaveAction(LeaveActionCancel, row.Status, row.StartDate, s.businessNow(), s.businessLocation()); err != nil {
+			return err
+		}
+		typ, err := tx.FindLeaveType(ctx, row.LeaveTypeID)
+		if err != nil {
+			return err
+		}
+		if typ == nil {
+			return xerr.Internal(fmt.Errorf("oa: 请假申请 %d 的类型 %d 不存在", row.ID, row.LeaveTypeID))
+		}
+		if typ.BalanceManaged {
+			balance, err := tx.FindBalanceForUpdate(ctx, row.UserID, typ.ID, row.StartDate.Year())
+			if err != nil {
+				return err
+			}
+			if balance == nil {
+				return xerr.Internal(fmt.Errorf(
+					"oa: 请假申请 %d 的额度行不存在（user=%d type=%d year=%d）",
+					row.ID, row.UserID, typ.ID, row.StartDate.Year(),
+				))
+			}
+			balance.Used = RefundDays(balance.Used, row.DurationDays)
+			if err := tx.SaveLeaveBalance(ctx, balance); err != nil {
+				return err
+			}
+		}
+		row.Status = model.LeaveRequestStatusCancelled
+		if err := tx.SaveLeaveRequest(ctx, row); err != nil {
+			return err
+		}
+		cancelled, cancelledType = row, typ
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	item := leaveRequestItemOf(*cancelled, cancelledType)
+	return &item, nil
+}
+
+// ---------- 查询 ----------
+
+// PageLeaveRequests 请假分页（登录即可，按 §4.6 可见范围返回）：status 可选
+// 过滤，start_date 倒序；附类型编码/名称。
+//
+// 可见范围：持 oa:leave:manage → 全租户；部门负责人 → 所负责部门子树内用户
+// 的数据（多个部门并集）∪ 本人；其余 → 仅本人。范围外用户的行不会出现。
+func (s *Service) PageLeaveRequests(ctx context.Context, req *dto.LeaveRequestPageReq) ([]dto.LeaveRequestItem, int64, error) {
+	if CurrentUserID(ctx) <= 0 {
 		return nil, 0, xerr.Unauthorized("")
+	}
+	scope, err := s.VisibilityScopeOf(ctx, "leave")
+	if err != nil {
+		return nil, 0, err
+	}
+	// nil 表示全租户；空切片表示什么都看不到（fail-closed）。
+	var userFilter []int64
+	if !scope.All {
+		userFilter = scope.UserIDs
+		if userFilter == nil {
+			userFilter = []int64{}
+		}
 	}
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
-	rows, total, err := s.repo.PageLeaveRequestsByUser(ctx, userID, req.Status, page.Offset(), page.PageSize)
+	rows, total, err := s.repo.PageLeaveRequestsByScope(ctx, userFilter, req.Status, page.Offset(), page.PageSize)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -328,10 +454,13 @@ func (s *Service) PageMyLeaveRequests(ctx context.Context, req *dto.LeaveRequest
 	return items, total, nil
 }
 
-// GetMyLeaveRequest 本人请假详情：申请行 + 附件 + bpm 审批时间线
-// （草稿无实例时 approval 为 nil）。非本人一律 404，不泄露存在性。
-func (s *Service) GetMyLeaveRequest(ctx context.Context, id int64) (*dto.LeaveRequestDetailResp, error) {
-	row, err := s.findOwnedLeaveRequest(ctx, id)
+// GetLeaveRequestDetail 请假详情：申请行 + 附件 + bpm 审批时间线
+// （草稿无实例时 approval 为 nil）。按 §4.6 可见范围读取：manage → 全租户、
+// 部门负责人 → 子树、本人；范围外/跨租户一律 404，不泄露存在性。
+// 时间线用 bpm 的业务读接口（本方法已完成可见性授权），部门负责人/HR 也能
+// 看到下属申请的审批记录。
+func (s *Service) GetLeaveRequestDetail(ctx context.Context, id int64) (*dto.LeaveRequestDetailResp, error) {
+	row, err := s.findVisibleLeaveRequest(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +481,9 @@ func (s *Service) GetMyLeaveRequest(ctx context.Context, id int64) (*dto.LeaveRe
 		if s.bpm == nil {
 			return nil, xerr.Internal(errors.New("oa: 审批引擎未装配"))
 		}
-		approval, err := s.bpm.GetInstanceDetail(ctx, *row.ApprovalInstanceID)
+		// 可见性已由本方法按 §4.6 校验，时间线使用业务读接口（跳过 bpm 的
+		// 发起人/办理人身份判定），保证部门负责人与 HR 能看到完整时间线。
+		approval, err := s.bpm.GetInstanceDetailForBusiness(ctx, *row.ApprovalInstanceID)
 		if err != nil {
 			return nil, err
 		}
@@ -363,9 +494,10 @@ func (s *Service) GetMyLeaveRequest(ctx context.Context, id int64) (*dto.LeaveRe
 
 // ---------- 附件 ----------
 
-// ListLeaveRequestFiles 列出本人申请附件（新上传的在前），URL 改写为鉴权下载端点。
+// ListLeaveRequestFiles 列出可见范围内申请的附件（新上传的在前），URL 改写为
+// 鉴权下载端点。可见范围与详情一致（manage/部门负责人/本人）。
 func (s *Service) ListLeaveRequestFiles(ctx context.Context, id int64) ([]dto.LeaveFileResp, error) {
-	if _, err := s.findOwnedLeaveRequest(ctx, id); err != nil {
+	if _, err := s.findVisibleLeaveRequest(ctx, id); err != nil {
 		return nil, err
 	}
 	store, err := s.leaveFileStore()
@@ -407,9 +539,10 @@ func (s *Service) UploadLeaveRequestFile(ctx context.Context, id int64, fh *mult
 	return &file, nil
 }
 
-// DownloadLeaveRequestFile 打开本人申请附件供鉴权下载；文件不属于该申请 404。
+// DownloadLeaveRequestFile 打开可见范围内申请的附件供鉴权下载；申请不可见
+// （含跨租户）或文件不属于该申请一律 404。
 func (s *Service) DownloadLeaveRequestFile(ctx context.Context, id, fileID int64) (*LeaveFileContent, error) {
-	if _, err := s.findOwnedLeaveRequest(ctx, id); err != nil {
+	if _, err := s.findVisibleLeaveRequest(ctx, id); err != nil {
 		return nil, err
 	}
 	store, err := s.leaveFileStore()
@@ -563,7 +696,8 @@ func (s *Service) lockRequestForCallback(ctx context.Context, repo *repository.R
 
 // ---------- 内部辅助 ----------
 
-// findOwnedLeaveRequest 读本人申请；不存在/跨租户/非本人一律 404。
+// findOwnedLeaveRequest 读本人申请（写动作的归属校验）；不存在/跨租户/
+// 非本人一律 404。
 func (s *Service) findOwnedLeaveRequest(ctx context.Context, id int64) (*model.LeaveRequest, error) {
 	row, err := s.repo.FindLeaveRequest(ctx, id)
 	if err != nil {
@@ -571,6 +705,27 @@ func (s *Service) findOwnedLeaveRequest(ctx context.Context, id int64) (*model.L
 	}
 	userID := CurrentUserID(ctx)
 	if row == nil || userID <= 0 || row.UserID != userID {
+		return nil, xerr.NotFound("请假申请不存在")
+	}
+	return row, nil
+}
+
+// findVisibleLeaveRequest 读可见范围内的申请（读动作的归属校验，spec §4.6）：
+// 持有 oa:leave:manage → 全租户；部门负责人 → 所负责部门子树；否则仅本人。
+// 不存在/跨租户/范围外一律 404，不泄露存在性。
+func (s *Service) findVisibleLeaveRequest(ctx context.Context, id int64) (*model.LeaveRequest, error) {
+	row, err := s.repo.FindLeaveRequest(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, xerr.NotFound("请假申请不存在")
+	}
+	scope, err := s.VisibilityScopeOf(ctx, "leave")
+	if err != nil {
+		return nil, err
+	}
+	if !scope.Permits(row.UserID) {
 		return nil, xerr.NotFound("请假申请不存在")
 	}
 	return row, nil

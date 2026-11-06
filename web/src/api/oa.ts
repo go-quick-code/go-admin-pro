@@ -236,9 +236,10 @@ export function deleteAnnouncementFile(id: number, fileId: number) {
 export function downloadAnnouncementFile(url: string) {
   return request.get(url, { baseURL: '', responseType: 'blob' }) as Promise<any>
 }
-// ---------- OA 请假申请（issue #52，spec #42 §4.8/§5） ----------
-// 权限模型：本人列表/详情/附件查看登录即可（服务端按本人收口）；
-// 写动作逐码 oa:leave:create/update/delete/submit；审批走通用待办 /bpm/task/*。
+// ---------- OA 请假申请（issue #52/#53，spec #42 §4.8/§5） ----------
+// 权限模型：列表/详情/附件查看登录即可（服务端按 §4.6 可见范围收口）；
+// 写动作逐码 oa:leave:create/update/delete/submit/withdraw/cancel；
+// 审批走通用待办 /bpm/task/*。
 
 export interface LeaveRequestPayload {
   id?: number
@@ -250,11 +251,12 @@ export interface LeaveRequestPayload {
   reason: string
 }
 
-// 本人请假分页：status 精确过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回/5 已取消）。
+// 请假分页：status 精确过滤（0 草稿/1 待审/2 通过/3 驳回/4 撤回/5 已取消）；
+// 服务端按可见范围返回（manage → 全租户、部门负责人 → 部门子树、否则本人）。
 export function pageMyLeaveRequests(params?: { pageNo?: number; pageSize?: number; status?: number }) {
   return request.get('/oa/leave/request/page', { params }) as Promise<any>
 }
-// 本人请假详情：申请行 + 附件 + bpm 审批时间线（草稿 approval 为空）。
+// 请假详情：申请行 + 附件 + bpm 审批时间线（草稿 approval 为空）；范围外 404。
 export function getMyLeaveRequest(id: number) {
   return request.get(`/oa/leave/request/${id}`) as Promise<any>
 }
@@ -273,6 +275,15 @@ export function deleteLeaveRequest(id: number) {
 // 提交审批：事务内创建 oa_leave_approval 实例并置待审。
 export function submitLeaveRequest(id: number) {
   return request.post(`/oa/leave/request/${id}/submit`) as Promise<any>
+}
+// 撤回：仅发起人、首个审批动作前（oa:leave:withdraw，button 5295）；额度不变。
+export function withdrawLeaveRequest(id: number) {
+  return request.post(`/oa/leave/request/${id}/withdraw`) as Promise<any>
+}
+// 取消：仅发起人、已通过且开始日期前（oa:leave:cancel，button 5296）；
+// 事务内返还已扣额度，开始日期后返回可读 400。
+export function cancelLeaveRequest(id: number) {
+  return request.post(`/oa/leave/request/${id}/cancel`) as Promise<any>
 }
 // 附件列表（新上传的在前）。
 export function listLeaveRequestFiles(id: number) {
