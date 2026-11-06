@@ -101,6 +101,44 @@
                 </el-form-item>
               </el-form>
             </el-tab-pane>
+
+            <!-- 社交账号绑定/解绑（issue #77，spec §4.4.6/§4.4.7）：
+                 绑定走 POST /system/social/bind 换授权地址并整页跳转，回调页
+                 完成写入后跳回本页；解绑调 DELETE /system/social/my/:id（登录
+                 即可，只能解绑本人）；重复绑定同一平台幂等，弹窗提示。 -->
+            <el-tab-pane label="社交账号" name="social">
+              <div class="social-bind">
+                <div class="bind-tip">绑定后可使用对应平台的社交账号扫码登录系统。</div>
+                <el-table :data="socialBindings" size="default" empty-text="暂未绑定社交账号">
+                  <el-table-column label="平台" width="120">
+                    <template #default="{ row }">{{ socialProviderLabel(row.provider) }}</template>
+                  </el-table-column>
+                  <el-table-column label="三方昵称" prop="nickname" min-width="120" show-overflow-tooltip />
+                  <el-table-column label="OpenID" prop="openid" min-width="180" show-overflow-tooltip />
+                  <el-table-column label="最近登录" min-width="160">
+                    <template #default="{ row }">{{ formatTime(row.lastLoginAt) || '-' }}</template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="90">
+                    <template #default="{ row }">
+                      <el-button link type="danger" @click="unbindSocial(row)">解绑</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+
+                <div v-if="bindableProviders.length" class="bind-actions">
+                  <el-button
+                    v-for="p in bindableProviders"
+                    :key="p.provider"
+                    @click="bindSocial(p.provider)"
+                  >
+                    绑定 {{ socialProviderLabel(p.provider, p.name) }}
+                  </el-button>
+                </div>
+                <div v-else class="bind-actions">
+                  <span class="bind-empty">暂无可绑定的社交平台（请联系管理员配置并启用社交客户端）</span>
+                </div>
+              </div>
+            </el-tab-pane>
           </el-tabs>
         </el-card>
       </el-col>
@@ -110,24 +148,90 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { updateProfile, changePassword } from '@/api/auth'
-import { getCurrentTenantQuota } from '@/api/system'
-import { formatSize } from '@/utils/format'
+import { getCurrentTenantQuota, listMySocialBindings, listSocialProviders, socialBind, unbindMySocialUser } from '@/api/system'
+import { formatSize, formatTime } from '@/utils/format'
+import { rememberSocialFlow, socialProviderLabel } from '@/utils/social'
 
+const route = useRoute()
 const userStore = useUserStore()
 const userInfo = computed(() => userStore.userInfo)
 
 // 当前租户配额（issue #71）：平台租户/未绑定套餐时 unlimited=true。
 const quota = ref<any>(null)
-onMounted(async () => {
-  quota.value = await getCurrentTenantQuota()
-})
 
-const activeTab = ref('basic')
+// 回调页完成绑定后跳回 /profile?tab=social，这里按 query 定位 tab。
+const activeTab = ref((route.query.tab as string) || 'basic')
 const saving = ref(false)
 const pwdFormRef = ref<FormInstance>()
+
+// ---------- 社交账号绑定/解绑（issue #77） ----------
+interface SocialBinding {
+  id: number
+  provider: string
+  openid: string
+  nickname: string
+  lastLoginAt: string
+}
+const socialBindings = ref<SocialBinding[]>([])
+// 可绑定的平台：登录页同源的启用平台列表（公开端点）。
+const bindableProviders = ref<Array<{ provider: string; name: string }>>([])
+
+async function loadSocialTab() {
+  try {
+    const data = await listMySocialBindings()
+    socialBindings.value = data?.list || []
+  } catch {
+    socialBindings.value = []
+  }
+  try {
+    bindableProviders.value = (await listSocialProviders()) || []
+  } catch {
+    bindableProviders.value = []
+  }
+}
+
+// 绑定：已绑定同平台时提示幂等语义（重复绑定同一 openid 只更新资料，
+// spec §4.4.6），确认后走 bind 换授权地址并整页跳转。
+async function bindSocial(provider: string) {
+  const bound = socialBindings.value.some((b) => b.provider === provider)
+  if (bound) {
+    const confirmed = await ElMessageBox.confirm(
+      '该平台已绑定社交账号。重复绑定同一账号将更新绑定资料（幂等操作），绑定其他账号会因账号已被占用而失败。继续？',
+      '重复绑定提示',
+      { type: 'warning' },
+    ).then(() => true).catch(() => false)
+    if (!confirmed) return
+  }
+  try {
+    const data = await socialBind(provider)
+    rememberSocialFlow(provider)
+    window.location.href = data.url
+  } catch {
+    // 拦截器已提示（平台未配置/已停用等），保持当前页。
+  }
+}
+
+// 解绑本人绑定（只能解绑本人，非本人/不存在后端返回 404）。
+async function unbindSocial(row: SocialBinding) {
+  const confirmed = await ElMessageBox.confirm(
+    `确定解绑 ${socialProviderLabel(row.provider)} 账号？解绑后将无法使用该账号扫码登录。`,
+    '解绑确认',
+    { type: 'warning' },
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+  await unbindMySocialUser(row.id)
+  ElMessage.success('已解绑')
+  await loadSocialTab()
+}
+
+onMounted(async () => {
+  quota.value = await getCurrentTenantQuota()
+  loadSocialTab()
+})
 
 const profileForm = reactive({
   nickname: userInfo.value?.nickname || '',
@@ -258,5 +362,27 @@ async function savePassword() {
 .form-narrow {
   max-width: 480px;
   padding-top: 12px;
+}
+
+.social-bind {
+  padding-top: 12px;
+}
+
+.bind-tip {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #909399;
+}
+
+.bind-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.bind-empty {
+  font-size: 13px;
+  color: #c0c4cc;
 }
 </style>
