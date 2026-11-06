@@ -116,6 +116,25 @@ func (h *Handler) DeleteChannel(c *gin.Context) {
 	response.OK(c, true)
 }
 
+// TestChannel 渠道测试发送（issue #73）：用指定渠道投递一条真实消息，
+// 验证渠道配置；仅平台租户可用（service 层校验）。
+func (h *Handler) TestChannel(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	var req dto.ChannelTestReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	result, err := h.svc.TestChannel(c.Request.Context(), id, &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
 // ---------- 模板 ----------
 
 func (h *Handler) PageTemplates(c *gin.Context) {
