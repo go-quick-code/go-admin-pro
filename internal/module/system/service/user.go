@@ -95,6 +95,9 @@ func (s *Service) GetUser(ctx context.Context, id int64) (*model.User, error) {
 // CreateUser 创建用户。用户行、角色绑定、岗位绑定在同一事务里落库，
 // 任一步失败整体回滚，不会留下没有角色/岗位的半套账号。
 func (s *Service) CreateUser(ctx context.Context, req *dto.UserCreateReq) error {
+	if err := s.checkUserQuota(ctx); err != nil {
+		return err
+	}
 	total, err := s.repo.CountUserByUsername(ctx, req.Username, 0)
 	if err != nil {
 		return err
