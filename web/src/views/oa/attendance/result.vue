@@ -407,7 +407,13 @@ async function submitRecompute() {
 }
 
 onMounted(async () => {
-  users.value = (await listSimpleUsers()) || []
+  // 用户下拉依赖 system:user:simple-list；未授权时降级为空列表，
+  // 结果表格仍按可见范围正常加载（不因下拉失效而白屏）。
+  try {
+    users.value = (await listSimpleUsers()) || []
+  } catch {
+    users.value = []
+  }
   await load()
 })
 </script>
