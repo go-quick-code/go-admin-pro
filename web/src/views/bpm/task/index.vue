@@ -305,6 +305,7 @@ function instanceStatusTag(status: number): string {
 function businessRouteOf(businessType: string): string {
   const routes: Record<string, string> = {
     crm_contract_approval: '/crm/contract',
+    oa_leave_approval: '/oa/leave/request',
   }
   return routes[businessType] || ''
 }
