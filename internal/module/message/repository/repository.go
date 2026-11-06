@@ -8,6 +8,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -271,6 +272,23 @@ func (r *Repository) ListLogs(ctx context.Context, f LogFilter, offset, limit in
 // CreateLog 写入发送日志：tenant_id 由租户插件回填（service 也显式赋值）。
 func (r *Repository) CreateLog(ctx context.Context, row *model.Log) error {
 	return r.db.WithContext(ctx).Create(row).Error
+}
+
+// CountLogsInMonth 统计租户在 [start, end) 内指定渠道的日志行数
+// （月度配额用量口径，spec §4.2.4：成功与失败都算，不做软删过滤——
+// message_log 是 append-only 表，本就无 deleted_at）。
+// 显式带 tenant_id 条件并 tenant.Skip：配额用量查询可能来自平台侧
+// （app 装配的全量配额提供者可查任意租户），不能依赖租户插件的上下文注入；
+// 发送校验路径传入的也是当前租户 ID，口径一致。
+// 时间边界按应用时区计算后传入（service.monthWindow），go-sql-driver 以
+// DSN loc（= app.timezone）序列化两端，比较语义为绝对时刻。
+func (r *Repository) CountLogsInMonth(ctx context.Context, tenantID int64, channelType string, start, end time.Time) (int64, error) {
+	var total int64
+	err := tenant.Skip(r.db.WithContext(ctx)).Model(&model.Log{}).
+		Where("tenant_id = ? AND channel_type = ? AND created_at >= ? AND created_at < ?",
+			tenantID, channelType, start, end).
+		Count(&total).Error
+	return total, err
 }
 
 // UpdateLogAttempt 记录一次重发结果：更新原行，不新增行（spec §4.3.7）。

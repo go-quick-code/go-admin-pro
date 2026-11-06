@@ -112,11 +112,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	scheduler := infraservice.NewJobScheduler(infraRepo, cfg.Location())
 	infraSvc := infraservice.New(infraRepo, cfg, scheduler)
 
-	// 租户配额装配（issue #71，spec §4.2 / ADR 0012）：system 解释套餐限额
-	// 与用户数，infra 提供存储用量；适配器同时满足 system 的 QuotaProvider
-	// 与 infra 的 QuotaGateway 两个窄接口，在此组合注入（见 quota_gateway.go）。
+	// 租户配额装配（issue #71/#75，spec §4.2 / ADR 0012）：system 解释套餐限额
+	// 与用户数，infra 提供存储用量，message 提供短信/邮件月度用量；适配器同时
+	// 满足 system 的 QuotaProvider、infra 的 QuotaGateway 与 message 的
+	// MessageQuotaGateway 三个窄接口，在此组合注入（见 quota_gateway.go）。
+	// messageSvc 建在后面：适配器的 message 侧与 system/message 两个注入点
+	// 在 message 装配处补齐。
 	quotaAdapter := quotaGateway{sys: sysSvc, infra: infraSvc}
-	sysSvc.SetQuotaProvider(quotaAdapter)
 	infraSvc.SetQuotaGateway(quotaAdapter)
 
 	// 注册日志清理任务，可在“定时任务”中把 handlerName 配置为 cleanLogs。
@@ -188,6 +190,14 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 发送日志走租户插件；provider 注册表在 New 内先注册内置 log provider，
 	// smtp（#73）/aliyun_sms（#74）实现后在此追加 RegisterSender。
 	messageSvc := messageservice.New(messagerepo.New(db))
+	// 业务时区（ADR 0006）：月度配额的「当月」边界按 app.timezone 划分。
+	messageSvc.SetLocation(cfg.Location())
+	// 配额装配补齐（issue #75）：适配器带上 message 后再注入 system 的
+	// QuotaProvider（TenantQuota 的短信/邮件月度用量）与 message 的
+	// MessageQuotaGateway（发送校验的限额来源）。
+	quotaAdapter.message = messageSvc
+	sysSvc.SetQuotaProvider(quotaAdapter)
+	messageSvc.SetQuotaGateway(quotaAdapter)
 	messageAPI := messageapi.New(messageSvc, sysAPI.RequirePermission)
 
 	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围

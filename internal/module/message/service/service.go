@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/message/repository"
@@ -26,6 +27,12 @@ var ErrPlatformOnly = errors.New("消息渠道与模板仅平台租户可管理"
 type Service struct {
 	repo     *repository.Repository
 	registry *Registry
+	// quotaGateway 是发送月度配额的限额来源（issue #75，spec §4.2.4），
+	// 由 internal/app 装配期注入；未注入时（如单元测试直连 Service）不做配额校验。
+	quotaGateway MessageQuotaGateway
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入：
+	// 月度配额的「当月」边界按它划分。nil 时退回 time.Local。
+	location *time.Location
 }
 
 // New 创建 message Service，并注册内置 provider：log（开发用）、smtp
