@@ -221,6 +221,10 @@ func seedMenus(db *gorm.DB) error {
 		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
 		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
 		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
+		// 监控面板（issue #84，spec §7.2）：206 段（grep 去重确认 206/2060 空闲）。
+		// overview/requests 共用 infra:monitor:query（spec §5.8 无其他权限码，
+		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		menu(206, 200, "监控面板", "monitor", "infra/monitor/index", "infra:monitor:query", "Monitor", 6),
 
 		btn(2011, 201, "文件上传", "infra:file:upload", 1),
 		btn(2012, 201, "文件删除", "infra:file:delete", 2),

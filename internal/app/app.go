@@ -275,6 +275,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	quotaAdapter.message = messageSvc
 	sysSvc.SetQuotaProvider(quotaAdapter)
 	messageSvc.SetQuotaGateway(quotaAdapter)
+	// 监控统计装配（issue #84，spec §4.10）：适配器组合 system（租户数/
+	// 用户数）与 message（发送成功/失败数），满足 infra 的
+	// MonitorStatsGateway 窄接口；infra 不直接读 system/message 表
+	//（ADR 模块边界，同 quotaGateway 模式）。message 装配在此完成，
+	// 适配器一次注入（值类型，注入后不得再改字段）。
+	monitorAdapter := monitorGateway{sys: sysSvc, message: messageSvc}
+	infraSvc.SetMonitorStatsGateway(monitorAdapter)
 	messageAPI := messageapi.New(messageSvc, sysAPI.RequirePermission)
 
 	// OA 模块（issue #43 骨架 + #50 工作日历起引入实体表仓储）：可见范围
