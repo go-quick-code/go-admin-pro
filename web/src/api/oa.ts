@@ -466,3 +466,55 @@ export function updateCalendarEvent(data: CalendarEventPayload) {
 export function cancelCalendarEvent(id: number) {
   return request.delete(`/oa/calendar/event/${id}`) as Promise<any>
 }
+
+
+// ---------- OA 文档目录与 ACL（issue #58，spec #42 §3.8/§4.12/§5） ----------
+// 权限模型：目录树/详情挂 oa:document:query（菜单 526 管理入口 / 537 我的文档），
+// 不可见目录不出现在树里、详情 404；创建挂 oa:document:create（5261），
+// 顶层目录必须带显式 ACL；改名/删除/ACL 设置只要求目录管理权（目录 owner 或
+// oa:document:manage），服务层对「可见无管理权」返回 403、不可见返回 404；
+// 有子目录或文件的目录删除返回 409。文件上传/下载由 #59 落地（码 5263）。
+
+// ACL 主体：0 全员（targetId=0）/ 1 部门（含子树）/ 2 角色 / 3 用户。
+export interface DocumentACLPayload {
+  targetType: number
+  targetId: number
+}
+
+export interface DocumentFolderPayload {
+  id?: number
+  parentId?: number
+  name: string
+  sort?: number
+  acl?: DocumentACLPayload[]
+}
+
+// 可见目录树：只含当前用户有读权限的目录；父目录不可见时子目录提升为根节点。
+export function getDocumentFolderTree() {
+  return request.get('/oa/document/folder/tree') as Promise<any>
+}
+// 目录详情（范围外/跨租户/无 ACL 顶层的非 owner 404）。
+export function getDocumentFolder(id: number) {
+  return request.get(`/oa/document/folder/${id}`) as Promise<any>
+}
+// 创建目录：parentId=0 为顶层（必须带显式 ACL）；子目录 acl 留空表示继承。
+export function createDocumentFolder(data: DocumentFolderPayload) {
+  return request.post('/oa/document/folder', data) as Promise<any>
+}
+// 改名/排序（parentId 不可变，v1 不做跨目录移动）。
+export function updateDocumentFolder(data: DocumentFolderPayload) {
+  const { id, name, sort } = data
+  return request.put('/oa/document/folder', { id, name, sort }) as Promise<any>
+}
+// 删除目录：有子目录或文件返回 409。
+export function deleteDocumentFolder(id: number) {
+  return request.delete(`/oa/document/folder/${id}`) as Promise<any>
+}
+// 读取目录 ACL（需要目录管理权）：own entries + 最近祖先的有效条目。
+export function getDocumentFolderACL(id: number) {
+  return request.get(`/oa/document/folder/${id}/acl`) as Promise<any>
+}
+// 整体替换目录 ACL：顶层目录不允许清空（400）；子目录清空表示继承父目录。
+export function setDocumentFolderACL(id: number, entries: DocumentACLPayload[]) {
+  return request.put(`/oa/document/folder/${id}/acl`, { entries }) as Promise<any>
+}
