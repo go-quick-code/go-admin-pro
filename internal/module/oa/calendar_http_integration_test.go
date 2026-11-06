@@ -333,6 +333,105 @@ func TestIntegrationCalendarVisibility(t *testing.T) {
 	}
 }
 
+// TestIntegrationCalendarDeptAncestorVisibility 锁定部门日程的子树语义
+// （PR #66 审查 P1-1）：部门日程对创建者部门及其**子树**可见，查看者侧按
+// 部门祖先链判定。种子部门树 100 总公司 → 101/102/103，另建 101 的子部门
+// 104。
+func TestIntegrationCalendarDeptAncestorVisibility(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	roleID := createRoleWithMenus(t, env, admin, "calendar_ancestor", []int64{
+		calendarMineMenuID, calendarCreate, calendarUpdate, calendarDelete,
+	})
+	dept104 := createSubDept(t, env, admin, "研发一组", 101)
+	// 创建者/查看者：101（创建者）、101 子部门 104、兄弟部门 102/103、祖先 100。
+	users := []struct {
+		name   string
+		deptID int64
+	}{
+		{"cal_anc_101", 101},
+		{"cal_anc_104", dept104},
+		{"cal_anc_102", 102},
+		{"cal_anc_103", 103},
+		{"cal_anc_100", 100},
+	}
+	tokens := make(map[string]string, len(users))
+	for _, u := range users {
+		id := createUser(t, env, admin, u.name, u.deptID)
+		bindCalendarRole(t, env, admin, u.name, id, u.deptID, roleID)
+		tokens[u.name] = env.Login(t, u.name, "123456")
+	}
+	creator101 := tokens["cal_anc_101"]
+
+	// 101 建的部门日程：101 自己与子部门 104 可见；102/103（兄弟）与
+	// 100（祖先）不可见——部门日程只向创建者部门的下级展开。
+	dept101 := createCalendarEventAPI(t, env, creator101, calendarEventBody(
+		"101 部门日程", "2030-01-10 09:00:00", "2030-01-10 10:00:00", false, 1,
+	))
+	if dept101.DeptID != 101 {
+		t.Fatalf("部门日程 dept_id = %d，期望创建人部门快照 101", dept101.DeptID)
+	}
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"cal_anc_101", true},
+		{"cal_anc_104", true},
+		{"cal_anc_102", false},
+		{"cal_anc_103", false},
+		{"cal_anc_100", false},
+	}
+	for _, tc := range cases {
+		status, api, rows := listCalendarEventsAPI(t, env, tokens[tc.name], calendarListStart, calendarListEnd)
+		mustOK(t, tc.name+" 列表", status, api)
+		if got := calendarTitles(rows)["101 部门日程"]; got != tc.want {
+			t.Fatalf("%s 对 101 部门日程可见性 = %v，期望 %v（rows=%+v）", tc.name, got, tc.want, rows)
+		}
+	}
+
+	// 100 建的部门日程：全部下级 101（含 104）/102/103 均可见。
+	dept100 := createCalendarEventAPI(t, env, tokens["cal_anc_100"], calendarEventBody(
+		"100 部门日程", "2030-01-10 11:00:00", "2030-01-10 12:00:00", false, 1,
+	))
+	if dept100.DeptID != 100 {
+		t.Fatalf("部门日程 dept_id = %d，期望创建人部门快照 100", dept100.DeptID)
+	}
+	for _, name := range []string{"cal_anc_101", "cal_anc_104", "cal_anc_102", "cal_anc_103", "cal_anc_100"} {
+		status, api, rows := listCalendarEventsAPI(t, env, tokens[name], calendarListStart, calendarListEnd)
+		mustOK(t, name+" 列表", status, api)
+		if !calendarTitles(rows)["100 部门日程"] {
+			t.Fatalf("%s 应能看到 100 建的部门日程（rows=%+v）", name, rows)
+		}
+	}
+
+	// 私有/公开不受影响：私有仅创建人，公开对全部登录用户可见。
+	private := createCalendarEventAPI(t, env, creator101, calendarEventBody(
+		"101 私有日程", "2030-01-10 13:00:00", "2030-01-10 14:00:00", false, 0,
+	))
+	public := createCalendarEventAPI(t, env, admin, calendarEventBody(
+		"公开日程", "2030-01-10 15:00:00", "2030-01-10 16:00:00", false, 2,
+	))
+	status, api, rows := listCalendarEventsAPI(t, env, tokens["cal_anc_104"], calendarListStart, calendarListEnd)
+	mustOK(t, "子部门查看私有/公开", status, api)
+	if titles := calendarTitles(rows); titles["101 私有日程"] {
+		t.Fatalf("私有日程不应被子部门用户看到（rows=%+v）", rows)
+	}
+	for _, name := range []string{"cal_anc_100", "cal_anc_102", "cal_anc_103", "cal_anc_104"} {
+		status, api, rows := listCalendarEventsAPI(t, env, tokens[name], calendarListStart, calendarListEnd)
+		mustOK(t, name+" 列表", status, api)
+		if !calendarTitles(rows)["公开日程"] {
+			t.Fatalf("%s 应能看到公开日程（rows=%+v）", name, rows)
+		}
+	}
+	status, api, _ = getCalendarEventAPI(t, env, tokens["cal_anc_104"], private.ID)
+	if status != http.StatusNotFound {
+		t.Fatalf("子部门读私有日程: HTTP %d code %d，期望 404", status, api.Code)
+	}
+	status, api, _ = getCalendarEventAPI(t, env, tokens["cal_anc_100"], public.ID)
+	mustOK(t, "祖先部门读公开日程", status, api)
+}
+
 // TestIntegrationCalendarPermissionCodes 权限码逐码 + 公开日程缺少
 // oa:calendar:public 的 403 + 非创建人不可编辑/取消。
 func TestIntegrationCalendarPermissionCodes(t *testing.T) {

@@ -1,15 +1,16 @@
 // calendar_rule.go 承载日程的核心判定规则（issue #56，docs/oa-mvp-spec.md
 // §4.11）。全部为**纯函数/纯方法**（无存储访问、无 HTTP 上下文）：
 //
-//   - 可见性：私有仅创建人；部门对创建人创建时的部门快照及子树可见；公开
-//     对全租户可见。取消（status=1）后一律不可见（列表与详情同一判定）；
+//   - 可见性：私有仅创建人；部门对创建人创建时的部门快照及其子树可见（查看
+//     者侧等价于 dept_id ∈ 查看者部门的祖先链）；公开对全租户可见。取消
+//     （status=1）后一律不可见（列表与详情同一判定）；
 //   - 创建公开日程需要 oa:calendar:public 权限；
 //   - 部门快照：dept_id 只在创建时写入，编辑器不得刷新（用户调部门后历史
 //     日程仍归属原部门）；
 //   - 起止时间：结束必须晚于开始；列表区间必须有序且不超过一年。
 //
 // 仓储侧只消费同一语义的**单条谓词**（repository.ListCalendarEventsByVisibility：
-// status=0 AND (creator_id=本人 OR (visibility=部门 AND dept_id IN 部门子树)
+// status=0 AND (creator_id=本人 OR (visibility=部门 AND dept_id IN 查看者祖先链)
 // OR visibility=公开)），本文件的 CalendarViewer.Permits 是该谓词的内存镜像，
 // 表驱动测试锁定二者语义一致。
 package service
@@ -40,16 +41,18 @@ const CalendarPublicPermission = "oa:calendar:public"
 
 // CalendarViewer 是可见性判定所需的查看者上下文（存储无关）：
 //   - UserID 查看者用户 ID（<=0 视为未登录，什么都看不到）；
-//   - DeptIDs 查看者所属部门及其子树（升序去重；由 SystemGateway 取数后
-//     经 CalendarViewerOf 归一化）。空集合表示没有部门可见范围。
+//   - DeptIDs 查看者所属部门及其**祖先链**（含自身，升序去重；由
+//     SystemGateway 取数后经 CalendarViewerOf 归一化）。部门日程的 dept_id
+//     命中该集合即对查看者可见（部门及子部门语义的查看者侧表达）。空集合
+//     表示没有部门可见范围。
 type CalendarViewer struct {
 	UserID  int64
 	DeptIDs []int64
 }
 
 // CalendarViewerOf 归一化查看者上下文（纯函数）：userID<=0 时 fail-closed
-// 返回空视图；deptID<=0 时部门子树为空（只可能看到本人与公开日程）。
-// deptIDs 去重并升序，便于断言与 SQL IN 的稳定入参。
+// 返回空视图；deptID<=0 且 deptIDs 为空时部门可见范围为空（只可能看到本人
+// 与公开日程）。deptIDs 去重并升序，便于断言与 SQL IN 的稳定入参。
 func CalendarViewerOf(userID, deptID int64, deptIDs []int64) CalendarViewer {
 	if userID <= 0 {
 		return CalendarViewer{DeptIDs: []int64{}}
@@ -67,7 +70,7 @@ func CalendarViewerOf(userID, deptID int64, deptIDs []int64) CalendarViewer {
 	for id := range set {
 		out = append(out, id)
 	}
-	// 小集合插入排序即可（部门子树通常 < 100）；避免额外依赖。
+	// 小集合插入排序即可（部门祖先链通常 < 100）；避免额外依赖。
 	for i := 1; i < len(out); i++ {
 		for j := i; j > 0 && out[j] < out[j-1]; j-- {
 			out[j], out[j-1] = out[j-1], out[j]
@@ -80,7 +83,8 @@ func CalendarViewerOf(userID, deptID int64, deptIDs []int64) CalendarViewer {
 //   - 已取消（status != 0）→ false：取消后列表/详情都不再展示；
 //   - 创建人本人 → 恒可见（与 SQL 谓词的 creator_id 短路一致，调岗不影响）；
 //   - 私有 → 仅创建人；
-//   - 部门 → 日程的 dept_id（创建时快照）∈ 查看者部门子树；
+//   - 部门 → 日程的 dept_id（创建时快照）∈ 查看者部门祖先链（含自身）：
+//     子部门能看到祖先部门创建的日程，祖先部门看不到子部门创建的日程；
 //   - 公开 → 登录用户（userID>0）全租户可见；
 //   - 未知可见性 → fail-closed。
 func (v CalendarViewer) Permits(event model.CalendarEvent) bool {
@@ -105,6 +109,17 @@ func (v CalendarViewer) Permits(event model.CalendarEvent) bool {
 	default:
 		return false
 	}
+}
+
+// ValidateCalendarEventMutable 判断日程是否允许经日历接口改写/取消（纯函数）：
+// source=room_booking 的日程由会议室预约在同一事务内创建与联动取消，只能经
+// 会议室取消路径修改；日历接口的编辑/取消一律 409（PR #66 审查 P2-5），
+// 避免两侧状态分叉（日程取消了预约还挂着，或反过来）。
+func ValidateCalendarEventMutable(event model.CalendarEvent) error {
+	if event.Source == model.CalendarSourceRoomBooking {
+		return xerr.Conflict("会议室预约生成的日程不能通过日历修改或取消，请在会议室预约中操作")
+	}
+	return nil
 }
 
 // ValidateCalendarVisibility 校验可见性取值，并在公开时检查权限：

@@ -619,6 +619,13 @@ func seedRoles(db *gorm.DB) error {
 		{RoleID: 2, MenuID: 5295},
 		{RoleID: 2, MenuID: 5296},
 		{RoleID: 2, MenuID: 5297},
+		// 通用待办（PR #66 审查 P1-2）：部门负责人/普通员工经通知深链或菜单
+		// 进入 /bpm/task 需要 512 菜单（bpm:task:query）与 5121 办理按钮
+		// （bpm:task:handle）；缺少时页面 403、动态路由不注册、通知深链 404。
+		// 办理动作本身仍以「当前办理人/发起人」身份收口（spec §5），
+		// bpm:task:handle 只控制前端按钮显隐。
+		{RoleID: 2, MenuID: 512},
+		{RoleID: 2, MenuID: 5121},
 		// 顶栏通知铃铛（issue #64 review）：notify:message:query 挂在 5123
 		// 按钮，此前未授予普通角色，NotifyBell 轮询 403；普通角色需要读本人通知。
 		{RoleID: 2, MenuID: 5123},
