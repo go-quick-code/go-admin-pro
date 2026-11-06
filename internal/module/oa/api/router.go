@@ -190,6 +190,20 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	claim.GET("/:id/files/:fileId/download", h.DownloadExpenseClaimFile)
 	claim.POST("/:id/files", h.requirePermission("oa:expense:update"), h.UploadExpenseClaimFile)
 	claim.DELETE("/:id/files/:fileId", h.requirePermission("oa:expense:update"), h.DeleteExpenseClaimFile)
+
+	// 日程（issue #56，菜单种子 524 段，spec §4.11/§5）：列表/详情挂
+	// oa:calendar:query（可见性由服务层三态谓词收口：私有仅创建人、部门按
+	// 创建时部门快照及子树、公开全租户；范围外/跨租户/已取消 404）；
+	// 创建/编辑/取消逐码，取消为软取消（status=1，不再展示）。公开日程的
+	// 创建/编辑另需 oa:calendar:public（service 校验，缺失 403）。静态路由
+	// /list 先于 /:id 注册。
+	event := oa.Group("/calendar/event")
+	event.GET("/list", h.requirePermission(calendarQuery), h.ListCalendarEvents)
+	event.GET("/:id", h.requirePermission(calendarQuery), h.GetCalendarEvent)
+	event.POST("", h.requirePermission("oa:calendar:create"), h.CreateCalendarEvent)
+	event.PUT("", h.requirePermission("oa:calendar:update"), h.UpdateCalendarEvent)
+	event.DELETE("/:id", h.requirePermission("oa:calendar:delete"), h.CancelCalendarEvent)
+	event.POST("/:id/cancel", h.requirePermission("oa:calendar:delete"), h.CancelCalendarEvent)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。
