@@ -182,6 +182,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	oaSvc.SetBPM(bpmSvc)
 	oaSvc.SetAPIPrefix(cfg.App.APIPrefix)
 	oaSvc.SetLeaveFileStore(leaveFileStore{infra: infraSvc})
+	// 报销单（issue #54）：草稿/明细闭环只做业务写，不依赖 bpm；提交与审批
+	// 回调由 #55 在同一状态机上接线。附件复用 infra_file（biz_type=oa_expense）。
+	oaSvc.SetExpenseFileStore(expenseFileStore{infra: infraSvc})
 	bpmSvc.RegisterBusinessHandler(oaservice.LeaveApprovalBusinessType, oaSvc)
 
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission)

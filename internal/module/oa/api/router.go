@@ -138,6 +138,22 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	request.GET("/:id/files/:fileId/download", h.DownloadLeaveRequestFile)
 	request.POST("/:id/files", h.requirePermission("oa:leave:update"), h.UploadLeaveRequestFile)
 	request.DELETE("/:id/files/:fileId", h.requirePermission("oa:leave:update"), h.DeleteLeaveRequestFile)
+
+	// 报销单（issue #54，菜单种子 523/533 段）：列表/详情/附件查看登录即可
+	//（服务层按 §4.6 可见范围收口：manage → 全租户、部门负责人 → 子树、
+	// 否则本人；范围外/跨租户 404）；草稿写动作逐码——创建/编辑/删除，附件
+	// 上传与删除跟随编辑码（oa:expense:update）。提交（POST /submit）与审批
+	// 回调属 #55，本组暂不注册；状态常量与守卫已在 service 预留。
+	claim := oa.Group("/expense/claim")
+	claim.GET("/page", h.PageExpenseClaims)
+	claim.GET("/:id", h.GetExpenseClaimDetail)
+	claim.POST("", h.requirePermission("oa:expense:create"), h.CreateExpenseClaim)
+	claim.PUT("", h.requirePermission("oa:expense:update"), h.UpdateExpenseClaim)
+	claim.DELETE("/:id", h.requirePermission("oa:expense:delete"), h.DeleteExpenseClaim)
+	claim.GET("/:id/files", h.ListExpenseClaimFiles)
+	claim.GET("/:id/files/:fileId/download", h.DownloadExpenseClaimFile)
+	claim.POST("/:id/files", h.requirePermission("oa:expense:update"), h.UploadExpenseClaimFile)
+	claim.DELETE("/:id/files/:fileId", h.requirePermission("oa:expense:update"), h.DeleteExpenseClaimFile)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。

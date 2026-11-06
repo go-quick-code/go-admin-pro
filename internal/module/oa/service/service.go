@@ -48,6 +48,9 @@ type SystemGateway interface {
 	DeptNames(ctx context.Context, deptIDs []int64) (map[int64]string, error)
 	// RoleNames 批量返回角色名称（公告受众回显）。
 	RoleNames(ctx context.Context, roleIDs []int64) (map[int64]string, error)
+	// ListDictValues 返回系统字典类型的启用值集合（按 sort 排序）。
+	// 报销类别取字典 oa_expense_category 的启用值（issue #54，spec §4.9）。
+	ListDictValues(ctx context.Context, dictType string) ([]string, error)
 }
 
 // NotifyGateway 是 oa 对 notify 模块的依赖面（notify 为平台级被依赖方，
@@ -73,6 +76,9 @@ type Service struct {
 	bpm *bpmservice.Service
 	// files 是请假附件的存储依赖面（由 internal/app 装配 infra 适配器，issue #52）。
 	files LeaveFileStore
+	// expenseFiles 是报销附件的存储依赖面（由 internal/app 装配 infra 适配器，
+	// issue #54）；与请假附件字段分开，避免同一工单合并时互相覆盖。
+	expenseFiles ExpenseFileStore
 	// announcementFiles 是公告附件的存储依赖面（由 internal/app 装配 infra
 	// 适配器，issue #48）；与请假附件字段分开，避免同一工单合并时互相覆盖。
 	announcementFiles AnnouncementFileStore

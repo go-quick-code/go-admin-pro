@@ -150,3 +150,28 @@ func (s *Service) RoleNames(ctx context.Context, roleIDs []int64) (map[int64]str
 	}
 	return names, nil
 }
+
+// ListDictValues 返回系统字典类型的启用值集合（按 sort、id 升序；重复值
+// 只返回一次）。报销类别取字典 oa_expense_category 的启用值（issue #54，
+// spec §4.9）。字典表是平台级配置（不带 tenant_id），所有租户看到同一份。
+func (s *Service) ListDictValues(ctx context.Context, dictType string) ([]string, error) {
+	status := int8(model.StatusEnable)
+	rows, err := s.repo.ListDictData(ctx, dictType, "", &status)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for i := range rows {
+		value := rows[i].Value
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values, nil
+}
