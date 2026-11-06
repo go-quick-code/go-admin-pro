@@ -35,4 +35,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	apiLog.GET("/page", h.perm("infra:api-log:query"), h.PageAPILogs)
 	apiLog.DELETE("", h.perm("infra:api-log:delete"), h.DeleteAPILogs)
 	apiLog.DELETE("/clear", h.perm("infra:api-log:delete"), h.ClearAPILogs)
+
+	// 数据库文档（issue #83，spec §4.9/§5.8）：仅平台租户（service 层收口 403）。
+	dbdoc := rg.Group("/infra/db-doc")
+	dbdoc.GET("/tables", h.perm("infra:db-doc:query"), h.ListDBTables)
+	dbdoc.GET("/table/:name", h.perm("infra:db-doc:query"), h.GetDBTable)
+	dbdoc.GET("/export", h.perm("infra:db-doc:query"), h.ExportDBDoc)
 }

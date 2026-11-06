@@ -211,6 +211,10 @@ func seedMenus(db *gorm.DB) error {
 		// 访问日志（issue #80，spec §7.2）：204 段，按钮码 2041（菜单 ID×10+n，
 		// grep 去重确认 204/2041 未被占用）。
 		menu(204, 200, "访问日志", "api-log", "infra/api-log/index", "infra:api-log:query", "Document", 4),
+		// 数据库文档（issue #83，spec §7.2）：205 段（grep 去重确认 205 空闲）。
+		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
+		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
 
 		btn(2011, 201, "文件上传", "infra:file:upload", 1),
 		btn(2012, 201, "文件删除", "infra:file:delete", 2),
