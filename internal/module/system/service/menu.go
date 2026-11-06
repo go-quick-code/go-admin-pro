@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
@@ -34,6 +35,20 @@ func (s *Service) ListMenuTree(ctx context.Context) ([]*model.Menu, error) {
 	list, err := s.repo.ListMenus(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// 非平台租户只能看到套餐范围内菜单（含按钮）；平台租户/未绑套餐不限制。
+	allowed, err := s.allowedMenuIDs(ctx, tenant.ID(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if allowed != nil {
+		filtered := make([]model.Menu, 0, len(list))
+		for _, menu := range list {
+			if _, ok := allowed[menu.ID]; ok {
+				filtered = append(filtered, menu)
+			}
+		}
+		list = filtered
 	}
 	return BuildMenuTree(list), nil
 }

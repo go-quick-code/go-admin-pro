@@ -41,13 +41,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	role.PUT("", h.RequirePermission("system:role:update"), h.UpdateRole)
 	role.DELETE("/:id", h.RequirePermission("system:role:delete"), h.DeleteRole)
 
-	// 菜单
+	// 菜单：定义是全局共享的（system_menu 无 tenant_id），写操作只允许平台租户；
+	// 租户侧只读列表会按套餐过滤（service.ListMenuTree）。否则租户可改全局菜单
+	// 影响其他租户，套餐授权也会被绕过（ADR 0012）。
 	menu := rg.Group("/system/menu")
 	menu.GET("/list", h.RequirePermission("system:menu:query"), h.ListMenus)
 	menu.GET("/:id", h.RequirePermission("system:menu:query"), h.GetMenu)
-	menu.POST("", h.RequirePermission("system:menu:create"), h.CreateMenu)
-	menu.PUT("", h.RequirePermission("system:menu:update"), h.UpdateMenu)
-	menu.DELETE("/:id", h.RequirePermission("system:menu:delete"), h.DeleteMenu)
+	menu.POST("", h.RequirePlatformTenant(), h.RequirePermission("system:menu:create"), h.CreateMenu)
+	menu.PUT("", h.RequirePlatformTenant(), h.RequirePermission("system:menu:update"), h.UpdateMenu)
+	menu.DELETE("/:id", h.RequirePlatformTenant(), h.RequirePermission("system:menu:delete"), h.DeleteMenu)
 
 	// 部门
 	dept := rg.Group("/system/dept")

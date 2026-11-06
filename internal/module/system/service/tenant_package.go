@@ -8,6 +8,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -82,7 +83,30 @@ func (s *Service) UpdateTenantPackage(ctx context.Context, req *dto.TenantPackag
 	pkg.MaxSMSMonthly = req.MaxSMSMonthly
 	pkg.MaxMailMonthly = req.MaxMailMonthly
 	pkg.Remark = strings.TrimSpace(req.Remark)
-	return s.repo.SaveTenantPackage(ctx, pkg)
+	// 套餐菜单变化要同步所有引用租户的超管菜单，否则已绑定租户会停留在
+	// 旧套餐（spec §4.1）。套餐与租户重绑同事务提交。
+	if err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		if err := tx.SaveTenantPackage(ctx, pkg); err != nil {
+			return err
+		}
+		tenantIDs, err := tx.ListTenantIDsByPackageID(ctx, pkg.ID)
+		if err != nil {
+			return err
+		}
+		for _, tenantID := range tenantIDs {
+			if tenantID == tenant.DefaultID {
+				continue
+			}
+			if err := s.syncTenantSuperAdminMenus(ctx, tx, tenantID, pkg.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.ClearAllPermissionCache()
+	return nil
 }
 
 func (s *Service) UpdateTenantPackageStatus(ctx context.Context, id int64, status int8) error {

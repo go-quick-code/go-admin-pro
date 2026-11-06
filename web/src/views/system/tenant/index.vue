@@ -24,6 +24,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import ProTable from '@/components/ProTable.vue'
 import { formatTime, statusOptions } from '@/utils/format'
@@ -33,13 +34,26 @@ import {
   updateTenant,
   updateTenantStatus,
   deleteTenant,
+  listSimpleTenantPackages,
 } from '@/api/system'
+
+const packages = ref<any[]>([])
+
+const packageOptions = computed(() =>
+  packages.value.map((pkg) => ({ label: pkg.name, value: pkg.id })),
+)
+
+function packageName(packageId: number) {
+  if (!packageId) return '未绑定'
+  return packages.value.find((pkg) => pkg.id === packageId)?.name || `#${packageId}`
+}
 
 const columns = [
   { prop: 'id', label: 'ID', width: 70 },
   { prop: 'name', label: '租户名称', minWidth: 140 },
   { prop: 'contactName', label: '联系人', minWidth: 110 },
   { prop: 'contactMobile', label: '联系电话', minWidth: 130 },
+  { prop: 'packageId', label: '套餐', minWidth: 120, formatter: (row: any) => packageName(row.packageId) },
   { prop: 'accountCount', label: '账号额度', width: 100 },
   { prop: 'expireTime', label: '过期时间', minWidth: 170, slot: true },
   { prop: 'status', label: '状态', width: 90, slot: true },
@@ -51,18 +65,19 @@ const searchItems = [
   { prop: 'status', label: '状态', type: 'select', options: statusOptions },
 ]
 
-const formItems = [
+const formItems = computed(() => [
   { prop: 'name', label: '租户名称', required: true },
   { prop: 'contactName', label: '联系人' },
   { prop: 'contactMobile', label: '联系电话' },
+  { prop: 'packageId', label: '租户套餐', type: 'select', options: packageOptions.value },
   { prop: 'domain', label: '绑定域名', placeholder: '可选，如 demo.example.com' },
   { prop: 'accountCount', label: '账号额度', type: 'number' },
   { prop: 'expireTime', label: '过期时间', type: 'datetime' },
   { prop: 'status', label: '状态', type: 'radio', options: statusOptions },
   { prop: 'remark', label: '备注', type: 'textarea' },
-]
+])
 
-const defaultForm = { status: 0, accountCount: 10 }
+const defaultForm = { status: 0, accountCount: 10, packageId: 0 }
 
 const api = {
   page: pageTenants,
@@ -70,6 +85,10 @@ const api = {
   update: updateTenant,
   remove: deleteTenant,
 }
+
+onMounted(async () => {
+  packages.value = (await listSimpleTenantPackages()) || []
+})
 
 async function toggleStatus(row: any) {
   const next = row.status === 0 ? 1 : 0

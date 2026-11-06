@@ -271,6 +271,7 @@ type TenantCreateReq struct {
 	ContactName   string `json:"contactName"`
 	ContactMobile string `json:"contactMobile"`
 	Status        int8   `json:"status"`
+	PackageID     int64  `json:"packageId"`
 	Domain        string `json:"domain"`
 	ExpireTime    string `json:"expireTime"`
 	AccountCount  int    `json:"accountCount"`
@@ -283,6 +284,7 @@ type TenantUpdateReq struct {
 	ContactName   string `json:"contactName"`
 	ContactMobile string `json:"contactMobile"`
 	Status        int8   `json:"status"`
+	PackageID     int64  `json:"packageId"`
 	Domain        string `json:"domain"`
 	ExpireTime    string `json:"expireTime"`
 	AccountCount  int    `json:"accountCount"`
