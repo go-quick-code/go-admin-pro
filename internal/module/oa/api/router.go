@@ -26,6 +26,10 @@ const (
 	attendanceResultCorrect = "oa:attendance:result:correct"
 )
 
+// 考勤月度汇总权限码（issue #62，菜单种子 534）：查询挂菜单本身
+// （oa:attendance:summary:query）；全租户可见复用 oa:attendance:manage（5332）。
+const attendanceSummaryQuery = "oa:attendance:summary:query"
+
 // Handler 是 oa 模块的 HTTP 入口。
 // requirePermission 复用 system 模块的权限中间件（与 crm 同款装配方式）：
 // 本工单（issue #43）的可见范围探测接口是登录即可用的「我的可见范围」查询，
@@ -105,6 +109,14 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	result.POST("/recompute", h.requirePermission(attendanceResultCorrect), h.RecomputeAttendanceResults)
 	result.PUT("/:id/correct", h.requirePermission(attendanceResultCorrect), h.CorrectAttendanceResult)
 	result.DELETE("/:id/correct", h.requirePermission(attendanceResultCorrect), h.ClearAttendanceResultCorrection)
+
+	// 考勤月度汇总（issue #62，菜单种子 534 段，spec §4.10）：管理端分页/单
+	// 用户查询挂 oa:attendance:summary:query；员工「我的考勤」本月汇总卡片
+	// 登录即可（强制本人）。可见范围与结果列表同源（VisibilityScopeOf）。
+	summary := oa.Group("/attendance/summary")
+	summary.GET("/page", h.requirePermission(attendanceSummaryQuery), h.PageAttendanceSummaries)
+	summary.GET("/user", h.requirePermission(attendanceSummaryQuery), h.GetAttendanceSummaryOfUser)
+	summary.GET("/mine", h.GetMyAttendanceSummary)
 
 	// 请假类型与额度（issue #51，菜单种子 522 段）：类型列表与本人余额
 	// 登录即可（员工发起请假/查看余额的前置）；类型与额度的全部管理动作

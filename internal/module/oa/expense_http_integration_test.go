@@ -24,8 +24,8 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
-// 报销菜单/按钮码（菜单 523 + 5231–5235，员工页 534；issue #54 种子）。
-// 534 是合并 #61 后的空位（533 已被考勤结果占用）。
+// 报销菜单/按钮码（菜单 523 + 5231–5235，员工页 535；issue #54 种子）。
+// 535 是合并 #62 后的空位（533 考勤结果、534 考勤汇总已被占用）。
 const (
 	expenseMenuID     = int64(523)
 	expenseCreate     = int64(5231)
@@ -33,7 +33,7 @@ const (
 	expenseDelete     = int64(5233)
 	expenseSubmit     = int64(5234)
 	expenseManage     = int64(5235)
-	expenseMineMenuID = int64(534)
+	expenseMineMenuID = int64(535)
 )
 
 // expenseClaimResp 是报销单详情/保存响应的测试视图。

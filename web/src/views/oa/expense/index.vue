@@ -268,7 +268,7 @@ import {
   uploadExpenseClaimFile,
 } from '@/api/oa'
 
-// 报销（issue #54，菜单 523 报销 / 534 我的报销）：列表 + 草稿编辑抽屉
+// 报销（issue #54，菜单 523 报销 / 535 我的报销）：列表 + 草稿编辑抽屉
 // （表头 + 明细行增删改排序 + 合计预览）+ 详情（明细/附件/时间线）。
 // 合计由服务端按明细重算（请求里的 totalAmount 被忽略）；提交与审批属 #55，
 // 本页暂不提供提交按钮。权限码 oa:expense:create/update/delete/query。

@@ -359,6 +359,15 @@ func (s *Service) ApproveTask(ctx context.Context, taskID int64, comment string)
 	if err != nil {
 		return nil, err
 	}
+	// 事务已提交：可选的提交后钩子在已提交数据上执行（issue #62 请假通过后
+	// 的考勤结果重算）。钩子失败不回滚审批，由实现方自行记录。
+	if inst != nil {
+		if handler, ok := s.handlerFor(inst.BusinessType); ok {
+			if hook, ok := handler.(ApprovalCommitHook); ok {
+				hook.AfterApproved(ctx, inst)
+			}
+		}
+	}
 	return inst, nil
 }
 

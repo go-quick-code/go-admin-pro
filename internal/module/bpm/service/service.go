@@ -63,6 +63,15 @@ type BusinessHandler interface {
 	OnWithdrawn(ctx context.Context, instance *model.ProcessInstance, tx *gorm.DB) error
 }
 
+// ApprovalCommitHook 是 BusinessHandler 的**可选**扩展：实例最终通过、业务回调
+// 所在事务**提交成功后**由 bpm 调用一次（同一 goroutine，错误由实现自行记录，
+// 不影响已提交的审批）。用于必须读到已提交业务状态的后续动作——例如 issue
+// #62 请假通过后的考勤结果重算：重算经 LeaveDaysProvider 读「已通过」的请假
+// 记录，事务内读不到未提交状态。
+type ApprovalCommitHook interface {
+	AfterApproved(ctx context.Context, instance *model.ProcessInstance)
+}
+
 // Service 汇聚 bpm 模块的业务能力。
 type Service struct {
 	repo   *repository.Repository

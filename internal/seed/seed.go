@@ -329,9 +329,10 @@ func seedMenus(db *gorm.DB) error {
 		btn(5296, 529, "请假取消", "oa:leave:cancel", 6),
 
 		// 报销（issue #54）：523 报销（管理/财务入口，查询码挂菜单；spec §7.2 的
-		// 504 段在本仓库协调台账改为 523 段）+ 534 我的报销（员工侧空位自取，
-		// 合并 #61 后 533 已被考勤结果占用，grep 去重后取 534；529/530/531/532
-		// 已被请假/考勤/公告占用）。两页面共用同一视图，可见范围由后端 §4.6 收口。
+		// 504 段在本仓库协调台账改为 523 段）+ 535 我的报销（员工侧空位自取：
+		// 529 我的请假/530 考勤组/531 我的考勤/532 我的公告/533 考勤结果/
+		// 534 考勤汇总已占用，合并 #62 后 grep 去重取 535）。两页面共用同一
+		// 视图，可见范围由后端 §4.6 收口。
 		// 按钮码 = 菜单 ID×10+n：5231 创建/5232 编辑/5233 删除/5234 提交
 		//（提交逻辑属 #55，码先登记，路由由 #55 落地）/5235 管理（财务/管理
 		// 可见范围，spec §4.6/§4.9 默认审批流节点 2）。
@@ -341,7 +342,7 @@ func seedMenus(db *gorm.DB) error {
 		btn(5233, 523, "报销删除", "oa:expense:delete", 3),
 		btn(5234, 523, "报销提交", "oa:expense:submit", 4),
 		btn(5235, 523, "报销管理", "oa:expense:manage", 5),
-		menu(534, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 12),
+		menu(535, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 13),
 
 		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
 		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
@@ -362,6 +363,13 @@ func seedMenus(db *gorm.DB) error {
 		menu(533, 500, "考勤结果", "attendance-result", "oa/attendance/result", "oa:attendance:result:query", "DataAnalysis", 11),
 		btn(5331, 533, "考勤校正", "oa:attendance:result:correct", 1),
 		btn(5332, 533, "全租户可见", "oa:attendance:manage", 2),
+
+		// 考勤月度汇总（issue #62）：534 段（500–549 空位自取，grep 去重确认
+		// 534 未被占用）。查询码挂菜单（汇总页入口）；可见范围复用 #43 helper——
+		// oa:attendance:manage（5332 按钮承载）看全租户、部门负责人看子树、
+		// 否则仅本人。员工「本月汇总」卡片在「我的考勤」531 页面内登录即可，
+		// 不新增菜单。
+		menu(534, 500, "考勤汇总", "attendance-summary", "oa/attendance/summary", "oa:attendance:summary:query", "TrendCharts", 12),
 
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
@@ -506,7 +514,7 @@ func seedRoles(db *gorm.DB) error {
 		// 报销员工侧（issue #54，spec §7.3「内置普通角色授予…报销…的基础菜单」）：
 		// 我的报销页面 + 草稿创建/编辑/删除/提交按钮码；不含管理菜单 523 与
 		// oa:expense:manage（财务/管理员）。
-		{RoleID: 2, MenuID: 534},
+		{RoleID: 2, MenuID: 535},
 		{RoleID: 2, MenuID: 5231},
 		{RoleID: 2, MenuID: 5232},
 		{RoleID: 2, MenuID: 5233},
