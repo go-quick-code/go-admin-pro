@@ -13,7 +13,15 @@ import (
 )
 
 // sendTimeout 是 provider 投递超时（spec §4.3.2：超时 10s）。
-const sendTimeout = 10 * time.Second
+// 用 var 而非 const：仅集成测试把超时调短以验证超时路径（用例内改回原值），
+// 生产代码不写此变量。
+var sendTimeout = 10 * time.Second
+
+// SendTimeout / SetSendTimeout 是发送超时的读写缝：仅供集成测试在超时用例中
+// 调短后复原，生产代码不应调用。
+func SendTimeout() time.Duration { return sendTimeout }
+
+func SetSendTimeout(d time.Duration) { sendTimeout = d }
 
 // SendSMS 发送短信（POST /message/sms/send）。
 func (s *Service) SendSMS(ctx context.Context, req *dto.SendReq) (*dto.SendResult, error) {
@@ -34,12 +42,9 @@ func (s *Service) send(ctx context.Context, channelType string, req *dto.SendReq
 		return nil, err
 	}
 
-	template, err := s.repo.FindTemplateByCode(ctx, channelType, req.TemplateCode)
+	template, err := s.findEnabledTemplate(ctx, channelType, req.TemplateCode)
 	if err != nil {
 		return nil, err
-	}
-	if template == nil || template.Status != model.StatusEnable {
-		return nil, xerr.BadRequest("消息模板不存在或已停用")
 	}
 
 	channel, err := s.resolveChannel(ctx, channelType, req.ChannelCode)
@@ -47,19 +52,38 @@ func (s *Service) send(ctx context.Context, channelType string, req *dto.SendReq
 		return nil, err
 	}
 
+	return s.deliver(ctx, channel, template, recipient, req.Params)
+}
+
+// findEnabledTemplate 按类型与编码取启用中的模板（不存在/停用 400）。
+func (s *Service) findEnabledTemplate(ctx context.Context, channelType, code string) (*model.Template, error) {
+	template, err := s.repo.FindTemplateByCode(ctx, channelType, code)
+	if err != nil {
+		return nil, err
+	}
+	if template == nil || template.Status != model.StatusEnable {
+		return nil, xerr.BadRequest("消息模板不存在或已停用")
+	}
+	return template, nil
+}
+
+// deliver 是发送流程的共用核心（发送与渠道测试发送共用）：参数校验一致 →
+// 渲染 → provider 发送（超时 10s）→ 写日志（成功与失败都写）。
+// provider 未知/发送失败返回 502，错误详情只落日志，不回显密钥。
+func (s *Service) deliver(ctx context.Context, channel *model.Channel, template *model.Template, recipient string, params map[string]string) (*dto.SendResult, error) {
 	declared, err := decodeTemplateParams(template.Params)
 	if err != nil {
 		return nil, xerr.BadRequest("模板参数声明格式错误")
 	}
-	if err := validateSendParams(declared, req.Params); err != nil {
+	if err := validateSendParams(declared, params); err != nil {
 		return nil, err
 	}
 
-	title, err := renderTemplate(template.Title, req.Params)
+	title, err := renderTemplate(template.Title, params)
 	if err != nil {
 		return nil, err
 	}
-	content, err := renderTemplate(template.Content, req.Params)
+	content, err := renderTemplate(template.Content, params)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +91,7 @@ func (s *Service) send(ctx context.Context, channelType string, req *dto.SendReq
 	now := time.Now()
 	row := &model.Log{
 		TenantID:     tenant.ID(ctx),
-		ChannelType:  channelType,
+		ChannelType:  channel.ChannelType,
 		ChannelID:    channel.ID,
 		TemplateCode: template.Code,
 		Recipient:    recipient,
@@ -82,7 +106,7 @@ func (s *Service) send(ctx context.Context, channelType string, req *dto.SendReq
 		s.recordSendResult(ctx, row, SendResult{}, lookupErr)
 		slog.Error("message provider unavailable",
 			"channelId", channel.ID, "provider", channel.Provider, "err", lookupErr)
-		return nil, badGateway(sendFailureMessage(channelType))
+		return nil, badGateway(sendFailureMessage(channel.ChannelType))
 	}
 
 	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
@@ -93,15 +117,15 @@ func (s *Service) send(ctx context.Context, channelType string, req *dto.SendReq
 		Recipient:    recipient,
 		Title:        title,
 		Content:      content,
-		Params:       req.Params,
+		Params:       params,
 	})
 	s.recordSendResult(ctx, row, result, sendErr)
 	if sendErr != nil {
 		// 详情只落 message_log 与 slog，不回显给调用方（spec §4.3.5）。
 		slog.Error("message send failed",
 			"channelId", channel.ID, "provider", channel.Provider,
-			"channelType", channelType, "err", sendErr)
-		return nil, badGateway(sendFailureMessage(channelType))
+			"channelType", channel.ChannelType, "err", sendErr)
+		return nil, badGateway(sendFailureMessage(channel.ChannelType))
 	}
 	return &dto.SendResult{LogID: row.ID}, nil
 }

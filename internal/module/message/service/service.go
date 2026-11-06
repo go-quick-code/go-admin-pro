@@ -28,12 +28,12 @@ type Service struct {
 	registry *Registry
 }
 
-// New 创建 message Service，并注册内置的 log provider。
-// 其他 provider（smtp/aliyun_sms）由后续工单实现后经 RegisterSender 注入。
+// New 创建 message Service，并注册内置 provider：log（开发用）与 smtp
+// （邮件，issue #73）。aliyun_sms 由后续工单实现后经 RegisterSender 注入。
 func New(repo *repository.Repository) *Service {
 	return &Service{
 		repo:     repo,
-		registry: NewRegistry(NewLogSender()),
+		registry: NewRegistry(NewLogSender(), NewSMTPSender()),
 	}
 }
 

@@ -44,6 +44,15 @@ type StatusReq struct {
 	Status *int8 `json:"status" binding:"required"`
 }
 
+// ChannelTestReq 渠道测试发送请求（POST /message/channel/:id/test）：
+// 用指定渠道向 recipient 投递 templateCode 渲染后的消息，验证渠道配置。
+// 仅平台租户可用（service 层校验，spec §5.2）。
+type ChannelTestReq struct {
+	Recipient    string            `json:"recipient" binding:"required,max=255"`
+	TemplateCode string            `json:"templateCode" binding:"required,max=64"`
+	Params       map[string]string `json:"params"`
+}
+
 // ---------- 模板 ----------
 
 // TemplatePageReq 模板分页筛选。
