@@ -103,6 +103,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	scheduler := infraservice.NewJobScheduler(infraRepo, cfg.Location())
 	infraSvc := infraservice.New(infraRepo, cfg, scheduler)
 
+	// 租户配额装配（issue #71，spec §4.2 / ADR 0012）：system 解释套餐限额
+	// 与用户数，infra 提供存储用量；适配器同时满足 system 的 QuotaProvider
+	// 与 infra 的 QuotaGateway 两个窄接口，在此组合注入（见 quota_gateway.go）。
+	quotaAdapter := quotaGateway{sys: sysSvc, infra: infraSvc}
+	sysSvc.SetQuotaProvider(quotaAdapter)
+	infraSvc.SetQuotaGateway(quotaAdapter)
+
 	// 注册日志清理任务，可在“定时任务”中把 handlerName 配置为 cleanLogs。
 	// 清理跨租户执行（tenant.Skip，见 system repository），属系统级处理器：
 	// 只有平台租户管理员可创建/修改/启用/运行（PR #39 审查 P0）。

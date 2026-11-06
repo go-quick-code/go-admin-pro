@@ -18,6 +18,43 @@
           <div class="info-row"><span>手机号</span><b>{{ userInfo?.mobile || '-' }}</b></div>
           <div class="info-row"><span>邮箱</span><b>{{ userInfo?.email || '-' }}</b></div>
           <div class="info-row"><span>租户</span><b>{{ userInfo?.tenantId }}</b></div>
+
+          <!-- 当前租户配额（issue #71）：套餐限额与用量一目了然。 -->
+          <el-divider />
+          <div class="quota-title">
+            租户配额
+            <el-tag v-if="quota?.unlimited" type="success" size="small" effect="plain">不限</el-tag>
+          </div>
+          <template v-if="quota">
+            <div class="quota-row">
+              <span>用户数</span>
+              <b>
+                {{ quota.used.users }}
+                <span v-if="!quota.unlimited && quota.limit.maxUsers > 0" class="quota-limit">/ {{ quota.limit.maxUsers }}</span>
+              </b>
+            </div>
+            <div class="quota-row">
+              <span>存储</span>
+              <b>
+                {{ formatSize(quota.used.storageBytes) }}
+                <span v-if="!quota.unlimited && quota.limit.maxStorageMb > 0" class="quota-limit">/ {{ quota.limit.maxStorageMb }} MB</span>
+              </b>
+            </div>
+            <div class="quota-row">
+              <span>本月短信</span>
+              <b>
+                {{ quota.used.smsMonthly }}
+                <span v-if="!quota.unlimited && quota.limit.maxSmsMonthly > 0" class="quota-limit">/ {{ quota.limit.maxSmsMonthly }}</span>
+              </b>
+            </div>
+            <div class="quota-row">
+              <span>本月邮件</span>
+              <b>
+                {{ quota.used.mailMonthly }}
+                <span v-if="!quota.unlimited && quota.limit.maxMailMonthly > 0" class="quota-limit">/ {{ quota.limit.maxMailMonthly }}</span>
+              </b>
+            </div>
+          </template>
         </el-card>
       </el-col>
 
@@ -72,13 +109,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { updateProfile, changePassword } from '@/api/auth'
+import { getCurrentTenantQuota } from '@/api/system'
+import { formatSize } from '@/utils/format'
 
 const userStore = useUserStore()
 const userInfo = computed(() => userStore.userInfo)
+
+// 当前租户配额（issue #71）：平台租户/未绑定套餐时 unlimited=true。
+const quota = ref<any>(null)
+onMounted(async () => {
+  quota.value = await getCurrentTenantQuota()
+})
 
 const activeTab = ref('basic')
 const saving = ref(false)
@@ -181,6 +226,33 @@ async function savePassword() {
 .info-row b {
   color: #303133;
   font-weight: 500;
+}
+
+.quota-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+
+.quota-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 4px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.quota-row b {
+  color: #303133;
+  font-weight: 500;
+}
+
+.quota-limit {
+  color: #c0c4cc;
+  font-weight: 400;
 }
 
 .form-narrow {

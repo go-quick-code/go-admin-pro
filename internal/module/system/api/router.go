@@ -82,6 +82,12 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	dictData.PUT("", h.RequirePermission("system:dict:update"), h.UpdateDictData)
 	dictData.DELETE("/:id", h.RequirePermission("system:dict:delete"), h.DeleteDictData)
 
+	// 租户配额（issue #71，spec §5.1）：当前租户登录即可；指定租户需要
+	// system:tenant:query，但不进下面的平台 403 组——非平台租户查别租户
+	// 按「跨租户不可见」返回 404（handler 内判定，spec §4.11.4）。
+	rg.GET("/system/tenant/quota", h.GetCurrentTenantQuota)
+	rg.GET("/system/tenant/:id/quota", h.RequirePermission("system:tenant:query"), h.GetTenantQuota)
+
 	// 租户：仅平台租户可用（PR #39 残余风险 B）。中间件必须在所有路由前注册。
 	tenantGroup := rg.Group("/system/tenant")
 	tenantGroup.Use(h.RequirePlatformTenant())
