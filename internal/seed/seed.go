@@ -8,6 +8,7 @@ import (
 
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
@@ -57,6 +58,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 		return err
 	}
 	if err := seedConfigs(db); err != nil {
+		return err
+	}
+	if err := seedMessages(db); err != nil {
 		return err
 	}
 	if err := seedPoolConfigs(db); err != nil {
@@ -461,6 +465,37 @@ func seedMenus(db *gorm.DB) error {
 		btn(5121, 512, "任务办理", "bpm:task:handle", 1),
 		btn(5122, 512, "实例查询", "bpm:instance:query", 2),
 		btn(5123, 512, "通知查询", "notify:message:query", 3),
+
+		// 消息中心（issue #72，spec §7.2）：600 目录 + 601 短信管理 + 602 邮件管理
+		// + 603 发送日志。菜单查询码按 spec：601 挂 message:channel:query、
+		// 602 挂 message:mail:query、603 挂 message:log:query；模板没有独立菜单，
+		// 模板查询/增删改按钮码挂 601/602 段（ID = 菜单ID*10+n，grep 去重确认
+		// 600/601/602/603 与 6011–6019/6021–6029/6031–6032 未被占用）。
+		// 渠道/模板的「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		dir(600, 0, "消息中心", "/message", "ChatDotRound", 60),
+		menu(601, 600, "短信管理", "sms", "message/sms/index", "message:channel:query", "Iphone", 1),
+		btn(6011, 601, "渠道查询", "message:channel:query", 1),
+		btn(6012, 601, "渠道新增", "message:channel:create", 2),
+		btn(6013, 601, "渠道修改", "message:channel:update", 3),
+		btn(6014, 601, "渠道删除", "message:channel:delete", 4),
+		btn(6015, 601, "模板查询", "message:template:query", 5),
+		btn(6016, 601, "模板新增", "message:template:create", 6),
+		btn(6017, 601, "模板修改", "message:template:update", 7),
+		btn(6018, 601, "模板删除", "message:template:delete", 8),
+		btn(6019, 601, "短信发送", "message:sms:send", 9),
+		menu(602, 600, "邮件管理", "mail", "message/mail/index", "message:mail:query", "Message", 2),
+		btn(6021, 602, "渠道查询", "message:channel:query", 1),
+		btn(6022, 602, "渠道新增", "message:channel:create", 2),
+		btn(6023, 602, "渠道修改", "message:channel:update", 3),
+		btn(6024, 602, "渠道删除", "message:channel:delete", 4),
+		btn(6025, 602, "模板查询", "message:template:query", 5),
+		btn(6026, 602, "模板新增", "message:template:create", 6),
+		btn(6027, 602, "模板修改", "message:template:update", 7),
+		btn(6028, 602, "模板删除", "message:template:delete", 8),
+		btn(6029, 602, "邮件发送", "message:mail:send", 9),
+		menu(603, 600, "发送日志", "log", "message/log/index", "message:log:query", "Tickets", 3),
+		btn(6031, 603, "日志重发", "message:log:resend", 1),
+		btn(6032, 603, "日志删除", "message:log:delete", 2),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
@@ -835,6 +870,76 @@ func seedConfigs(db *gorm.DB) error {
 		{TenantID: 1, Category: "system", Name: "用户初始密码", Key: "user.init.password", Value: "123456", Type: "string", Visible: false, Remark: "新增用户默认密码"},
 	}
 	return tenant.Skip(db).Create(&configs).Error
+}
+
+// seedMessages 写入消息模块默认数据（issue #72，spec §7.3）：一条 log provider
+// 的短信渠道、一条 log provider 的邮件渠道，以及两条欢迎模板。
+// 仅当渠道表与模板表都为空时写入——管理员删除/改名后重复启动不复活；
+// 渠道/模板是平台级表，仍显式 tenant.Skip 表示系统级写入。
+func seedMessages(db *gorm.DB) error {
+	var channelCount, templateCount int64
+	if err := tenant.Skip(db).Model(&msgmodel.Channel{}).Count(&channelCount).Error; err != nil {
+		return err
+	}
+	if err := tenant.Skip(db).Model(&msgmodel.Template{}).Count(&templateCount).Error; err != nil {
+		return err
+	}
+	if channelCount > 0 || templateCount > 0 {
+		return nil
+	}
+
+	channels := []msgmodel.Channel{
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 1},
+			ChannelType: msgmodel.ChannelTypeSMS,
+			Code:        "sms-log",
+			Name:        "短信日志渠道",
+			Provider:    msgmodel.ProviderLog,
+			Config:      "{}",
+			Status:      msgmodel.StatusEnable,
+			Remark:      "内置开发渠道：只写应用日志，不真正发送（ADR 0010）",
+		},
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 2},
+			ChannelType: msgmodel.ChannelTypeMail,
+			Code:        "mail-log",
+			Name:        "邮件日志渠道",
+			Provider:    msgmodel.ProviderLog,
+			Config:      "{}",
+			Status:      msgmodel.StatusEnable,
+			Remark:      "内置开发渠道：只写应用日志，不真正发送（ADR 0010）",
+		},
+	}
+	if err := tenant.Skip(db).Create(&channels).Error; err != nil {
+		return fmt.Errorf("seed message channels: %w", err)
+	}
+
+	templates := []msgmodel.Template{
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 1},
+			ChannelType: msgmodel.ChannelTypeSMS,
+			Code:        "welcome",
+			Name:        "欢迎短信",
+			Content:     "您好 {{name}}，欢迎使用 go-admin-pro。",
+			Params:      `["name"]`,
+			Status:      msgmodel.StatusEnable,
+		},
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 2},
+			ChannelType: msgmodel.ChannelTypeMail,
+			Code:        "welcome",
+			Name:        "欢迎邮件",
+			Title:       "欢迎使用 go-admin-pro",
+			Content:     "<p>您好 {{name}}，欢迎使用 go-admin-pro。</p>",
+			Params:      `["name"]`,
+			Status:      msgmodel.StatusEnable,
+		},
+	}
+	if err := tenant.Skip(db).Create(&templates).Error; err != nil {
+		return fmt.Errorf("seed message templates: %w", err)
+	}
+	slog.Info("seed message defaults created", "channels", len(channels), "templates", len(templates))
+	return nil
 }
 
 func seedJobs(db *gorm.DB) error {

@@ -6,6 +6,7 @@ import (
 	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
@@ -38,6 +39,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
 		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
+		&msgmodel.Channel{}, &msgmodel.Template{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -72,6 +74,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
 	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
+	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
+	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
+	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板")
 	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
 	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
@@ -116,6 +121,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
+	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")
+	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板（幂等）")
 }
 
 // assertDefaultLeaveDefinition 断言请假默认流程（issue #63 收口，spec §4.8）：

@@ -12,6 +12,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/codegen"
 	crmapi "github.com/go-quick-code/go-admin-pro/internal/module/crm/api"
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
+	messageapi "github.com/go-quick-code/go-admin-pro/internal/module/message/api"
 	notifyapi "github.com/go-quick-code/go-admin-pro/internal/module/notify/api"
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
@@ -21,7 +22,7 @@ import (
 )
 
 // New 构建 HTTP 引擎，完成公开接口、鉴权接口与静态资源的装配。
-func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler, oaAPI *oaapi.Handler, bpmAPI *bpmapi.Handler, notifyAPI *notifyapi.Handler) *gin.Engine {
+func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler, oaAPI *oaapi.Handler, bpmAPI *bpmapi.Handler, notifyAPI *notifyapi.Handler, messageAPI *messageapi.Handler) *gin.Engine {
 	if cfg.App.Env == "dev" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -48,6 +49,9 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	// bpm（issue #44）：流程定义管理（实例/任务接口由 #46 追加注册）。
 	bpmAPI.RegisterProtected(protected)
 	notifyAPI.RegisterProtected(protected)
+	// message（issue #72）：渠道/模板（仅平台租户，service 层收口）、
+	// 短信/邮件发送与租户级发送日志。
+	messageAPI.RegisterProtected(protected)
 
 	// 上传文件不挂公开静态目录（PR #39 残余风险 A）：任何匿名用户都不能
 	// 通过 /files/* 直链读取文件，唯一入口是 GET /infra/file/:id/download
