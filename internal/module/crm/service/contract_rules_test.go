@@ -34,9 +34,9 @@ var contractStatusMatrix = []struct {
 	{from: 1, to: 4, legal: true},
 	{from: 1, to: 1, wantMsg: "草稿"},
 	{from: 1, to: 3, wantMsg: "草稿"},
-	// 待审：审批通过、驳回回草稿、作废。
-	{from: 2, to: 3, legal: true},
-	{from: 2, to: 1, legal: true},
+	// 待审：只能由用户作废；审批通过/驳回由 bpm 回调回写，不在状态端点（issue #47）。
+	{from: 2, to: 3, wantMsg: "待审"},
+	{from: 2, to: 1, wantMsg: "待审"},
 	{from: 2, to: 4, legal: true},
 	{from: 2, to: 2, wantMsg: "待审"},
 	// 已签：只能作废。
@@ -75,6 +75,47 @@ func TestCanTransitionContractStatus(t *testing.T) {
 		if err := CanTransitionContractStatus(s, 1); !isBadRequest(err) {
 			t.Fatalf("来源状态 %d 非法：期望 400，实际 %v", s, err)
 		}
+	}
+}
+
+// TestContractApprovalSnapshot 锁定 bpm 实例快照规则（issue #47，spec §4.5）：
+// 标题含合同号，摘要含客户名称与金额；超长按快照列宽截断。
+func TestContractApprovalSnapshot(t *testing.T) {
+	title, summary := contractApprovalSnapshot(
+		"HT202601020001", "年度服务合同", "华西制造有限公司", moneyFrom(t, "128000.00"),
+	)
+	if title != "合同审批: HT202601020001" {
+		t.Fatalf("标题快照错误：%q", title)
+	}
+	want := "客户：华西制造有限公司；合同：年度服务合同；金额：128000.00 元"
+	if summary != want {
+		t.Fatalf("摘要快照错误：%q，期望 %q", summary, want)
+	}
+
+	// 客户名缺失降级为 "-"（不阻塞提交，合同本身仍可读）。
+	_, summary = contractApprovalSnapshot("HT1", "合同", "", moneyFrom(t, "0"))
+	if !strings.Contains(summary, "客户：-") {
+		t.Fatalf("空客户名应降级为 -：%q", summary)
+	}
+
+	// 摘要按 500 字符截断（不切坏多字节字符）。
+	longCustomer := strings.Repeat("客", 600)
+	_, summary = contractApprovalSnapshot("HT1", "合同", longCustomer, moneyFrom(t, "1"))
+	if runes := []rune(summary); len(runes) != 500 {
+		t.Fatalf("摘要应按 500 字符截断，实际 %d", len(runes))
+	}
+}
+
+// TestTruncateContractRejectReason 驳回原因按 crm_contract.reject_reason
+// varchar(500) 列宽截断（issue #47）。
+func TestTruncateContractRejectReason(t *testing.T) {
+	if got := truncateContractRejectReason("金额需要重新核算"); got != "金额需要重新核算" {
+		t.Fatalf("短原因不应改写：%q", got)
+	}
+	long := strings.Repeat("驳", MaxContractRejectReasonLen+10)
+	got := truncateContractRejectReason(long)
+	if runes := []rune(got); len(runes) != MaxContractRejectReasonLen {
+		t.Fatalf("应按 %d 字符截断，实际 %d", MaxContractRejectReasonLen, len(runes))
 	}
 }
 

@@ -78,9 +78,9 @@
           <p class="detail-meta">
             业务类型：{{ detail.instance.businessType }} · 业务 ID：{{ detail.instance.businessId }}
             <el-link
-              v-if="businessRouteOf(detail.instance.businessType)"
+              v-if="businessRouteOf(detail.instance.businessType, detail.instance.businessId)"
               type="primary"
-              :href="businessRouteOf(detail.instance.businessType)"
+              :href="businessRouteOf(detail.instance.businessType, detail.instance.businessId)"
               target="_blank"
             >
               查看业务
@@ -301,13 +301,19 @@ function instanceStatusTag(status: number): string {
   return 'primary'
 }
 
-// 业务详情入口：业务类型 → 前端路由（后续业务工单落地页面后在此登记）。
-function businessRouteOf(businessType: string): string {
+// 业务详情入口：业务类型 → 前端路由（业务工单落地页面后在此登记）。
+// 合同审批直达合同详情抽屉（/crm/contract?id=<合同ID>，issue #47）。
+function businessRouteOf(businessType: string, businessId?: number): string {
   const routes: Record<string, string> = {
     crm_contract_approval: '/crm/contract',
     oa_leave_approval: '/oa/leave/request',
   }
-  return routes[businessType] || ''
+  const base = routes[businessType]
+  if (!base) return ''
+  if (businessType === 'crm_contract_approval' && businessId) {
+    return `${base}?id=${businessId}`
+  }
+  return base
 }
 
 // ---------- 审批时间线 ----------

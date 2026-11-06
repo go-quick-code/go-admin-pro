@@ -225,6 +225,62 @@
             <span class="line-total">合计：{{ detail.totalAmount ?? '0.00' }} 元</span>
           </div>
         </el-tab-pane>
+        <!-- 审批记录（issue #47）：合同详情展示 bpm 时间线与当前待办入口；
+             审批动作统一在待办中心完成，合同页不再内嵌审批按钮。 -->
+        <el-tab-pane label="审批记录" name="approval">
+          <template v-if="detail.approval">
+            <div class="approval-head">
+              <span>
+                流程状态：
+                <el-tag :type="instanceStatusTag(detail.approval.instance.status)" size="small">
+                  {{ instanceStatusText(detail.approval.instance.status) }}
+                </el-tag>
+              </span>
+              <el-button
+                v-if="pendingApprovalTasks.length"
+                type="primary"
+                size="small"
+                @click="goTaskCenter"
+              >
+                前往待办中心
+              </el-button>
+            </div>
+            <div v-if="pendingApprovalTasks.length" class="approval-section">
+              <h4 class="approval-title">当前待办</h4>
+              <el-table :data="pendingApprovalTasks" border size="small">
+                <el-table-column prop="nodeName" label="节点" min-width="140" />
+                <el-table-column label="办理人" min-width="140">
+                  <template #default="{ row }">
+                    {{ row.assigneeName || `用户#${row.assigneeId}` }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="到达时间" min-width="170">
+                  <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+                </el-table-column>
+              </el-table>
+            </div>
+            <div class="approval-section">
+              <h4 class="approval-title">审批时间线</h4>
+              <el-timeline v-if="detail.approval.records.length">
+                <el-timeline-item
+                  v-for="rec in detail.approval.records"
+                  :key="rec.id"
+                  :timestamp="formatTime(rec.createTime)"
+                  :type="recordTag(rec.action) === 'success' ? 'success' : recordTag(rec.action) === 'danger' ? 'danger' : 'primary'"
+                >
+                  <div>
+                    <el-tag :type="recordTag(rec.action)" size="small">{{ recordText(rec.action) }}</el-tag>
+                    <span class="timeline-operator">{{ rec.operatorName || `用户#${rec.operatorId}` }}</span>
+                  </div>
+                  <div class="timeline-node">{{ rec.nodeName || '（实例级动作）' }}</div>
+                  <div v-if="rec.comment" class="timeline-comment">{{ rec.comment }}</div>
+                </el-timeline-item>
+              </el-timeline>
+              <el-empty v-else description="暂无审批记录（等待首个审批动作）" :image-size="60" />
+            </div>
+          </template>
+          <el-empty v-else description="尚未发起审批" :image-size="60" />
+        </el-tab-pane>
         <el-tab-pane label="跟进记录" name="follow-ups">
           <ProTable
             :columns="followUpColumns"
@@ -294,8 +350,8 @@
       </template>
     </el-drawer>
 
-    <!-- 状态流转对话框：草稿→待审（提交）、待审→已签（审批通过）/草稿（驳回）、
-         任意非作废→作废（终态）。审批通过与驳回须 crm:contract:approve。 -->
+    <!-- 状态流转对话框：草稿→待审（提交审批）、任意非作废→作废（终态）。
+         审批通过/驳回统一在 bpm 待办中心办理（issue #47），此处不再提供审批按钮。 -->
     <el-dialog v-model="statusVisible" title="合同状态流转" width="460px" destroy-on-close>
       <el-form label-width="90px">
         <el-form-item label="合同">
@@ -313,20 +369,17 @@
             </el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="statusTo === 1" label="驳回原因">
-          <el-input
-            v-model="statusReason"
-            type="textarea"
-            :rows="2"
-            maxlength="500"
-            placeholder="可留空"
-          />
-        </el-form-item>
+        <el-alert
+          v-if="statusTo === 2"
+          type="info"
+          :closable="false"
+          title="提交后生成 bpm 待办，审批通过/驳回请在「流程中心 → 待办任务」办理"
+        />
         <el-alert
           v-if="statusTo === 4"
           type="warning"
           :closable="false"
-          title="作废后合同不可再流转、不可编辑（终态）"
+          title="作废后合同不可再流转、不可编辑（终态）；待审合同的审批流程将自动终止"
         />
       </el-form>
       <template #footer>
@@ -342,6 +395,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 import ProTable from '@/components/ProTable.vue'
 import ExcelActions from '@/components/ExcelActions.vue'
 import {
@@ -376,8 +430,9 @@ import {
 } from '@/api/crm'
 import { useUserStore } from '@/stores/user'
 
-// 合同状态对齐规格（docs/crm-mvp-spec.md §4.4）：
-// 1 草稿 → 2 待审（提交）→ 3 已签（审批通过）；待审可驳回回草稿；4 作废（终态）。
+// 合同状态对齐规格（docs/crm-mvp-spec.md §4.4 / oa-mvp-spec §4.5）：
+// 1 草稿 → 2 待审（提交，生成 bpm 待办）→ 3 已签（审批通过）/ 1 草稿（驳回）；
+// 4 作废（终态）。审批结果由 bpm 回调回写，页面只展示状态与时间线。
 const statusOptions = [
   { label: '草稿', value: 1 },
   { label: '待审', value: 2 },
@@ -441,8 +496,8 @@ function addLine(form: any) {
 }
 
 // ---------- 状态流转选项：按当前状态 + 权限码过滤 ----------
-// 审批通过与驳回是审批人动作（后端 ApprovalService 再校验 crm:contract:approve）；
-// 提交与作废只挂 crm:contract:update。
+// 用户动作只有提交审批与作废（issue #47）：审批通过与驳回是 bpm 待办动作，
+// 不在合同页内嵌；提交后待办由流程中心「待办任务」统一办理。
 const userStore = useUserStore()
 
 function transitionsFor(row: any) {
@@ -451,8 +506,6 @@ function transitionsFor(row: any) {
     options.push({ label: '提交审批', value: 2, perm: 'crm:contract:update' })
     options.push({ label: '作废', value: 4, perm: 'crm:contract:update' })
   } else if (row?.status === 2) {
-    options.push({ label: '审批通过', value: 3, perm: 'crm:contract:approve' })
-    options.push({ label: '驳回回草稿', value: 1, perm: 'crm:contract:approve' })
     options.push({ label: '作废', value: 4, perm: 'crm:contract:update' })
   } else if (row?.status === 3) {
     options.push({ label: '作废', value: 4, perm: 'crm:contract:update' })
@@ -599,23 +652,49 @@ async function removeContractFile(row: any) {
   await loadContractFiles(detail.value.id)
 }
 
-// ---------- 状态流转（唯一状态入口 PUT /crm/contract/status） ----------
+// ---------- 审批记录 tab（issue #47）：bpm 时间线与当前待办入口 ----------
+const pendingApprovalTasks = computed(() =>
+  ((detail.value?.approval?.tasks || []) as any[]).filter((task) => task.status === 0),
+)
+
+function instanceStatusText(status: number): string {
+  return ['运行中', '通过', '驳回', '撤回'][status] ?? `未知(${status})`
+}
+function instanceStatusTag(status: number): string {
+  if (status === 1) return 'success'
+  if (status === 2 || status === 3) return 'danger'
+  return 'primary'
+}
+function recordText(action: number): string {
+  return ['通过', '驳回', '撤回', '转办'][action - 1] ?? `未知(${action})`
+}
+function recordTag(action: number): string {
+  if (action === 1) return 'success'
+  if (action === 2) return 'danger'
+  return 'warning'
+}
+
+const router = useRouter()
+const route = useRoute()
+function goTaskCenter() {
+  router.push({ path: '/bpm/task', query: { tab: 'todo' } })
+}
+
+// ---------- 状态流转（用户唯一状态入口 PUT /crm/contract/status） ----------
 const statusVisible = ref(false)
 const statusRow = ref<any>(null)
 const statusTo = ref<number>()
-const statusReason = ref('')
 const transitionOptions = computed(() => transitionsFor(statusRow.value))
 
 function openStatus(row: any) {
   statusRow.value = row
   statusTo.value = undefined
-  statusReason.value = ''
   statusVisible.value = true
 }
 
 async function confirmStatus() {
   if (!statusTo.value || !statusRow.value) return
-  await changeContractStatus(statusRow.value.id, statusTo.value, statusReason.value)
+  await changeContractStatus(statusRow.value.id, statusTo.value)
   ElMessage.success(`已变更为「${statusLabel(statusTo.value)}」`)
   statusVisible.value = false
   tableRef.value?.reload()
@@ -675,6 +754,11 @@ onMounted(async () => {
   ])
   customers.value = custPage.list || []
   products.value = prodPage.list || []
+  // 待办中心「查看业务」跳转：/crm/contract?id=<合同ID> 直接打开详情抽屉。
+  const queryId = typeof route.query.id === 'string' ? Number(route.query.id) : 0
+  if (queryId > 0) {
+    await openDetail({ id: queryId })
+  }
 })
 </script>
 
@@ -704,5 +788,33 @@ onMounted(async () => {
 }
 .file-link {
   color: #409eff;
+}
+.approval-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.approval-section {
+  margin-bottom: 18px;
+}
+.approval-title {
+  margin: 0 0 8px;
+}
+.timeline-operator {
+  margin-left: 8px;
+  font-weight: 600;
+}
+.timeline-node {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.timeline-comment {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  font-size: 13px;
 }
 </style>

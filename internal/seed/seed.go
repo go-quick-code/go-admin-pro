@@ -29,6 +29,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedMenus(db); err != nil {
 		return err
 	}
+	if err := seedBPMDefinitions(db); err != nil {
+		return err
+	}
 	if err := seedDepts(db); err != nil {
 		return err
 	}
@@ -243,8 +246,8 @@ func seedMenus(db *gorm.DB) error {
 		btn(4084, 4080, "商机删除", "crm:opportunity:delete", 4),
 		btn(4085, 4080, "商机阶段推进", "crm:opportunity:stage", 5),
 		// 合同（issue #16）：菜单 ID 从 4100 起（4060–4070 产品、4080–4085 商机已占用，
-		// grep 去重确认）。审批通过与驳回挂独立按钮码 crm:contract:approve
-		//（ApprovalService v1 直通实现据此放行，bpm 上线后同码走流程）。
+		// grep 去重确认）。crm:contract:approve 自 issue #47 起是默认流程
+		// crm_contract_approval 的审批人规则权限码（候选池由 bpm 物化待办）。
 		menu(4100, 400, "合同管理", "contract", "crm/contract/index", "crm:contract:query", "Tickets", 5),
 		btn(4101, 4100, "合同查询", "crm:contract:query", 1),
 		btn(4102, 4100, "合同新增", "crm:contract:create", 2),

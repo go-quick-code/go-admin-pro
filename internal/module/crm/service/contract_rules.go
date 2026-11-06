@@ -11,8 +11,9 @@ import (
 )
 
 // 合同规则（issue #16，docs/crm-mvp-spec.md §4.4 状态机、§4.3 金额不变量）：
-//   - 状态机：1 草稿 → 2 待审（提交）→ 3 已签（审批通过）；待审可驳回回草稿；
-//     草稿/待审/已签均可作废（4），作废为终态。状态变更唯一入口是
+//   - 状态机：1 草稿 → 2 待审（提交，同事务启动 bpm 实例）；待审 → 3 已签 /
+//     1 草稿是审批结果，由 bpm BusinessHandler 在审批动作事务内回写，不经
+//     状态端点；草稿/待审/已签均可作废（4），作废为终态。状态变更唯一入口是
 //     PUT /crm/contract/status（条件更新防并发），非法流转 400；
 //   - 金额不变量：有行项目时合同金额恒等于 SUM(行项目金额)，由服务端计算落库
 //     （客户端提交的金额忽略——不变量由服务端保证，而非靠客户端自觉一致）；
@@ -42,12 +43,14 @@ var ContractStatusNames = map[int8]string{
 	model.ContractStatusVoid:    "作废",
 }
 
-// contractStatusTransitions 是合法流转表（事实来源，CanTransitionContractStatus 依此判定）。
+// contractStatusTransitions 是状态端点允许的用户动作（事实来源，
+// CanTransitionContractStatus 依此判定）。审批通过与驳回不在表内：它们是
+// bpm 审批动作的结果，由 BusinessHandler 在同一事务内回写（issue #47）。
 var contractStatusTransitions = map[int8]map[int8]bool{
 	// 草稿：提交审批、作废。
 	model.ContractStatusDraft: {model.ContractStatusPending: true, model.ContractStatusVoid: true},
-	// 待审：审批通过、驳回回草稿、作废。
-	model.ContractStatusPending: {model.ContractStatusSigned: true, model.ContractStatusDraft: true, model.ContractStatusVoid: true},
+	// 待审：只能作废（审批通过/驳回在待办中心办理）。
+	model.ContractStatusPending: {model.ContractStatusVoid: true},
 	// 已签：只能作废（生效合同不再回退草稿/重走审批）。
 	model.ContractStatusSigned: {model.ContractStatusVoid: true},
 	// 作废为终态：无任何出边。
