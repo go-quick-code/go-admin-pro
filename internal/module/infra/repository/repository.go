@@ -15,6 +15,10 @@ type Repository struct {
 
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
+// DB 暴露底层 gorm 连接，供数据库文档等直接读取 information_schema 的
+// 能力使用（issue #83）：information_schema 不是租户表，不走仓储方法。
+func (r *Repository) DB() *gorm.DB { return r.db }
+
 func notFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil

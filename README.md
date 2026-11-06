@@ -83,7 +83,7 @@ go-admin-pro
 │   ├── testutil/               # 集成测试基座（真实 router + MySQL，integration 标签）
 │   ├── module/
 │   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户、日志
-│   │   ├── infra/              # 文件、参数配置、定时任务
+│   │   ├── infra/              # 文件、参数配置、定时任务、数据库文档
 │   │   ├── crm/                # 客户管理（CRM 第一条纵切，手写样板：model/dto/repository/service/api）
 │   │   ├── bpm/                # 流程定义、实例、任务、审批记录、通用待办
 │   │   ├── notify/             # 站内通知投递、未读数、已读状态
@@ -98,6 +98,7 @@ go-admin-pro
 │       ├── excel/              # Excel 导入导出与模板
 │       ├── money/              # 金额值类型（int64 分，decimal(12,2)）
 │       ├── datascope/          # 行级数据权限谓词引擎（角色范围 1–5、多角色并集）
+│       ├── dbschema/           # information_schema 读取（codegen 与数据库文档共用）
 │       ├── response/ xerr/     # 统一响应与业务错误
 │       └── web/ utils/         # 分页、通用工具
 ├── web/                        # Vue3 前端

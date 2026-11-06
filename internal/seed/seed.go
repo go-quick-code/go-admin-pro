@@ -208,6 +208,10 @@ func seedMenus(db *gorm.DB) error {
 		menu(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),
 		menu(202, 200, "参数配置", "config", "infra/config/index", "infra:config:query", "SetUp", 2),
 		menu(203, 200, "定时任务", "job", "infra/job/index", "infra:job:query", "Timer", 3),
+		// 数据库文档（issue #83，spec §7.2）：205 段（grep 去重确认 205 空闲）。
+		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
+		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 4),
 
 		btn(2011, 201, "文件上传", "infra:file:upload", 1),
 		btn(2012, 201, "文件删除", "infra:file:delete", 2),

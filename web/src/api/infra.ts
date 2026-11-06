@@ -59,3 +59,15 @@ export function deleteJob(id: number) {
 export function pageJobLogs(params: any) {
   return request.get('/infra/job/log/page', { params }) as Promise<any>
 }
+
+// ---------- 数据库文档（issue #83，仅平台租户） ----------
+export function listDBTables(keyword?: string) {
+  return request.get('/infra/db-doc/tables', { params: { keyword: keyword || undefined } }) as Promise<any>
+}
+export function getDBTable(name: string) {
+  return request.get(`/infra/db-doc/table/${name}`) as Promise<any>
+}
+// 导出 Markdown：responseType=blob，页面按 Content-Disposition 保存。
+export function exportDBDoc() {
+  return request.get('/infra/db-doc/export', { responseType: 'blob' }) as Promise<any>
+}
