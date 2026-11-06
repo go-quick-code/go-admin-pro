@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/config"
@@ -40,6 +41,16 @@ type Service struct {
 	repo      *repository.Repository
 	cfg       *config.Config
 	scheduler *JobScheduler
+
+	// fileAuthMu 保护业务文件授权表：注册发生在 app 装配期，读取在请求期。
+	fileAuthMu sync.RWMutex
+	// fileAuthorizers 是按 biz_type 注册的业务读/删授权器（PR #66 安全审计
+	// finding 1）：通用下载/删除/分页入口在 biz_type != "" 时必须命中，未注册
+	// 的业务类型 fail-closed。注册入口见 file_authorizer.go。
+	fileAuthorizers map[string]FileAuthorizer
+	// fileDeleteSyncers 是通用删除入口的业务归属行同步器（如 oa_document_file
+	// 软删），避免「列表有、内容 404」的悬空。
+	fileDeleteSyncers map[string]FileDeleteSyncer
 }
 
 func New(repo *repository.Repository, cfg *config.Config, scheduler *JobScheduler) *Service {
@@ -197,6 +208,25 @@ func (s *Service) ListFiles(ctx context.Context, req *dto.FilePageReq) ([]model.
 	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
 	page.Normalize()
 	filter := repository.FileFilter{Name: req.Name, Type: req.Type}
+	if req.BizType == "" {
+		// 默认只列通用文件（biz_type=''）：业务文件（文档/请假/报销/公告/
+		// 合同附件）不经通用分页暴露元数据（PR #66 安全审计 finding 1）。
+		filter.GenericOnly = true
+	} else {
+		if len(req.BizType) > 32 {
+			return nil, 0, xerr.BadRequest("业务类型长度不能超过 32 个字符")
+		}
+		if req.BizID < 0 {
+			return nil, 0, xerr.BadRequest("业务 ID 不能为负数")
+		}
+		// 显式业务类型 = 类型级管理视角：必须命中该类型授权器（Read 语义），
+		// 未注册/未授权 fail-closed。
+		if err := s.AuthorizeFileList(ctx, req.BizType, req.BizID); err != nil {
+			return nil, 0, err
+		}
+		filter.BizType = req.BizType
+		filter.BizID = req.BizID
+	}
 	list, total, err := s.repo.ListFiles(ctx, filter, page.Offset(), page.PageSize)
 	if err != nil {
 		return nil, 0, err
@@ -211,6 +241,10 @@ func (s *Service) ListFiles(ctx context.Context, req *dto.FilePageReq) ([]model.
 // OpenFile 打开文件供鉴权下载（PR #39 残余风险 A）：按 ID 查文件
 // （租户插件保证同租户），磁盘内容缺失与跨租户一样按 404 处理，
 // 不把内部存储路径暴露给调用方。调用方负责关闭返回的文件句柄。
+//
+// 业务文件（biz_type != ""）必须先通过该业务的读授权（PR #66 安全审计
+// finding 1）：只持 infra:file:query 不能绕过业务 ACL；未注册授权器的
+// 业务类型按不存在处理。
 func (s *Service) OpenFile(ctx context.Context, id int64) (*model.File, *os.File, error) {
 	f, err := s.repo.FindFileByID(ctx, id)
 	if err != nil {
@@ -218,6 +252,9 @@ func (s *Service) OpenFile(ctx context.Context, id int64) (*model.File, *os.File
 	}
 	if f == nil {
 		return nil, nil, xerr.NotFound("文件不存在")
+	}
+	if err := s.authorizeFile(ctx, f, FileActionRead); err != nil {
+		return nil, nil, err
 	}
 	absPath := filepath.Join(s.cfg.Storage.Local.BasePath, filepath.FromSlash(f.Path))
 	fh, err := os.Open(absPath)
@@ -230,6 +267,10 @@ func (s *Service) OpenFile(ctx context.Context, id int64) (*model.File, *os.File
 	return f, fh, nil
 }
 
+// DeleteFile 删除文件本体（DELETE /infra/file/:id）：业务文件必须先通过该
+// 业务的删除授权，再同步业务侧归属行（如 oa_document_file 软删），最后删除
+// 磁盘文件与 infra 记录（PR #66 安全审计 finding 1）。未注册授权器的业务
+// 类型按不存在处理（fail-closed）；biz_type == "" 的通用文件行为不变。
 func (s *Service) DeleteFile(ctx context.Context, id int64) error {
 	f, err := s.repo.FindFileByID(ctx, id)
 	if err != nil {
@@ -237,6 +278,17 @@ func (s *Service) DeleteFile(ctx context.Context, id int64) error {
 	}
 	if f == nil {
 		return xerr.NotFound("文件不存在")
+	}
+	if f.BizType != "" {
+		if err := s.authorizeFile(ctx, f, FileActionDelete); err != nil {
+			return err
+		}
+		if sync := s.fileDeleteSyncerOf(f.BizType); sync != nil {
+			// 先软删业务归属行：同步失败则不删本体，避免业务列表悬空。
+			if err := sync(ctx, f.BizID, f.ID); err != nil {
+				return err
+			}
+		}
 	}
 	return s.deleteFile(ctx, f)
 }
