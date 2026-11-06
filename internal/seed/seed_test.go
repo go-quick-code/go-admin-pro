@@ -60,8 +60,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。
 	assertCount(t, db, &sysmodel.DictData{}, 16, "字典数据")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
-	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）。
-	assertCount(t, db, &inframodel.Job{}, 3, "定时任务")
+	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
+	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
 	// 默认审批流程（issue #47，spec §7.3）：crm_contract_approval v1 已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 1, "默认流程定义")

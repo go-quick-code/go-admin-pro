@@ -204,6 +204,27 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	event.PUT("", h.requirePermission("oa:calendar:update"), h.UpdateCalendarEvent)
 	event.DELETE("/:id", h.requirePermission("oa:calendar:delete"), h.CancelCalendarEvent)
 	event.POST("/:id/cancel", h.requirePermission("oa:calendar:delete"), h.CancelCalendarEvent)
+
+	// 会议室与预约（issue #57，菜单种子 525/538/539 段，spec §4.11/§4.14/§5）：
+	// 会议室查询/详情与预约列表挂 oa:room:query；会议室 CRUD/启停/删除挂
+	// oa:room:manage（有未来有效预约时删除 409，只能停用）；创建预约挂
+	// oa:room:booking；取消预约登录即可（服务层校验预约人本人或
+	// oa:room:manage，并同步软取消生成的日程）。员工侧预约列表复用同一接口：
+	// 无 oa:room:manage 的查看者强制只看本人。静态路由（/list、/booking/list）
+	// 先于 /:id 注册。
+	room := oa.Group("/room")
+	room.GET("/list", h.requirePermission(roomQuery), h.ListEnabledMeetingRooms)
+	room.GET("/page", h.requirePermission(roomQuery), h.PageMeetingRooms)
+	booking := room.Group("/booking")
+	booking.GET("/list", h.requirePermission(roomQuery), h.PageRoomBookings)
+	booking.GET("/:id", h.requirePermission(roomQuery), h.GetRoomBooking)
+	booking.POST("", h.requirePermission(roomBooking), h.CreateRoomBooking)
+	booking.POST("/:id/cancel", h.CancelRoomBooking)
+	room.GET("/:id", h.requirePermission(roomQuery), h.GetMeetingRoom)
+	room.POST("", h.requirePermission(roomManage), h.CreateMeetingRoom)
+	room.PUT("/:id", h.requirePermission(roomManage), h.UpdateMeetingRoom)
+	room.PUT("/:id/status", h.requirePermission(roomManage), h.SetMeetingRoomStatus)
+	room.DELETE("/:id", h.requirePermission(roomManage), h.DeleteMeetingRoom)
 }
 
 // GetVisibilityScope 返回当前用户的可见范围。
