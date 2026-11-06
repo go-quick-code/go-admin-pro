@@ -165,6 +165,15 @@ func seedMenus(db *gorm.DB) error {
 		btn(1101, 110, "套餐新增", "system:tenant-package:create", 1),
 		btn(1102, 110, "套餐修改", "system:tenant-package:update", 2),
 		btn(1103, 110, "套餐删除", "system:tenant-package:delete", 3),
+		// 社交登录（issue #76，spec §7.2）：111 段。客户端管理仅平台租户可操作；
+		// 绑定用户查询/解绑是租户内管理动作。按钮码 1111–1115（菜单 ID×10+n，
+		// grep 去重确认空闲）。provider 实现（微信/钉钉/企微）由 #77 承接。
+		menu(111, 100, "社交登录", "social", "system/social/index", "system:social:query", "Connection", 11),
+		btn(1111, 111, "客户端新增", "system:social:create", 1),
+		btn(1112, 111, "客户端修改", "system:social:update", 2),
+		btn(1113, 111, "客户端删除", "system:social:delete", 3),
+		btn(1114, 111, "绑定用户查询", "system:social-user:query", 4),
+		btn(1115, 111, "绑定用户解绑", "system:social-user:delete", 5),
 
 		btn(1011, 101, "用户新增", "system:user:create", 1),
 		btn(1012, 101, "用户修改", "system:user:update", 2),
