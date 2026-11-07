@@ -28,6 +28,12 @@ type Service struct {
 	// productRefs 是产品删除引用校验扩展点（issue #88，spec §4.9；本票为
 	// 骨架，单据域引用类型由 #90–#94 注册），见 product_refs.go。
 	productRefs ProductRefChecker
+	// 仓库/客户/供应商删除引用校验扩展点（issue #89，spec §4.9）：三类引用
+	// 类型 erp_warehouse/erp_customer/erp_supplier 当前无单据引用源，
+	// #90–#92 实现 Checker 后在 app 装配处注册，见 party_refs.go。
+	warehouseRefs WarehouseRefChecker
+	customerRefs  CustomerRefChecker
+	supplierRefs  SupplierRefChecker
 }
 
 // New 创建 erp Service。

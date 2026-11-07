@@ -35,6 +35,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterProductCategoryRoutes(rg)
 	h.RegisterProductUnitRoutes(rg)
 	h.RegisterProductRoutes(rg)
+	// 仓库/客户/供应商主数据（issue #89，spec §3.1/§5）。
+	h.RegisterWarehouseRoutes(rg)
+	h.RegisterCustomerRoutes(rg)
+	h.RegisterSupplierRoutes(rg)
 }
 
 // ---------- 通用绑定助手（与 system/crm 模块同构，保持模块自包含）----------

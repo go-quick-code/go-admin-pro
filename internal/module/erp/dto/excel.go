@@ -43,3 +43,53 @@ type ProductUnitExportRow struct {
 	Status     string    `excel:"状态,width=10"`
 	CreateTime time.Time `excel:"创建时间,width=20"`
 }
+
+// ---------- 仓库/客户/供应商导出列（issue #89，spec §4.11）----------
+
+// WarehouseExportRow 是仓库导出列。
+type WarehouseExportRow struct {
+	Name       string    `excel:"仓库名称,width=24"`
+	Address    string    `excel:"仓库地址,width=32"`
+	Principal  string    `excel:"负责人,width=12"`
+	Sort       int       `excel:"排序,width=8"`
+	Status     string    `excel:"状态,width=10"`
+	CreateTime time.Time `excel:"创建时间,width=20"`
+}
+
+// CustomerExportRow 是 ERP 客户导出列：税率经 TextMarshaler 输出十进制字符串。
+type CustomerExportRow struct {
+	Name        string       `excel:"客户名称,width=24"`
+	Contact     string       `excel:"联系人,width=12"`
+	Mobile      string       `excel:"手机号码,width=16"`
+	Telephone   string       `excel:"联系电话,width=16"`
+	Email       string       `excel:"电子邮箱,width=24"`
+	Fax         string       `excel:"传真,width=16"`
+	TaxNo       string       `excel:"税号,width=24"`
+	TaxPercent  *money.Money `excel:"税率(%),width=10"`
+	BankName    string       `excel:"开户行,width=24"`
+	BankAccount string       `excel:"开户账号,width=24"`
+	BankAddress string       `excel:"开户行地址,width=32"`
+	Status      string       `excel:"状态,width=10"`
+	Sort        int          `excel:"排序,width=8"`
+	Remark      string       `excel:"备注,width=36"`
+	CreateTime  time.Time    `excel:"创建时间,width=20"`
+}
+
+// SupplierExportRow 是供应商导出列（字段同 ERP 客户，spec §3.1）。
+type SupplierExportRow struct {
+	Name        string       `excel:"供应商名称,width=24"`
+	Contact     string       `excel:"联系人,width=12"`
+	Mobile      string       `excel:"手机号码,width=16"`
+	Telephone   string       `excel:"联系电话,width=16"`
+	Email       string       `excel:"电子邮箱,width=24"`
+	Fax         string       `excel:"传真,width=16"`
+	TaxNo       string       `excel:"税号,width=24"`
+	TaxPercent  *money.Money `excel:"税率(%),width=10"`
+	BankName    string       `excel:"开户行,width=24"`
+	BankAccount string       `excel:"开户账号,width=24"`
+	BankAddress string       `excel:"开户行地址,width=32"`
+	Status      string       `excel:"状态,width=10"`
+	Sort        int          `excel:"排序,width=8"`
+	Remark      string       `excel:"备注,width=36"`
+	CreateTime  time.Time    `excel:"创建时间,width=20"`
+}
