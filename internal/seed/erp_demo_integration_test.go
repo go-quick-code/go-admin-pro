@@ -330,6 +330,18 @@ func assertERPDemoStockReplay(t *testing.T, db *gorm.DB) {
 	if len(stocks) != 2 {
 		t.Fatalf("库存余额应有 2 行，实际 %d", len(stocks))
 	}
+	// 演示种子经唯一入口落账：库存行审计列由入账原语写入（created_at 非空、
+	// creator/updater = 注入的 admin 主体），不是列默认 '0'/NULL。
+	wantCreator := strconv.FormatInt(erpDemoAdminID(t, db), 10)
+	for _, stock := range stocks {
+		if stock.CreatedAt.IsZero() || stock.UpdatedAt.IsZero() {
+			t.Fatalf("库存行 created_at/updated_at 不应为空：%+v", stock.BaseEntity)
+		}
+		if stock.Creator != wantCreator || stock.Updater != wantCreator {
+			t.Fatalf("库存行 creator/updater = %q/%q，期望 %q（演示 admin 主体经唯一入口写入）",
+				stock.Creator, stock.Updater, wantCreator)
+		}
+	}
 	want := map[stockKey]int64{
 		{productID: 3001, warehouseID: 3001}: 6000,  // 10 + 1 − 5
 		{productID: 3002, warehouseID: 3001}: 11000, // 20 − 1 − 8

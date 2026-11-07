@@ -10,16 +10,19 @@
 // 有值，产品库存、出入库流水、十二类单据与财务页面都能看到一条完整链路。
 //
 // 幂等：按表哨兵——ERP 任一主数据/单据/库存表已有行（含软删）时整段跳过，
-// 重复执行不重复插入。演示行使用固定 ID 段（主数据 3001 起、单据 4001 起、
-// 库存 4201 起、流水 4301 起，各表独立），与 CRM（1001 起）/OA（2001 起）
-// 演示 ID 不冲突；运行期自增 ID 由数据库发放，不会撞主键。
+// 重复执行不重复插入。演示行使用固定 ID 段（主数据 3001 起、单据 4001 起，
+// 各表独立），与 CRM（1001 起）/OA（2001 起）演示 ID 不冲突；库存余额与流水
+// 行由唯一入账入口插入，ID 走数据库自增（不再固定 4201/4301 段）。
 //
 // 落库口径（spec §4，所有不变量与 service 审核路径一致，均在此注释说明）：
-//   - 演示数据不走 HTTP/service（种子阶段没有登录上下文），而是按各表不变量
-//     手工落库：明细行金额 = 单价 × 数量（Money.MulQty）、主表金额 = 明细合计、
-//     订单进度 in_count/out_count 只计已审核单、收付款回写 receipt_price/
-//     payment_price = 已审核核销合计、库存余额 = 流水代数和且 total_count 快照
-//     逐笔正确、任何时点无负库存。
+//   - 单据/主数据按各表不变量手工落库（种子阶段没有真实登录会话，但为库存
+//     入账构造了演示租户 + admin 主体上下文）：明细行金额 = 单价 × 数量
+//     （Money.MulQty）、主表金额 = 明细合计、订单进度 in_count/out_count 只计
+//     已审核单、收付款回写 receipt_price/payment_price = 已审核核销合计。
+//   - 库存余额与流水**只经唯一入账入口 ApplyStockChange**（spec §4.2，issue #97
+//     终审修复）：采购入库/盘点差异/销售出库逐行动账，与 HTTP 审核路径同一
+//     代码路径；total_count 快照由入口计算，任何时点无负库存。无登录会话时
+//     审计列按平台约定回退系统账号 '0'；本种子显式注入 admin 主体（creator=admin）。
 //   - 单号按 spec §4.8 的「前缀 + yyyyMMdd + 4 位序号」生成，并同步写
 //     erp_sequence（GREATEST 合并，绝不回退已有序列），后续 UI 新建不会撞号。
 //   - 业务时间全部落在演示当天（北京时间/进程本地时区，与其它演示种子一致），
@@ -30,13 +33,16 @@
 package seed
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
 
 	erpmodel "github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
+	erprepo "github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
 	erpservice "github.com/go-quick-code/go-admin-pro/internal/module/erp/service"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	basemodel "github.com/go-quick-code/go-admin-pro/internal/pkg/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
@@ -66,7 +72,7 @@ const (
 	erpDemoAccountICBCID      int64 = 3001
 	erpDemoAccountAlipayID    int64 = 3002
 
-	// 单据主表（4001 起；明细 4101 起、库存 4201 起、流水 4301 起）。
+	// 单据主表（4001 起；明细 4101 起；库存余额/流水走唯一入账入口，ID 自增）。
 	erpDemoPurchaseOrderID int64 = 4001
 	erpDemoPurchaseInID    int64 = 4002
 	erpDemoStockCheckID    int64 = 4003
@@ -92,8 +98,23 @@ func (u erpDemoUser) creator() string {
 	return fmt.Sprintf("%d", u.ID)
 }
 
+// erpDemoStockApplier 封装唯一入账入口（service.ApplyStockChange）：演示种子
+// 与 HTTP 审核路径共用同一库存落账代码，余额与流水不直写（spec §4.2）。
+type erpDemoStockApplier struct {
+	svc  *erpservice.Service
+	repo *erprepo.Repository
+}
+
+func (a erpDemoStockApplier) apply(ctx context.Context, ch erpservice.StockChange) error {
+	if err := a.svc.ApplyStockChange(ctx, a.repo, ch); err != nil {
+		return fmt.Errorf("演示库存入账失败（%s / 单据 %d）: %w", ch.BizType, ch.BizID, err)
+	}
+	return nil
+}
+
 // seedERPDemo 写入 ERP 演示数据：表哨兵非空时整段跳过，否则在同一事务里
-// 按 主数据 → 采购 → 盘点 → 销售 → 收付款 → 库存余额 → 序列 的顺序落库。
+// 按 主数据 → 采购入库（入账）→ 盘点（差异入账）→ 销售出库（入账）→
+// 收付款 → 序列 的顺序落库。
 func seedERPDemo(db *gorm.DB) error {
 	reason, err := erpDemoSkipReason(db)
 	if err != nil {
@@ -122,28 +143,33 @@ func seedERPDemo(db *gorm.DB) error {
 		}
 		dateKey := now.Format("20060102")
 		seq := newERPDemoSequencer(tx, erpDemoTenantID)
+		// 库存入账唯一入口从 ctx 取租户与审计用户：种子没有真实登录会话，
+		// 显式注入演示租户与 admin 主体（spec §4.2/§4.10，ADR 0002 审计列）。
+		stockCtx := tenant.WithTenantID(context.Background(), erpDemoTenantID)
+		stockCtx = authn.With(stockCtx, authn.Principal{
+			UserID: admin.ID, TenantID: erpDemoTenantID, Username: "admin",
+		})
+		stockRepo := erprepo.New(tx)
+		stock := erpDemoStockApplier{svc: erpservice.New(stockRepo, nil), repo: stockRepo}
 
 		if err := erpDemoSeedMaster(tx, admin, now); err != nil {
 			return err
 		}
 		purchaseOrderTime := at(10)
 		purchaseInTime := at(9)
-		if err := erpDemoSeedPurchase(tx, admin, seq, dateKey, purchaseOrderTime, purchaseInTime); err != nil {
+		if err := erpDemoSeedPurchase(stockCtx, stock, tx, admin, seq, dateKey, purchaseOrderTime, purchaseInTime); err != nil {
 			return err
 		}
 		checkTime := at(7)
-		if err := erpDemoSeedStockCheck(tx, admin, seq, dateKey, checkTime); err != nil {
+		if err := erpDemoSeedStockCheck(stockCtx, stock, tx, admin, seq, dateKey, checkTime); err != nil {
 			return err
 		}
 		saleOrderTime := at(6)
 		saleOutTime := at(4)
-		if err := erpDemoSeedSale(tx, admin, seq, dateKey, saleOrderTime, saleOutTime); err != nil {
+		if err := erpDemoSeedSale(stockCtx, stock, tx, admin, seq, dateKey, saleOrderTime, saleOutTime); err != nil {
 			return err
 		}
 		if err := erpDemoSeedFinance(tx, admin, seq, dateKey, at(2), at(1)); err != nil {
-			return err
-		}
-		if err := erpDemoSeedStocks(tx, purchaseInTime, saleOutTime); err != nil {
 			return err
 		}
 		return seq.flush()
@@ -367,8 +393,9 @@ func erpDemoSeedMaster(tx *gorm.DB, admin erpDemoUser, now time.Time) error {
 // erpDemoSeedPurchase 写入一张已审核采购订单与挂单的已审核采购入库单：
 // 订单明细 in_count 回写为已审核入库数量（spec §4.4）；入库主表金额 =
 // 明细合计、payment_price 由付款单核销回写（本文件随后写付款单）。
-// 入库审核的库存效果写入 stock_record（正流水），余额行在链路末尾统一落库。
-func erpDemoSeedPurchase(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, dateKey string, orderTime, inTime time.Time) error {
+// 入库审核的库存效果经唯一入口 ApplyStockChange 逐行落账（余额 + 正流水
+// 同事务），total_count 快照由入口计算。
+func erpDemoSeedPurchase(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, dateKey string, orderTime, inTime time.Time) error {
 	lines := []erpDemoLine{
 		{ProductID: erpDemoProductTerminalID, Count: qty.FromMilli(10000), Price: erpDemoMoney(120000)},
 		{ProductID: erpDemoProductKeyboardID, Count: qty.FromMilli(20000), Price: erpDemoMoney(15000)},
@@ -443,24 +470,16 @@ func erpDemoSeedPurchase(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, 
 		return fmt.Errorf("写入 ERP 演示采购入库明细: %w", err)
 	}
 
-	// 审核入账流水（唯一入口同口径：正入 + 变动后结存快照，spec §4.2/§4.3）。
-	// 初始余额为 0，故第 1/2 笔结存即 10.000 / 20.000。
-	records := []erpmodel.StockRecord{
-		{
-			BaseEntity: erpDemoBase(4301, inTime, creator),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductTerminalID, WarehouseID: erpDemoWarehouseMainID,
-			Count: qty.FromMilli(10000), TotalCount: qty.FromMilli(10000),
-			BizType: erpmodel.StockRecordBizPurchaseIn, BizID: purchaseIn.ID, BizItemID: inItems[0].ID, BizNo: inNo,
-		},
-		{
-			BaseEntity: erpDemoBase(4302, inTime, creator),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductKeyboardID, WarehouseID: erpDemoWarehouseMainID,
-			Count: qty.FromMilli(20000), TotalCount: qty.FromMilli(20000),
-			BizType: erpmodel.StockRecordBizPurchaseIn, BizID: purchaseIn.ID, BizItemID: inItems[1].ID, BizNo: inNo,
-		},
-	}
-	if err := tenant.Skip(tx).Create(&records).Error; err != nil {
-		return fmt.Errorf("写入 ERP 演示采购入库流水: %w", err)
+	// 审核入账：逐行经唯一入口 ApplyStockChange（余额更新 + 流水同事务，
+	// total_count 快照由入口计算，spec §4.2/§4.3）。
+	for _, item := range inItems {
+		if err := stock.apply(ctx, erpservice.StockChange{
+			ProductID: item.ProductID, WarehouseID: purchaseIn.WarehouseID,
+			Count: item.Count, BizType: erpmodel.StockRecordBizPurchaseIn,
+			BizID: purchaseIn.ID, BizItemID: item.ID, BizNo: inNo,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -471,7 +490,7 @@ func erpDemoSeedPurchase(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, 
 // 一次演示盘盈与盘亏两个方向（spec §4.6：差异 = actual_count − 当时账面数）。
 // base_count 是创建时账面快照（10/20），审核以当时账面为准；本演示单在
 // 采购入库之后、销售出库之前审核，故当时账面即 10/20。
-func erpDemoSeedStockCheck(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, dateKey string, checkTime time.Time) error {
+func erpDemoSeedStockCheck(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, dateKey string, checkTime time.Time) error {
 	creator := admin.creator()
 	checkNo, err := seq.nextNo(erpservice.SeqBizTypeStockCheck, erpservice.StockCheckNoPrefix, dateKey)
 	if err != nil {
@@ -502,23 +521,20 @@ func erpDemoSeedStockCheck(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer
 	if err := tenant.Skip(tx).Create(&items).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示盘点明细: %w", err)
 	}
-	// 差异流水：终端 +1（结存 11）、键鼠 −1（结存 19）；差异为零不产生流水。
-	records := []erpmodel.StockRecord{
-		{
-			BaseEntity: erpDemoBase(4303, checkTime, creator),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductTerminalID, WarehouseID: erpDemoWarehouseMainID,
-			Count: qty.FromMilli(1000), TotalCount: qty.FromMilli(11000),
-			BizType: erpmodel.StockRecordBizStockCheck, BizID: doc.ID, BizItemID: items[0].ID, BizNo: checkNo,
-		},
-		{
-			BaseEntity: erpDemoBase(4304, checkTime, creator),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductKeyboardID, WarehouseID: erpDemoWarehouseMainID,
-			Count: qty.FromMilli(-1000), TotalCount: qty.FromMilli(19000),
-			BizType: erpmodel.StockRecordBizStockCheck, BizID: doc.ID, BizItemID: items[1].ID, BizNo: checkNo,
-		},
-	}
-	if err := tenant.Skip(tx).Create(&records).Error; err != nil {
-		return fmt.Errorf("写入 ERP 演示盘点流水: %w", err)
+	// 差异调整经唯一入口：终端 +1、键鼠 −1；差异为零不产生流水
+	//（spec §4.6：差异 = actual_count − 当时账面数）。
+	for i := range items {
+		diff := qty.FromMilli(items[i].ActualCount.Milli() - items[i].BaseCount.Milli())
+		if diff.Milli() == 0 {
+			continue
+		}
+		if err := stock.apply(ctx, erpservice.StockChange{
+			ProductID: items[i].ProductID, WarehouseID: doc.WarehouseID,
+			Count: diff, BizType: erpmodel.StockRecordBizStockCheck,
+			BizID: doc.ID, BizItemID: items[i].ID, BizNo: checkNo,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -527,9 +543,9 @@ func erpDemoSeedStockCheck(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer
 
 // erpDemoSeedSale 写入一张已审核销售订单与挂单的已审核销售出库单：
 // 订单明细 out_count 回写为已审核出库数量（spec §4.5）；出库主表金额 =
-// 明细合计、receipt_price 由收款单核销回写。出库审核的库存效果写入
-// stock_record（负流水），余额行在链路末尾统一落库。
-func erpDemoSeedSale(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, dateKey string, orderTime, outTime time.Time) error {
+// 明细合计、receipt_price 由收款单核销回写。出库审核的库存效果经唯一入口
+// ApplyStockChange 逐行落账（余额 + 负流水同事务）。
+func erpDemoSeedSale(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, dateKey string, orderTime, outTime time.Time) error {
 	lines := []erpDemoLine{
 		{ProductID: erpDemoProductTerminalID, Count: qty.FromMilli(5000), Price: erpDemoMoney(180000)},
 		{ProductID: erpDemoProductKeyboardID, Count: qty.FromMilli(8000), Price: erpDemoMoney(24900)},
@@ -598,23 +614,15 @@ func erpDemoSeedSale(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, date
 		return fmt.Errorf("写入 ERP 演示销售出库明细: %w", err)
 	}
 
-	// 审核出账流水（负流水）：终端 11 − 5 = 6、键鼠 19 − 8 = 11，均非负。
-	records := []erpmodel.StockRecord{
-		{
-			BaseEntity: erpDemoBase(4305, outTime, creator),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductTerminalID, WarehouseID: erpDemoWarehouseMainID,
-			Count: qty.FromMilli(-5000), TotalCount: qty.FromMilli(6000),
-			BizType: erpmodel.StockRecordBizSaleOut, BizID: saleOut.ID, BizItemID: outItems[0].ID, BizNo: outNo,
-		},
-		{
-			BaseEntity: erpDemoBase(4306, outTime, creator),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductKeyboardID, WarehouseID: erpDemoWarehouseMainID,
-			Count: qty.FromMilli(-8000), TotalCount: qty.FromMilli(11000),
-			BizType: erpmodel.StockRecordBizSaleOut, BizID: saleOut.ID, BizItemID: outItems[1].ID, BizNo: outNo,
-		},
-	}
-	if err := tenant.Skip(tx).Create(&records).Error; err != nil {
-		return fmt.Errorf("写入 ERP 演示销售出库流水: %w", err)
+	// 审核出账经唯一入口（负流水）：终端 11 − 5 = 6、键鼠 19 − 8 = 11，均非负。
+	for _, item := range outItems {
+		if err := stock.apply(ctx, erpservice.StockChange{
+			ProductID: item.ProductID, WarehouseID: saleOut.WarehouseID,
+			Count: qty.FromMilli(-item.Count.Milli()), BizType: erpmodel.StockRecordBizSaleOut,
+			BizID: saleOut.ID, BizItemID: item.ID, BizNo: outNo,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -674,39 +682,6 @@ func erpDemoSeedFinance(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, d
 	}
 	if err := tenant.Skip(tx).Create(&paymentItem).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示付款明细: %w", err)
-	}
-	return nil
-}
-
-// ---------- 库存余额 ----------
-
-// erpDemoSeedStocks 落最终库存余额（仓库×产品唯一）：
-//
-//	终端：入库 10 + 盘盈 1 − 出库 5 = 6
-//	键鼠：入库 20 − 盘亏 1 − 出库 8 = 11
-//
-// 与 stock_record 代数和一致（spec §4.3：余额 = 初始 + 流水代数和），任何
-// 时点均无负数。链路上每笔余额变动都经唯一入账入口的同口径流水记录。
-func erpDemoSeedStocks(tx *gorm.DB, firstTime, lastTime time.Time) error {
-	rows := []erpmodel.Stock{
-		{
-			BaseEntity: erpDemoBase(4201, firstTime, "0"),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductTerminalID,
-			WarehouseID: erpDemoWarehouseMainID, Count: qty.FromMilli(6000),
-		},
-		{
-			BaseEntity: erpDemoBase(4202, firstTime, "0"),
-			TenantID:   erpDemoTenantID, ProductID: erpDemoProductKeyboardID,
-			WarehouseID: erpDemoWarehouseMainID, Count: qty.FromMilli(11000),
-		},
-	}
-	// 余额行的更新时间跟随最后一笔库存变动（销售出库）。
-	for i := range rows {
-		rows[i].UpdatedAt = lastTime
-		rows[i].Updater = "0"
-	}
-	if err := tenant.Skip(tx).Create(&rows).Error; err != nil {
-		return fmt.Errorf("写入 ERP 演示库存余额: %w", err)
 	}
 	return nil
 }
