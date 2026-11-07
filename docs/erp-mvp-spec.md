@@ -108,14 +108,14 @@
 
 ### 4.4 采购进度与占用
 
-- 入库/退货**必须挂已审核订单**（`order_id` 必填）；退货必须挂已审核入库单。无订单的收发走其它入库/出库单（此为对芋道的收紧，芋道来源单可空；差异记清单）。
+- 入库/退货**必须挂已审核订单**（`order_id` 必填）；退货必须挂已审核入库单。创建**与审核时**均复核挂单仍为已审核（创建后父单被反审核则 409，防「审核父单→建子单→反审核父单→审核子单」窗口）。无订单的收发走其它入库/出库单（此为对芋道的收紧，芋道来源单可空；差异记清单）。
 - **占用校验**：订单（项）剩余可入 = `count` −（未审核 + 已审核入库数量）−（未审核 + 已审核退货数量）；超量 409。未审核单也计入占用，防止超卖超采。
-- **进度回写**：`in_count/return_count` 只统计**已审核**单；审批/反审核时重算。
+- **进度回写**：`in_count/return_count` 只统计**已审核**单；审批/反审核时重算。同一产品跨多条明细时，按明细 ID 序依次分摊聚合量（前面的行先填满），Σ 进度精确等于聚合值，不把聚合量重复写给每一行。
 - 删除未审核入库/退货单自然释放占用；反审核同理。
 
 ### 4.5 销售进度与占用
 
-- 同 4.4 镜像：出库/退货挂已审核销售订单，退货挂已审核出库单；`out_count/return_count` 占用与回写同构。
+- 同 4.4 镜像：出库/退货挂已审核销售订单，退货挂已审核出库单；创建与审核时均复核挂单仍为已审核（父单被反审核后子单审核 409）；`out_count/return_count` 占用与回写同构（同产品跨行按明细 ID 序分摊）。
 
 ### 4.6 调拨与盘点
 
@@ -153,8 +153,8 @@
 
 统一前缀 `/erp`，信封 `{code,data,msg}`，分页 `PageQuery/PageResult`，仓储固定 `id DESC`。
 
-- **主数据**（分类/单位/产品/仓库/客户/供应商）：`GET page`（分类用 `GET list` 全量、前端组树）、`GET :id`、`POST`、`PUT :id`、`DELETE :id`、`GET export-excel`；产品单位/分类树形删除走引用校验。
-- **单据**（12 类同构）：`GET page`（带状态/时间/单号/往来单位筛选）、`GET :id`（带头+明细+进度/核销信息）、`POST`、`PUT :id`（仅未审核）、`DELETE :id`（仅未审核）、`PUT update-status`（审核/反审核，幂等目标态）、`GET export-excel`。
+- **主数据**（分类/单位/产品/仓库/客户/供应商）：`GET page`（分类用 `GET list` 全量、前端组树）、`GET :id`、`POST`、`PUT /erp/<entity>`（id 在 body，与 CRM/ProTable 一致）、`DELETE :id`、`GET export-excel`；产品单位/分类树形删除走引用校验。
+- **单据**（12 类同构）：`GET page`（带状态/时间/单号/往来单位筛选）、`GET :id`（带头+明细+进度/核销信息）、`POST`、`PUT /erp/<entity>`（id 在 body，仅未审核）、`DELETE :id`（仅未审核）、`PUT update-status`（审核/反审核，幂等目标态）、`GET export-excel`。
 - **库存**：`GET /erp/stock/page`（仓库×产品余额）、`GET /erp/stock/get-count`（产品全仓合计）、`GET /erp/stock-record/page`（流水按 biz_type/仓库/产品/时间筛选）、库存导出。
 - **统计**：`GET /erp/sale-statistics/summary`、`/time-summary`；`GET /erp/purchase-statistics/summary`、`/time-summary`。口径：销售额 = Σ已审核销售出库 `total_price`（按 `out_time` 落区间）− Σ已审核销售退货 `total_price`（按 `return_time`）；采购 = 采购入库 − 采购退货（`in_time`/`return_time`）；summary 返回今日/昨日/本月/今年；time-summary 返回近 N 个月（默认 6）按月。
 
@@ -167,7 +167,7 @@
 
 ## 7. 迁移号、菜单、权限码、种子
 
-- **迁移**：00029 起按域拆 6 个迁移（主数据 / 库存+序列 / 采购 / 销售 / 杂项出入库 / 财务），每迁移一个主题、带 Down 段；`scripts/verify-migration.sh` 的 `EXPECTED_TABLES` 默认值改 **100**。
+- **迁移**：00029 起按实际主题拆 6 个迁移——00029 主数据（6 表）、00030 库存+序列+其它出入库（7 表，杂项单据表随库存核心一并建）、00031 采购（6 表）、00032 销售（6 表）、00033 调拨盘点（4 表）、00034 财务（5 表）；每迁移一个主题、带 Down 段；`scripts/verify-migration.sh` 的 `EXPECTED_TABLES` 默认值改 **100**。
 - **菜单**：写 seed 不写迁移（纪律：开工前 grep `seed.go` 去重再取号）。顶层 dir **700**（ERP 进销存）；分配：701 首页统计；710 产品分类、711 产品单位、712 产品；720 仓库、721 产品库存、722 出入库明细、723 其它入库、724 其它出库、725 库存调拨、726 库存盘点；730 供应商、731 采购订单、732 采购入库、733 采购退货；740 客户、741 销售订单、742 销售出库、743 销售退货；750 结算账户、751 付款单、752 收款单。按钮 = 菜单ID×10+n（query/create/update/delete/approve/export）。
 - **权限码**：`erp:<entity>:query|create|update|delete|approve|export`（库存页 query/export，统计页 query）。内置普通角色（role id=2）**默认不授予**任何 ERP 菜单（财务与库存敏感，仅管理员与后续自定义角色）；seed 幂等策略沿用现有（菜单按 ID 只插缺失项）。
 - **字典**：其它入库/出库类型字典（取值实施时对齐芋道字典种子）。
