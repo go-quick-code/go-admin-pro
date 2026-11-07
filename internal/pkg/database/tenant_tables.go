@@ -130,4 +130,16 @@ var TenantTables = []string{
 	// 插件隔离，跨租户业务 ID 一律 404；匹配缓存按租户快照构建
 	//（system/service sensitive_word.go），CRUD 后失效。
 	"system_sensitive_word",
+
+	// ERP 主数据（issue #88，迁移 00029，docs/erp-mvp-spec.md §3.1/§4.10）：
+	// 六表一次建齐（分类/单位/产品 + 仓库/客户/供应商先建后用），全量租户
+	// 隔离（跨租户业务 ID 一律 404）；owner_user_id/owner_dept_id 承载数据
+	// 范围谓词（owner = 创建人，owner 恒有值，spec §4.10）。后续票的单据表
+	// 落地迁移时把表名追加到这里并补租户隔离用例。
+	"erp_product_category",
+	"erp_product_unit",
+	"erp_product",
+	"erp_warehouse",
+	"erp_customer",
+	"erp_supplier",
 }
