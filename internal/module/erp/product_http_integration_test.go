@@ -130,6 +130,56 @@ func TestIntegrationProductCRUD(t *testing.T) {
 	}
 }
 
+// TestIntegrationProductOptionalFields 可选字段缺省创建（§3.1 展示字段语义）：
+// 不提交 weight 与三个参考价时整单成功（weight 为 NULL、参考价落 0.00）；同时
+// 固化「空串仍 400」的 API 边界——前端产品页 beforeSubmit 负责剔除空串
+// （#88 已知缺陷修复），后端不做空串容错，避免把非法十进制静默当缺省。
+func TestIntegrationProductOptionalFields(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	category := createCategory(t, env, token, "可选字段分类", nil)
+	unit := createUnit(t, env, token, "套", nil)
+	categoryID := int64(category["id"].(float64))
+	unitID := int64(unit["id"].(float64))
+
+	status, api := env.Request(t, http.MethodPost, "/erp/product", token, map[string]any{
+		"categoryId": categoryID,
+		"unitId":     unitID,
+		"name":       "只填必填项的产品",
+		"status":     0,
+	})
+	if status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("缺省 weight/参考价创建产品：HTTP %d code %d msg %q，期望 HTTP 200 code 0",
+			status, api.Code, api.Msg)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(api.Data, &row); err != nil {
+		t.Fatalf("解析创建产品响应: %v（data=%s）", err, string(api.Data))
+	}
+	if row["weight"] != nil {
+		t.Fatalf("未提交 weight 应回读 null，实际 %v", row["weight"])
+	}
+	if row["purchasePrice"] != "0.00" || row["salePrice"] != "0.00" || row["minPrice"] != "0.00" {
+		t.Fatalf("未提交参考价应回读 0.00：%v/%v/%v",
+			row["purchasePrice"], row["salePrice"], row["minPrice"])
+	}
+
+	// 空串是非法十进制，后端 400（前端已剔除；这里锁定契约不被静默放宽）。
+	status, api = env.Request(t, http.MethodPost, "/erp/product", token, map[string]any{
+		"categoryId":    categoryID,
+		"unitId":        unitID,
+		"name":          "空串参考价",
+		"purchasePrice": "",
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("空串参考价：HTTP %d code %d，期望 400（msg=%q）", status, api.Code, api.Msg)
+	}
+	if _, total := pageProducts(t, env, token, "&name=空串参考价"); total != 0 {
+		t.Fatalf("空串参考价不应落库：total=%d", total)
+	}
+}
+
 // TestIntegrationProductRefConstraints 引用约束（spec §4.9）：
 // 分类/单位被产品引用禁删 409；解除引用（删产品）后可删。
 func TestIntegrationProductRefConstraints(t *testing.T) {

@@ -7,6 +7,7 @@
       :search-items="searchItems"
       :api="api"
       :default-form="defaultForm"
+      :before-submit="beforeSubmit"
       perm-prefix="erp:product"
       title="产品"
       :action-width="160"
@@ -171,6 +172,18 @@ const defaultForm: Record<string, any> = {
   weight: '',
   status: 0,
   remark: '',
+}
+
+// 可选字段未填写时不提交空串（后端 qty/money 定点只接受十进制字符串或 null，
+// 空串会 400；#88 已知缺陷修复）：重量清空后保持/清空 NULL，三个参考价清空后
+// 由服务端零值（0.00）承载。客户/供应商页的 taxPercent 同款规避不受影响。
+function beforeSubmit(payload: Record<string, any>) {
+  for (const key of ['weight', 'purchasePrice', 'salePrice', 'minPrice']) {
+    if (payload[key] === '' || payload[key] == null) {
+      delete payload[key]
+    }
+  }
+  return payload
 }
 
 // 产品导出复用当前列表筛选（空值由 ExcelActions 剔除）。
