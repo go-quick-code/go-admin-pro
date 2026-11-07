@@ -133,11 +133,31 @@ func TestGeneratedFreshModuleCompiles(t *testing.T) {
 // fresh-module 变体的语义是「生成一个全新模块」，生成骨架即整个模块，
 // 真实实现与骨架并存会互相覆盖同名文件（repository.go/service.go/api.go 等）
 // 导致编译检查失去意义。
+//
+// 装配外溢适配（issue #90 延续本测试的既有模式）：app.go 会对真实 erp Service
+// 调用 SetWarehouseRefChecker/SetProductRefChecker/SetLocation（库存域引用
+// 校验与业务时区装配），生成的全新骨架没有这些接缝——剪除模块的同时剔除
+// 这些装配行，保持「全新模块自洽可编译」的检查语义。
 func pruneRealErpModule(t *testing.T, tmp string) {
 	t.Helper()
 	dir := filepath.Join(tmp, "internal", "module", "erp")
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("剪除真实 erp 模块: %v", err)
+	}
+	appPath := filepath.Join(tmp, "internal", "app", "app.go")
+	raw, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("读取 app.go: %v", err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, "erpSvc.Set") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if err := os.WriteFile(appPath, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		t.Fatalf("剔除 erpSvc.Set 装配行: %v", err)
 	}
 }
 
