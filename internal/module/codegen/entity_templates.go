@@ -796,6 +796,8 @@ const tmplScaffoldRouter = `// Package api 是 [[ .Module ]] 模块的 HTTP 入�
 package api
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/[[ .Module ]]/service"
@@ -804,14 +806,21 @@ import (
 // Handler 是 [[ .Module ]] 模块的 HTTP 入口。
 // requirePermission 复用 system 模块的权限中间件（crm 同款装配方式），
 // 权限码与菜单种子保持一致。
+// location 是应用业务时区（ADR 0006），与 crm/oa 同款装配契约
+//（api.New(svc, requirePermission, location)）；Excel/日期逻辑接入时直接可用。
 type Handler struct {
 	svc               *service.Service
 	requirePermission func(string) gin.HandlerFunc
+	location          *time.Location
 }
 
-// New 创建 [[ .Module ]] Handler。
-func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc) *Handler {
-	return &Handler{svc: svc, requirePermission: requirePermission}
+// New 创建 [[ .Module ]] Handler。location 为 nil 时回退 time.Local
+//（生产装配固定传 config.Location()）。
+func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc, location *time.Location) *Handler {
+	if location == nil {
+		location = time.Local
+	}
+	return &Handler{svc: svc, requirePermission: requirePermission, location: location}
 }
 
 // RegisterProtected 注册需要登录的 [[ .Module ]] 接口，rg 上应已挂载 Auth 中间件。

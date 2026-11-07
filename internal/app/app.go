@@ -17,6 +17,9 @@ import (
 	crmapi "github.com/go-quick-code/go-admin-pro/internal/module/crm/api"
 	crmrepo "github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
 	crmservice "github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
+	erpapi "github.com/go-quick-code/go-admin-pro/internal/module/erp/api"
+	erprepo "github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	erpservice "github.com/go-quick-code/go-admin-pro/internal/module/erp/service"
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
@@ -240,6 +243,14 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
 
+	// ERP 模块（issue #88，docs/erp-mvp-spec.md §2）：repo→service→api 顺序装配；
+	// 数据范围解析复用 system Service（datascope 引擎宿主，ADR 0004），依赖只指向
+	// 平台层，不依赖 crm/oa/bpm（ADR 0015）。产品删除引用校验扩展点（product_refs.go）
+	// 本票为骨架，#90–#94 的单据域引用类型在各自装配处注册。
+	erpRepo := erprepo.New(db)
+	erpSvc := erpservice.New(erpRepo, sysSvc)
+	erpAPI := erpapi.New(erpSvc, sysAPI.RequirePermission, cfg.Location())
+
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
 	// 无业务依赖、不反向依赖业务模块；bpm/公告/会议室等生产者经 notifySvc 的
 	// CreateInTx seam 把通知写进各自的事务（同生共死），读取侧走 /notify/message/*。
@@ -388,7 +399,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission, apiLogWriter)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI)
 
 	scheduler.Start(context.Background())
 
