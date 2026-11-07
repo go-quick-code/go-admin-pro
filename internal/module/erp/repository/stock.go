@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
 )
 
@@ -30,10 +31,13 @@ type StockFilter struct {
 // 在唯一键上先取行锁物化该行，后续 LockStock 不落 gap 锁。
 // 只能在事务内调用（唯一入账入口的第 1 步）。
 func (r *Repository) EnsureStockRow(ctx context.Context, tenantID, productID, warehouseID int64) error {
+	now := time.Now()
+	user := database.AuditUser(ctx)
 	return r.db.WithContext(ctx).Exec(
-		"INSERT INTO `erp_stock` (`tenant_id`, `product_id`, `warehouse_id`, `count`) VALUES (?, ?, ?, 0) "+
+		"INSERT INTO `erp_stock` (`tenant_id`, `product_id`, `warehouse_id`, `count`, `created_at`, `updated_at`, `creator`, `updater`) "+
+			"VALUES (?, ?, ?, 0, ?, ?, ?, ?) "+
 			"ON DUPLICATE KEY UPDATE `count` = `count`",
-		tenantID, productID, warehouseID,
+		tenantID, productID, warehouseID, now, now, user, user,
 	).Error
 }
 
@@ -53,9 +57,9 @@ func (r *Repository) LockStock(ctx context.Context, tenantID, productID, warehou
 // 返回影响行数（恒 1；0 视为异常）。只能在事务内调用。
 func (r *Repository) IncreaseStock(ctx context.Context, tenantID, productID, warehouseID int64, delta qty.Qty) (int64, error) {
 	res := r.db.WithContext(ctx).Exec(
-		"UPDATE `erp_stock` SET `count` = `count` + ?, `updated_at` = ? "+
+		"UPDATE `erp_stock` SET `count` = `count` + ?, `updated_at` = ?, `updater` = ? "+
 			"WHERE `tenant_id` = ? AND `product_id` = ? AND `warehouse_id` = ?",
-		delta, time.Now(), tenantID, productID, warehouseID,
+		delta, time.Now(), database.AuditUser(ctx), tenantID, productID, warehouseID,
 	)
 	return res.RowsAffected, res.Error
 }
@@ -65,9 +69,9 @@ func (r *Repository) IncreaseStock(ctx context.Context, tenantID, productID, war
 // 产品/仓库/当前库存/变更量）。行锁已持有，先读后写。只能在事务内调用。
 func (r *Repository) DecreaseStock(ctx context.Context, tenantID, productID, warehouseID int64, amount qty.Qty) (int64, error) {
 	res := r.db.WithContext(ctx).Exec(
-		"UPDATE `erp_stock` SET `count` = `count` - ?, `updated_at` = ? "+
+		"UPDATE `erp_stock` SET `count` = `count` - ?, `updated_at` = ?, `updater` = ? "+
 			"WHERE `tenant_id` = ? AND `product_id` = ? AND `warehouse_id` = ? AND `count` >= ?",
-		amount, time.Now(), tenantID, productID, warehouseID, amount,
+		amount, time.Now(), database.AuditUser(ctx), tenantID, productID, warehouseID, amount,
 	)
 	return res.RowsAffected, res.Error
 }

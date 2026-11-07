@@ -6,10 +6,13 @@
 package erp_test
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
@@ -227,5 +230,63 @@ func TestIntegrationStockPermission(t *testing.T) {
 	status, _ = approveDoc(t, env, tokenB, "stock-in", docID, 20)
 	if status != http.StatusForbidden {
 		t.Fatalf("仅 query 角色审核单据：HTTP %d，期望 403（approve 独立权限码）", status)
+	}
+}
+
+// TestIntegrationStockAuditColumns 库存账裸 SQL 原语必须写审计列（spec §3 通用
+// 底座 + ADR 0002）：EnsureStockRow 插入时写 created_at/updated_at/creator/updater，
+// Increase/Decrease 更新时写 updated_at/updater。历史缺陷是裸 upsert 只用列默认值
+// → creator/updater 恒 '0'、created_at NULL。
+func TestIntegrationStockAuditColumns(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID := setupStockEnv(t, env, token, "审计")
+	adminID := findUserIDByUsername(t, env, token, "admin")
+	wantUser := strconv.FormatInt(adminID, 10)
+
+	in := createStockInDoc(t, env, token, map[string]any{
+		"warehouseId": warehouseID, "inTime": env.Date() + " 09:00:00",
+		"items": []map[string]any{stockItemJSON(productID, "5", "1.00")},
+	})
+	inID := int64(in["id"].(float64))
+	if status, api := approveDoc(t, env, token, "stock-in", inID, 20); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("审核入库单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	assertStockAudit(t, env, warehouseID, productID, wantUser)
+
+	// 出账方向更新：updater 仍为当前登录用户，updated_at 非空。
+	out := createStockOutDoc(t, env, token, map[string]any{
+		"warehouseId": warehouseID, "outTime": env.Date() + " 10:00:00",
+		"items": []map[string]any{stockItemJSON(productID, "2", "1.00")},
+	})
+	outID := int64(out["id"].(float64))
+	if status, api := approveDoc(t, env, token, "stock-out", outID, 20); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("审核出库单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	assertStockAudit(t, env, warehouseID, productID, wantUser)
+}
+
+// assertStockAudit 断言 erp_stock 行的审计列已由入账原语补齐（无登录上下文时
+// 允许 '0'，但 HTTP 路径必须写当前用户）。
+func assertStockAudit(t *testing.T, env *testutil.IntegrationEnv, warehouseID, productID int64, wantUser string) {
+	t.Helper()
+	var row struct {
+		Creator   string
+		Updater   string
+		CreatedAt sql.NullTime
+		UpdatedAt sql.NullTime
+	}
+	if err := tenant.Skip(env.DB).Table("erp_stock").
+		Select("creator, updater, created_at, updated_at").
+		Where("warehouse_id = ? AND product_id = ?", warehouseID, productID).
+		Take(&row).Error; err != nil {
+		t.Fatalf("读取库存行审计列: %v", err)
+	}
+	if !row.CreatedAt.Valid || !row.UpdatedAt.Valid {
+		t.Fatalf("库存行 created_at/updated_at 不应为 NULL：%+v", row)
+	}
+	if row.Creator != wantUser || row.Updater != wantUser {
+		t.Fatalf("库存行 creator/updater = %q/%q，期望 %q/%q（当前登录用户）",
+			row.Creator, row.Updater, wantUser, wantUser)
 	}
 }
