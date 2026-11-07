@@ -62,5 +62,13 @@ func (c PurchaseDocRefChecker) CheckSupplierRefs(ctx context.Context, supplierID
 	if rows > 0 {
 		return xerr.Conflict("供应商被采购单据引用，禁止删除")
 	}
+	// 财务域（issue #94，spec §4.9/§4.7）：供应商被付款单引用同样禁删。
+	paymentRows, err := c.svc.repo.CountFinancePaymentsBySupplier(ctx, supplierID)
+	if err != nil {
+		return err
+	}
+	if paymentRows > 0 {
+		return xerr.Conflict("供应商被付款单引用，禁止删除")
+	}
 	return nil
 }

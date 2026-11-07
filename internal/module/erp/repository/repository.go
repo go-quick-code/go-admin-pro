@@ -6,6 +6,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"gorm.io/gorm"
@@ -28,6 +29,16 @@ func (r *Repository) Transaction(ctx context.Context, fn func(tx *Repository) er
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(&Repository{db: tx})
 	})
+}
+
+// TransactionReadCommitted 以 READ COMMITTED 隔离级别执行事务（issue #94）：
+// 财务核销的上限校验在持有被核销单据行锁后聚合「其它已审核核销额」，需要
+// 当前读语义（看到等待期间其它事务已提交的核销），避免 REPEATABLE READ 的
+// 事务快照漏记；行锁（目标单据）负责串行化并发核销，不依赖范围锁。
+func (r *Repository) TransactionReadCommitted(ctx context.Context, fn func(tx *Repository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(&Repository{db: tx})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }
 
 // notFound 把 gorm.ErrRecordNotFound 规整为 nil（service 层统一翻译 404）。

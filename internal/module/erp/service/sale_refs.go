@@ -34,6 +34,14 @@ func (s *Service) CheckCustomerRefs(ctx context.Context, customerID int64) error
 	if retRows > 0 {
 		return xerr.Conflict("客户被销售退货单引用，禁止删除")
 	}
+	// 财务域（issue #94，spec §4.9/§4.7）：客户被收款单引用同样禁删。
+	receiptRows, err := s.repo.CountFinanceReceiptsByCustomer(ctx, customerID)
+	if err != nil {
+		return err
+	}
+	if receiptRows > 0 {
+		return xerr.Conflict("客户被收款单引用，禁止删除")
+	}
 	return nil
 }
 
