@@ -53,6 +53,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterPurchaseOrderRoutes(rg)
 	h.RegisterPurchaseInRoutes(rg)
 	h.RegisterPurchaseReturnRoutes(rg)
+	// 首页统计（issue #95，spec §5/§6）：销售/采购 × summary/time-summary。
+	h.RegisterStatisticsRoutes(rg)
 }
 
 // ---------- 通用绑定助手（与 system/crm 模块同构，保持模块自包含）----------

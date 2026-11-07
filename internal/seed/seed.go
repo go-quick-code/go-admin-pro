@@ -561,6 +561,10 @@ func seedMenus(db *gorm.DB) error {
 		// 财务与库存敏感：内置普通角色（role id=2）默认不授予任何 ERP 菜单
 		//（spec §7，见 seedRoles 的 roleMenus——刻意无 700 段条目）。
 		dir(700, 0, "ERP 进销存", "/erp", "ShoppingCart", 70),
+		// 首页统计（issue #95，spec §6/§7）：701 挂 erp:statistics:query；按钮
+		// 7011 与菜单同码（对齐 CRM 仪表盘 4140/4141 的形态，grep 去重确认未占用）。
+		menu(701, 700, "首页统计", "statistics", "erp/statistics/index", "erp:statistics:query", "DataLine", 0),
+		btn(7011, 701, "统计查询", "erp:statistics:query", 1),
 		menu(710, 700, "产品分类", "product-category", "erp/product-category/index", "erp:product-category:query", "Files", 1),
 		btn(7101, 710, "分类新增", "erp:product-category:create", 1),
 		btn(7102, 710, "分类修改", "erp:product-category:update", 2),
