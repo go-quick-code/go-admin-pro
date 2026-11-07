@@ -69,6 +69,10 @@ const bizLabels: Record<string, string> = {
   stock_in_CANCEL: '其它入库（反审核）',
   stock_out: '其它出库',
   stock_out_CANCEL: '其它出库（反审核）',
+  stock_move: '库存调拨',
+  stock_move_CANCEL: '库存调拨（反审核）',
+  stock_check: '盘点调整',
+  stock_check_CANCEL: '盘点调整（反审核）',
 }
 function bizLabel(biz: string) {
   return bizLabels[biz] ?? biz

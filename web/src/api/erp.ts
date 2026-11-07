@@ -353,3 +353,57 @@ export function updatePurchaseReturnStatus(data: { id: number; status: number })
 export function exportPurchaseReturns(params?: Record<string, any>) {
   return downloadExcel('/erp/purchase-return/export-excel', params)
 }
+
+// ---------- ERP 库存调拨单（DB，issue #93，spec §3.5/§4.6） ----------
+// 单号由服务端经 erp_sequence 发放（入参无单号字段）；审核时同一事务内出仓
+// 负、入仓正两笔流水同额成对（两仓必须不同、源仓不足 409）；反审核各生成
+// 反向流水。审核/反审核走 update-status（幂等目标态：20 审核 / 10 反审核），
+// approve 为独立权限码。
+export function pageStockMoves(params: any) {
+  return request.get('/erp/stock-move/page', { params }) as Promise<any>
+}
+export function getStockMove(id: number) {
+  return request.get(`/erp/stock-move/${id}`) as Promise<any>
+}
+export function createStockMove(data: any) {
+  return request.post('/erp/stock-move', data) as Promise<any>
+}
+export function updateStockMove(data: any) {
+  return request.put('/erp/stock-move', data) as Promise<any>
+}
+export function deleteStockMove(id: number) {
+  return request.delete(`/erp/stock-move/${id}`) as Promise<any>
+}
+export function updateStockMoveStatus(data: { id: number; status: number }) {
+  return request.put('/erp/stock-move/update-status', data) as Promise<any>
+}
+export function exportStockMoves(params?: Record<string, any>) {
+  return downloadExcel('/erp/stock-move/export-excel', params)
+}
+
+// ---------- ERP 库存盘点单（PD，issue #93，spec §3.5/§4.6） ----------
+// 明细 actualCount 为实际清点数（≥ 0，十进制字符串）；baseCount 为创建时账面
+// 数快照（服务端写入、只读展示，审核以当时账面为准，入参无该字段）。审核按
+// 「差异 = actualCount − 当时账面数」调整库存（差正盘盈、差负盘亏），审核后
+// 账面 = 实际数；反审核按已入账流水净额反向。
+export function pageStockChecks(params: any) {
+  return request.get('/erp/stock-check/page', { params }) as Promise<any>
+}
+export function getStockCheck(id: number) {
+  return request.get(`/erp/stock-check/${id}`) as Promise<any>
+}
+export function createStockCheck(data: any) {
+  return request.post('/erp/stock-check', data) as Promise<any>
+}
+export function updateStockCheck(data: any) {
+  return request.put('/erp/stock-check', data) as Promise<any>
+}
+export function deleteStockCheck(id: number) {
+  return request.delete(`/erp/stock-check/${id}`) as Promise<any>
+}
+export function updateStockCheckStatus(data: { id: number; status: number }) {
+  return request.put('/erp/stock-check/update-status', data) as Promise<any>
+}
+export function exportStockChecks(params?: Record<string, any>) {
+  return downloadExcel('/erp/stock-check/export-excel', params)
+}
