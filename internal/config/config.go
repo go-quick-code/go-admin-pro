@@ -100,8 +100,8 @@ type DatabaseConfig struct {
 	SeedDemo *bool `mapstructure:"seed-demo"`
 }
 
-// SeedDemoEnabled 报告是否写入 CRM + OA + 平台演示数据：配置缺省（nil）视为
-// 关闭，只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
+// SeedDemoEnabled 报告是否写入 CRM + OA + ERP + 平台演示数据：配置缺省（nil）
+// 视为关闭，只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
 func (c *Config) SeedDemoEnabled() bool {
 	return c.Database.SeedDemo != nil && *c.Database.SeedDemo
 }
