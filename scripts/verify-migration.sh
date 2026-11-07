@@ -37,6 +37,10 @@
 #                       00024 新增 message_channel、message_template、message_log，
 #                       00025 新增 system_social_client、system_social_user，
 #                       00028 新增 system_area（平台级行政区划，issue #82），
+#                       00030 新增 erp_stock、erp_stock_record、erp_sequence、
+#                       erp_stock_in、erp_stock_in_item、erp_stock_out、
+#                       erp_stock_out_item（issue #90，7 张：库存账 3 +
+#                       杂项出入库单据 4；72→79），
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -44,7 +48,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-72}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-79}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
