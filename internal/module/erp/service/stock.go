@@ -326,4 +326,10 @@ var stockRecordBizNames = map[string]string{
 	model.StockRecordBizPurchaseInCancel:     "采购入库（反审核）",
 	model.StockRecordBizPurchaseReturn:       "采购退货",
 	model.StockRecordBizPurchaseReturnCancel: "采购退货（反审核）",
+	// 库存调拨/盘点（issue #93，spec §4.3/§4.6）：调拨出入成对、盘点差异调整，
+	// 各配 _CANCEL 对。
+	model.StockRecordBizStockMove:        "库存调拨",
+	model.StockRecordBizStockMoveCancel:  "库存调拨（反审核）",
+	model.StockRecordBizStockCheck:       "盘点调整",
+	model.StockRecordBizStockCheckCancel: "盘点调整（反审核）",
 }

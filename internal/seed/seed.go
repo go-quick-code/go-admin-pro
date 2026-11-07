@@ -662,6 +662,23 @@ func seedMenus(db *gorm.DB) error {
 		btn(7433, 743, "退货删除", "erp:sale-return:delete", 3),
 		btn(7434, 743, "退货审核", "erp:sale-return:approve", 4),
 		btn(7435, 743, "退货导出", "erp:sale-return:export", 5),
+
+		// 库存调拨/盘点（issue #93，spec §6/§7）：725 库存调拨（DB）、726 库存
+		// 盘点（PD）（spec §7 号段）。单据页按 query 菜单 + create/update/delete/
+		// approve/export 全套按钮（approve 为独立审核权限码，spec §4.1）。
+		// 按钮 = 菜单ID×10+n，7251–7255/7261–7265 grep 去重确认未占用。
+		menu(725, 700, "库存调拨", "stock-move", "erp/stock-move/index", "erp:stock-move:query", "Switch", 11),
+		btn(7251, 725, "调拨新增", "erp:stock-move:create", 1),
+		btn(7252, 725, "调拨修改", "erp:stock-move:update", 2),
+		btn(7253, 725, "调拨删除", "erp:stock-move:delete", 3),
+		btn(7254, 725, "调拨审核", "erp:stock-move:approve", 4),
+		btn(7255, 725, "调拨导出", "erp:stock-move:export", 5),
+		menu(726, 700, "库存盘点", "stock-check", "erp/stock-check/index", "erp:stock-check:query", "Finished", 12),
+		btn(7261, 726, "盘点新增", "erp:stock-check:create", 1),
+		btn(7262, 726, "盘点修改", "erp:stock-check:update", 2),
+		btn(7263, 726, "盘点删除", "erp:stock-check:delete", 3),
+		btn(7264, 726, "盘点审核", "erp:stock-check:approve", 4),
+		btn(7265, 726, "盘点导出", "erp:stock-check:export", 5),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。

@@ -53,6 +53,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterPurchaseOrderRoutes(rg)
 	h.RegisterPurchaseInRoutes(rg)
 	h.RegisterPurchaseReturnRoutes(rg)
+	// 库存调拨/盘点（issue #93，spec §3.5/§4.6/§5）：DB 调拨、PD 盘点。
+	h.RegisterStockMoveRoutes(rg)
+	h.RegisterStockCheckRoutes(rg)
 }
 
 // ---------- 通用绑定助手（与 system/crm 模块同构，保持模块自包含）----------

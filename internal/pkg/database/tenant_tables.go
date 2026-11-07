@@ -171,4 +171,11 @@ var TenantTables = []string{
 	"erp_sale_out_items",
 	"erp_sale_return",
 	"erp_sale_return_items",
+	// 库存调拨与盘点（issue #93，迁移 00033，spec §3.5/§4.6）：调拨/盘点两主
+	// 两明，全量租户隔离（跨租户业务 ID 一律 404）；库存入账原语与流水查询
+	// 走显式租户参数（与 00030 同口径）。
+	"erp_stock_move",
+	"erp_stock_move_item",
+	"erp_stock_check",
+	"erp_stock_check_item",
 }
