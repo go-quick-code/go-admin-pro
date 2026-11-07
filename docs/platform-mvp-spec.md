@@ -284,8 +284,8 @@
 | GET | `/system/tenant-package/simple-list` | `system:tenant-package:query` |
 | GET | `/system/tenant-package/:id` | `system:tenant-package:query` |
 | POST | `/system/tenant-package` | `system:tenant-package:create` |
-| PUT | `/system/tenant-package/:id` | `system:tenant-package:update` |
-| PUT | `/system/tenant-package/:id/status` | `system:tenant-package:update` |
+| PUT | `/system/tenant-package`（ID 在 body，与 user/role 模块约定一致） | `system:tenant-package:update` |
+| PUT | `/system/tenant-package/status`（ID 在 body） | `system:tenant-package:update` |
 | DELETE | `/system/tenant-package/:id` | `system:tenant-package:delete` |
 | GET | `/system/tenant/quota` | 登录即可（当前租户） |
 | GET | `/system/tenant/:id/quota` | `system:tenant:query`（平台） |
@@ -319,6 +319,9 @@
 | POST | `/system/social/bind` | 登录即可 |
 | GET | `/system/social/user/page` | `system:social-user:query` |
 | DELETE | `/system/social/user/:id` | `system:social-user:delete` |
+| GET | `/system/social/providers` | 公开（仅返回启用的 provider 编码与名称，供登录页渲染） |
+| GET | `/system/social/my` | 登录即可（当前用户绑定列表） |
+| DELETE | `/system/social/my/:id` | 登录即可（只能解绑本人；管理端走上一行） |
 
 ### 5.4 推送
 
@@ -348,8 +351,8 @@
 
 | 方法 | 路径 | 权限 |
 |---|---|---|
-| GET | `/system/area/tree` | `system:area:query` |
-| GET | `/system/area/children` | `system:area:query` |
+| GET | `/system/area/tree` | 登录即可（§4.8.1 所有登录用户可读；`system:area:query` 保留给平台管理页） |
+| GET | `/system/area/children` | 登录即可（同上） |
 | POST | `/system/area/import` | `system:area:import`（平台） |
 
 ### 5.8 数据库文档 / 监控
