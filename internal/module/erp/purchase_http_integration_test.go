@@ -583,6 +583,76 @@ func TestIntegrationPurchaseUnapproveBans(t *testing.T) {
 	}
 }
 
+// TestIntegrationPurchaseDeleteRefs 未审核单据被引用禁删（spec §4.9，与销售
+// 订单/出库对称）：
+//   - 未审核采购订单被未审核入库单引用时禁删（409），逆序拆单后可删；
+//   - 未审核采购入库单被未审核退货单引用时禁删（409），逆序拆单后可删。
+func TestIntegrationPurchaseDeleteRefs(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, "引用删")
+
+	// 订单 → 入库：订单审核 → 建入库（未审核）→ 反审核订单（无已审核挂单，
+	// 允许）→ 删除订单必须 409（挂单引用悬空会让占用失去锚点）。
+	order := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+		"supplierId": supplierID, "orderTime": env.Date() + " 09:00:00",
+		"items": []map[string]any{purchaseItemJSON(productID, "5", "1.00")},
+	})
+	orderID := int64(order["id"].(float64))
+	mustApprovePurchaseDoc(t, env, token, "purchase-order", orderID)
+	inDoc := createPurchaseDoc(t, env, token, "purchase-in", map[string]any{
+		"supplierId": supplierID, "orderId": orderID, "warehouseId": warehouseID,
+		"inTime": env.Date() + " 10:00:00",
+		"items":  []map[string]any{purchaseItemJSON(productID, "3", "1.00")},
+	})
+	inID := int64(inDoc["id"].(float64))
+	if status, api := approvePurchaseDoc(t, env, token, "purchase-order", orderID, 10); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("反审核订单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	if status, api := deleteByID(t, env, token, fmt.Sprintf("/erp/purchase-order/%d", orderID)); status != http.StatusConflict {
+		t.Fatalf("删除被未审核入库引用的订单：HTTP %d，期望 409（msg=%q）", status, api.Msg)
+	}
+	if status, api := deleteByID(t, env, token, fmt.Sprintf("/erp/purchase-in/%d", inID)); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("删除未审核入库单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	if status, api := deleteByID(t, env, token, fmt.Sprintf("/erp/purchase-order/%d", orderID)); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("解除引用后删除订单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+
+	// 入库 → 退货：订单/入库审核 → 建退货（未审核）→ 反审核入库（无已审核
+	// 退货，允许）→ 删除入库必须 409；删退货后可删入库。
+	order2 := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+		"supplierId": supplierID, "orderTime": env.Date() + " 09:10:00",
+		"items": []map[string]any{purchaseItemJSON(productID, "5", "1.00")},
+	})
+	order2ID := int64(order2["id"].(float64))
+	mustApprovePurchaseDoc(t, env, token, "purchase-order", order2ID)
+	in2 := createPurchaseDoc(t, env, token, "purchase-in", map[string]any{
+		"supplierId": supplierID, "orderId": order2ID, "warehouseId": warehouseID,
+		"inTime": env.Date() + " 10:10:00",
+		"items":  []map[string]any{purchaseItemJSON(productID, "4", "1.00")},
+	})
+	in2ID := int64(in2["id"].(float64))
+	mustApprovePurchaseDoc(t, env, token, "purchase-in", in2ID)
+	ret := createPurchaseDoc(t, env, token, "purchase-return", map[string]any{
+		"supplierId": supplierID, "inId": in2ID, "returnTime": env.Date() + " 11:10:00",
+		"items": []map[string]any{purchaseItemJSON(productID, "1", "1.00")},
+	})
+	retID := int64(ret["id"].(float64))
+	if status, api := approvePurchaseDoc(t, env, token, "purchase-in", in2ID, 10); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("反审核入库单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	if status, api := deleteByID(t, env, token, fmt.Sprintf("/erp/purchase-in/%d", in2ID)); status != http.StatusConflict {
+		t.Fatalf("删除被未审核退货引用的入库单：HTTP %d，期望 409（msg=%q）", status, api.Msg)
+	}
+	if status, api := deleteByID(t, env, token, fmt.Sprintf("/erp/purchase-return/%d", retID)); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("删除未审核退货单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+	if status, api := deleteByID(t, env, token, fmt.Sprintf("/erp/purchase-in/%d", in2ID)); status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("解除引用后删除入库单：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+}
+
 // TestIntegrationPurchaseConcurrentOccupancy 占用并发（spec §8.2 采购行加分项）：
 // 两张入库单同抢订单余量 5，恰一成一 409，无双重占用。
 func TestIntegrationPurchaseConcurrentOccupancy(t *testing.T) {

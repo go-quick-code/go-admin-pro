@@ -288,9 +288,10 @@ func (s *Service) UpdatePurchaseIn(ctx context.Context, req *dto.PurchaseInUpdat
 	})
 }
 
-// DeletePurchaseIn 删除采购入库单（仅未审核，已审核 409，spec §4.1）：
+// DeletePurchaseIn 删除采购入库单（仅未审核，已审核 409，spec §4.1/§4.9）：
 // 主表 + 明细一并软删除；未审核未落账不动库存，删除自然释放订单占用
-// （spec §4.4：删除未审核单自然释放占用）。
+// （spec §4.4）。存在退货单引用（含未审核）时禁删——挂单引用悬空会让退货
+// 占用校验失去锚点（与销售出库对称）。
 func (s *Service) DeletePurchaseIn(ctx context.Context, id int64) error {
 	row, err := s.findPurchaseIn(ctx, id)
 	if err != nil {
@@ -300,6 +301,13 @@ func (s *Service) DeletePurchaseIn(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		retRefs, err := tx.CountPurchaseReturnsByIn(ctx, row.ID, 0)
+		if err != nil {
+			return err
+		}
+		if retRefs > 0 {
+			return xerr.Conflict("采购入库单存在退货单引用，禁止删除")
+		}
 		if err := tx.DeletePurchaseIn(ctx, row.ID); err != nil {
 			return err
 		}

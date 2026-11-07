@@ -203,8 +203,9 @@ func (s *Service) UpdatePurchaseOrder(ctx context.Context, req *dto.PurchaseOrde
 	})
 }
 
-// DeletePurchaseOrder 删除采购订单（仅未审核，已审核 409，spec §4.1）：
-// 主表 + 明细一并软删除。未审核订单无入库/退货可挂，无占用/进度残留。
+// DeletePurchaseOrder 删除采购订单（仅未审核，已审核 409，spec §4.1/§4.9）：
+// 主表 + 明细一并软删除；存在入库单引用（含未审核，退货经入库单归属到订单）
+// 时禁删——挂单引用悬空会让占用/进度校验失去锚点（与销售订单对称）。
 func (s *Service) DeletePurchaseOrder(ctx context.Context, id int64) error {
 	row, err := s.findPurchaseOrder(ctx, id)
 	if err != nil {
@@ -214,6 +215,13 @@ func (s *Service) DeletePurchaseOrder(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		inRefs, err := tx.CountPurchaseInsByOrder(ctx, row.ID, 0)
+		if err != nil {
+			return err
+		}
+		if inRefs > 0 {
+			return xerr.Conflict("采购订单存在入库/退货单引用，禁止删除")
+		}
 		if err := tx.DeletePurchaseOrder(ctx, row.ID); err != nil {
 			return err
 		}

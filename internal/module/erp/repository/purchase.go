@@ -176,6 +176,20 @@ func (r *Repository) CountPurchaseOrderItemsByProduct(ctx context.Context, produ
 	return countItemsByProduct(ctx, r.db, &model.PurchaseOrderItem{}, productID)
 }
 
+// CountPurchaseInsByOrder 挂在该订单上的入库单数（删除未审核订单的引用禁令用：
+// 含未审核挂单；minStatus > 0 时只计状态 >= minStatus 的单）。
+func (r *Repository) CountPurchaseInsByOrder(ctx context.Context, orderID int64, minStatus int8) (int64, error) {
+	q := r.db.WithContext(ctx).Model(&model.PurchaseIn{}).Where("order_id = ?", orderID)
+	if minStatus > 0 {
+		q = q.Where("status >= ?", minStatus)
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // ---------- 采购入库（RK） ----------
 
 // PurchaseInFilter 是采购入库单列表查询条件（筛选 + 数据范围谓词）。
@@ -309,6 +323,20 @@ func (r *Repository) UpdatePurchaseInStatusIf(ctx context.Context, id int64, fro
 // CountPurchaseInItemsByProduct 产品删除引用计数的一部分：入库单明细引用行数。
 func (r *Repository) CountPurchaseInItemsByProduct(ctx context.Context, productID int64) (int64, error) {
 	return countItemsByProduct(ctx, r.db, &model.PurchaseInItem{}, productID)
+}
+
+// CountPurchaseReturnsByIn 挂在该入库单上的退货单数（删除未审核入库单的引用
+// 禁令用：含未审核挂单；minStatus > 0 时只计状态 >= minStatus 的单）。
+func (r *Repository) CountPurchaseReturnsByIn(ctx context.Context, inID int64, minStatus int8) (int64, error) {
+	q := r.db.WithContext(ctx).Model(&model.PurchaseReturn{}).Where("in_id = ?", inID)
+	if minStatus > 0 {
+		q = q.Where("status >= ?", minStatus)
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // ---------- 采购退货（RT） ----------
