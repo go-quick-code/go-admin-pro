@@ -616,6 +616,30 @@ func seedMenus(db *gorm.DB) error {
 		btn(7243, 724, "出库删除", "erp:stock-out:delete", 3),
 		btn(7244, 724, "出库审核", "erp:stock-out:approve", 4),
 		btn(7245, 724, "出库导出", "erp:stock-out:export", 5),
+
+		// 销售三单（issue #92，spec §6/§7）：741 销售订单、742 销售出库、743 销售
+		// 退货（spec §7 号段；#91 采购 731–733 同构）。单据页按 query 菜单 +
+		// create/update/delete/approve/export 全套按钮（approve 为独立审核权限码，
+		// spec §4.1）。按钮 = 菜单ID×10+n，7411–7415/7421–7425/7431–7435 grep
+		// 去重确认未占用。
+		menu(741, 700, "销售订单", "sale-order", "erp/sale-order/index", "erp:sale-order:query", "Ticket", 11),
+		btn(7411, 741, "订单新增", "erp:sale-order:create", 1),
+		btn(7412, 741, "订单修改", "erp:sale-order:update", 2),
+		btn(7413, 741, "订单删除", "erp:sale-order:delete", 3),
+		btn(7414, 741, "订单审核", "erp:sale-order:approve", 4),
+		btn(7415, 741, "订单导出", "erp:sale-order:export", 5),
+		menu(742, 700, "销售出库", "sale-out", "erp/sale-out/index", "erp:sale-out:query", "Position", 12),
+		btn(7421, 742, "出库新增", "erp:sale-out:create", 1),
+		btn(7422, 742, "出库修改", "erp:sale-out:update", 2),
+		btn(7423, 742, "出库删除", "erp:sale-out:delete", 3),
+		btn(7424, 742, "出库审核", "erp:sale-out:approve", 4),
+		btn(7425, 742, "出库导出", "erp:sale-out:export", 5),
+		menu(743, 700, "销售退货", "sale-return", "erp/sale-return/index", "erp:sale-return:query", "RefreshLeft", 13),
+		btn(7431, 743, "退货新增", "erp:sale-return:create", 1),
+		btn(7432, 743, "退货修改", "erp:sale-return:update", 2),
+		btn(7433, 743, "退货删除", "erp:sale-return:delete", 3),
+		btn(7434, 743, "退货审核", "erp:sale-return:approve", 4),
+		btn(7435, 743, "退货导出", "erp:sale-return:export", 5),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
