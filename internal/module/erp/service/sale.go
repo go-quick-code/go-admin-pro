@@ -246,34 +246,17 @@ func (s *Service) recomputeSaleOrderProgress(ctx context.Context, tx *repository
 
 // fillOrderProgress 把订单×产品的已审核聚合量依明细 ID 序填充到明细行（纯函数）：
 // 同产品跨多行时按行序依次占用（前面的行先填满），总量精确等于聚合值。
-// 调用方传入的 items 已按明细 ID 升序（FindSaleOrderItemsByOrder）。
+// 调用方传入的 items 已按明细 ID 升序（FindSaleOrderItemsByOrder）；分摊口径
+// 与采购共用 fillProgressByItemOrder（见 progress.go）。
 func fillOrderProgress(items []model.SaleOrderItem, outSums, returnSums map[int64]qty.Qty) {
-	outLeft := make(map[int64]int64, len(outSums))
-	for id, sum := range outSums {
-		outLeft[id] = sum.Milli()
-	}
-	retLeft := make(map[int64]int64, len(returnSums))
-	for id, sum := range returnSums {
-		retLeft[id] = sum.Milli()
-	}
-	for i := range items {
-		it := &items[i]
-		take := func(left map[int64]int64) qty.Qty {
-			avail := left[it.ProductID]
-			want := it.Count.Milli()
-			taken := want
-			if avail < taken {
-				taken = avail
-			}
-			if taken < 0 {
-				taken = 0
-			}
-			left[it.ProductID] = avail - taken
-			return qty.FromMilli(taken)
-		}
-		it.OutCount = take(outLeft)
-		it.ReturnCount = take(retLeft)
-	}
+	fillProgressByItemOrder(items,
+		func(it model.SaleOrderItem) int64 { return it.ProductID },
+		func(it model.SaleOrderItem) qty.Qty { return it.Count },
+		outSums, returnSums,
+		func(i int, outCount, returnCount qty.Qty) {
+			items[i].OutCount = outCount
+			items[i].ReturnCount = returnCount
+		})
 }
 
 // ---------- 往来单位 / 销售员校验 ----------

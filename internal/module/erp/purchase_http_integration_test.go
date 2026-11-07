@@ -350,6 +350,46 @@ func TestIntegrationPurchaseInOccupancyProgress(t *testing.T) {
 	}
 }
 
+// TestIntegrationPurchaseProgressSameProductRows 同产品跨多行时的进度分摊
+// （spec §4.4 进度回写；终审 P0 修复回归）：订单两行同产品 4/6，入库单一行 7
+// 审核后 in_count 必须按明细 ID 序填为 4/3，Σ=7；旧实现把聚合量 7 写给每一行
+// 导致 Σ in_count 虚高为 14。
+func TestIntegrationPurchaseProgressSameProductRows(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, "同品分摊")
+
+	order := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+		"supplierId": supplierID, "orderTime": env.Date() + " 09:00:00",
+		"items": []map[string]any{
+			purchaseItemJSON(productID, "4", "1.00"),
+			purchaseItemJSON(productID, "6", "1.00"),
+		},
+	})
+	orderID := int64(order["id"].(float64))
+	mustApprovePurchaseDoc(t, env, token, "purchase-order", orderID)
+
+	inDoc := createPurchaseDoc(t, env, token, "purchase-in", map[string]any{
+		"supplierId": supplierID, "orderId": orderID, "warehouseId": warehouseID,
+		"inTime": env.Date() + " 10:00:00",
+		"items":  []map[string]any{purchaseItemJSON(productID, "7", "1.00")},
+	})
+	mustApprovePurchaseDoc(t, env, token, "purchase-in", int64(inDoc["id"].(float64)))
+
+	detail := getPurchaseDetail(t, env, token, "purchase-order", orderID)
+	items, ok := detail["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("订单应有 2 行明细：%v", detail["items"])
+	}
+	want := []string{"4.000", "3.000"}
+	for i, raw := range items {
+		item := raw.(map[string]any)
+		if got := fmt.Sprint(item["inCount"]); got != want[i] {
+			t.Fatalf("第 %d 行 inCount = %s，期望 %s（按明细 ID 序分摊）", i+1, got, want[i])
+		}
+	}
+}
+
 // TestIntegrationPurchaseReturnFlow 退货链路（spec §4.4 + §8.2）：退货必挂已审核
 // 入库（409）、仓库取自入库单、超入库量 409、未审核退货占量、审核减库存并回写
 // return_count（只计已审核）。

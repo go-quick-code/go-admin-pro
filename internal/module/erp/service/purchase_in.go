@@ -13,6 +13,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -566,8 +567,18 @@ func recalcPurchaseOrderProgress(ctx context.Context, tx *repository.Repository,
 	if err != nil {
 		return err
 	}
+	// 同产品跨多行按明细 ID 序分摊（与销售 fillOrderProgress 共用纯函数），
+	// 聚合量不会写给每一行导致 Σ in_count 虚高（spec §4.4 进度回写口径）。
+	fillProgressByItemOrder(items,
+		func(it model.PurchaseOrderItem) int64 { return it.ProductID },
+		func(it model.PurchaseOrderItem) qty.Qty { return it.Count },
+		inSum, retSum,
+		func(i int, inCount, returnCount qty.Qty) {
+			items[i].InCount = inCount
+			items[i].ReturnCount = returnCount
+		})
 	for _, item := range items {
-		if err := tx.UpdatePurchaseOrderItemProgress(ctx, item.ID, inSum[item.ProductID], retSum[item.ProductID]); err != nil {
+		if err := tx.UpdatePurchaseOrderItemProgress(ctx, item.ID, item.InCount, item.ReturnCount); err != nil {
 			return err
 		}
 	}
