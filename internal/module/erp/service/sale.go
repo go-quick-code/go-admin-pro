@@ -29,22 +29,6 @@ const (
 	SeqBizTypeSaleReturn = "sale_return"
 )
 
-// saleStockRecordBizNames 是销售链路流水的中文展示（追加进 #90 的
-// stockRecordBizNames，spec §4.3 biz_type 全集随票扩展；init 合并避免改动
-// #90 既有行——#91 采购以同样方式追加自己的名字）。
-var saleStockRecordBizNames = map[string]string{
-	model.StockRecordBizSaleOut:          "销售出库",
-	model.StockRecordBizSaleOutCancel:    "销售出库（反审核）",
-	model.StockRecordBizSaleReturn:       "销售退货",
-	model.StockRecordBizSaleReturnCancel: "销售退货（反审核）",
-}
-
-func init() {
-	for k, v := range saleStockRecordBizNames {
-		stockRecordBizNames[k] = v
-	}
-}
-
 // ---------- 占用校验（spec §4.5 镜像 §4.4：超量 409，未审核也占用） ----------
 
 // countSumByProduct 把聚合行折叠成 产品→数量和 映射。

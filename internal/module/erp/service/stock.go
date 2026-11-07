@@ -314,20 +314,26 @@ func (s *Service) assembleStockRecordRows(ctx context.Context, list []model.Stoc
 	return rows, nil
 }
 
-// stockRecordBizNames 是流水 biz_type 的中文展示（导出/前端标签用）。
-// #91+ 扩采购/销售/调拨/盘点对时在此追加。
+// stockRecordBizNames 是流水 biz_type 的中文展示（导出/前端标签用）：全部 8 对
+// （16 个 biz_type，spec §4.3）在此单点注册，禁止其它文件用 init() 合并——
+// 单点注册保证成对/中文名测试能覆盖全集（终审 P1：去掉跨文件 init 合并）。
 var stockRecordBizNames = map[string]string{
+	// 其它入库/出库（#90）。
 	model.StockRecordBizStockIn:        "其它入库",
 	model.StockRecordBizStockInCancel:  "其它入库（反审核）",
 	model.StockRecordBizStockOut:       "其它出库",
 	model.StockRecordBizStockOutCancel: "其它出库（反审核）",
-	// 采购三单（issue #91，spec §4.3：biz_type 与表名一致 + _CANCEL 对）。
+	// 采购三单（#91，spec §4.3：biz_type 与表名一致 + _CANCEL 对）。
 	model.StockRecordBizPurchaseIn:           "采购入库",
 	model.StockRecordBizPurchaseInCancel:     "采购入库（反审核）",
 	model.StockRecordBizPurchaseReturn:       "采购退货",
 	model.StockRecordBizPurchaseReturnCancel: "采购退货（反审核）",
-	// 库存调拨/盘点（issue #93，spec §4.3/§4.6）：调拨出入成对、盘点差异调整，
-	// 各配 _CANCEL 对。
+	// 销售三单（#92，与采购镜像）。
+	model.StockRecordBizSaleOut:          "销售出库",
+	model.StockRecordBizSaleOutCancel:    "销售出库（反审核）",
+	model.StockRecordBizSaleReturn:       "销售退货",
+	model.StockRecordBizSaleReturnCancel: "销售退货（反审核）",
+	// 库存调拨/盘点（#93）：调拨出入成对、盘点差异调整，各配 _CANCEL 对。
 	model.StockRecordBizStockMove:        "库存调拨",
 	model.StockRecordBizStockMoveCancel:  "库存调拨（反审核）",
 	model.StockRecordBizStockCheck:       "盘点调整",

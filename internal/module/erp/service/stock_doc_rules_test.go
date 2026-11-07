@@ -134,15 +134,29 @@ func TestFormatStockDocNo(t *testing.T) {
 }
 
 // TestStockRecordBizTypes 流水 biz_type 与 _CANCEL 对成对定义（spec §4.3），
-// 中文展示映射齐全（导出/前端标签）。
+// 中文展示映射齐全（导出/前端标签）：全集 8 对 16 个值单点注册在
+// stockRecordBizNames（终审 P1：跨文件 init 合并已移除，测试覆盖全部对）。
 func TestStockRecordBizTypes(t *testing.T) {
 	pairs := [][2]string{
 		{model.StockRecordBizStockIn, model.StockRecordBizStockInCancel},
 		{model.StockRecordBizStockOut, model.StockRecordBizStockOutCancel},
+		{model.StockRecordBizPurchaseIn, model.StockRecordBizPurchaseInCancel},
+		{model.StockRecordBizPurchaseReturn, model.StockRecordBizPurchaseReturnCancel},
+		{model.StockRecordBizSaleOut, model.StockRecordBizSaleOutCancel},
+		{model.StockRecordBizSaleReturn, model.StockRecordBizSaleReturnCancel},
+		{model.StockRecordBizStockMove, model.StockRecordBizStockMoveCancel},
+		{model.StockRecordBizStockCheck, model.StockRecordBizStockCheckCancel},
+	}
+	if len(stockRecordBizNames) != len(pairs)*2 {
+		t.Fatalf("biz_type 中文名映射应有 %d 项（%d 对），实际 %d（多注册/漏注册）",
+			len(pairs)*2, len(pairs), len(stockRecordBizNames))
 	}
 	for _, pair := range pairs {
 		if !strings.HasSuffix(pair[1], "_CANCEL") {
 			t.Fatalf("反向流水 %s 必须以 _CANCEL 结尾（成对定义，spec §4.3）", pair[1])
+		}
+		if pair[0]+"_CANCEL" != pair[1] {
+			t.Fatalf("反向流水 %s 与正向 %s 不成对（应为 %s_CANCEL）", pair[1], pair[0], pair[0])
 		}
 		for _, biz := range pair {
 			if stockRecordBizNames[biz] == "" {
