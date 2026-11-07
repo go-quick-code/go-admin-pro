@@ -185,13 +185,13 @@ func TestIntegrationPurchaseOrderLifecycle(t *testing.T) {
 		},
 	})
 	docID := int64(doc["id"].(float64))
-	if !purchaseOrderNoRe.MatchString(fmt.Sprint(doc["no"])) {
-		t.Fatalf("订单号 %v 不符 ^CG\\d{8}\\d{4,}$", doc["no"])
+	if !purchaseOrderNoRe.MatchString(fmt.Sprint(doc["orderNo"])) {
+		t.Fatalf("订单号 %v 不符 ^CG\\d{8}\\d{4,}$", doc["orderNo"])
 	}
-	if doc["no"] == "CG209901010001" {
-		t.Fatalf("客户端伪造单号被采纳：%v", doc["no"])
+	if doc["orderNo"] == "CG209901010001" {
+		t.Fatalf("客户端伪造单号被采纳：%v", doc["orderNo"])
 	}
-	if got := fmt.Sprint(doc["no"]); got != "CG"+env.DateKey()+"0001" {
+	if got := fmt.Sprint(doc["orderNo"]); got != "CG"+env.DateKey()+"0001" {
 		t.Fatalf("订单号 = %s，期望 CG%s0001（序列按业务类型独立发放）", got, env.DateKey())
 	}
 	if doc["status"] != float64(10) {
@@ -613,14 +613,14 @@ func TestIntegrationPurchaseNumbering(t *testing.T) {
 		"supplierId": supplierID, "orderTime": env.Date() + " 09:00:00",
 		"items": []map[string]any{purchaseItemJSON(productID, "1", "1.00")},
 	})
-	if got := fmt.Sprint(order1["no"]); got != "CG"+dateKey+"0001" {
+	if got := fmt.Sprint(order1["orderNo"]); got != "CG"+dateKey+"0001" {
 		t.Fatalf("首张订单号 = %s，期望 CG%s0001", got, dateKey)
 	}
 	order2 := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
 		"supplierId": supplierID, "orderTime": env.Date() + " 09:00:00",
 		"items": []map[string]any{purchaseItemJSON(productID, "1", "1.00")},
 	})
-	if got := fmt.Sprint(order2["no"]); got != "CG"+dateKey+"0002" {
+	if got := fmt.Sprint(order2["orderNo"]); got != "CG"+dateKey+"0002" {
 		t.Fatalf("第二张订单号 = %s，期望 CG%s0002（同日自增）", got, dateKey)
 	}
 	// 入库必挂已审核订单：先审核 order1 再创建入库单。
@@ -696,7 +696,7 @@ func TestIntegrationPurchaseTenantIsolation(t *testing.T) {
 		"supplierId": sup2, "orderTime": env.Date() + " 09:00:00",
 		"items": []map[string]any{purchaseItemJSON(prod2, "1", "1.00")},
 	})
-	if got := fmt.Sprint(order2["no"]); got != "CG"+env.DateKey()+"0001" {
+	if got := fmt.Sprint(order2["orderNo"]); got != "CG"+env.DateKey()+"0001" {
 		t.Fatalf("租户 2 首单号 = %s，期望 CG%s0001（序列按租户隔离）", got, env.DateKey())
 	}
 }

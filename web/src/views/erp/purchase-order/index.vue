@@ -78,7 +78,7 @@
     <!-- 详情 drawer：头 descriptions + 明细（行金额/进度回写服务端权威）。 -->
     <el-drawer v-model="detailVisible" title="采购订单详情" size="720px">
       <el-descriptions v-if="detail" :column="2" border>
-        <el-descriptions-item label="单号">{{ detail.no }}</el-descriptions-item>
+        <el-descriptions-item label="单号">{{ detail.orderNo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail.statusName }}</el-descriptions-item>
         <el-descriptions-item label="供应商">{{ detail.supplierName }}</el-descriptions-item>
         <el-descriptions-item label="下单时间">{{ formatTime(detail.orderTime) }}</el-descriptions-item>
@@ -137,7 +137,7 @@ const statusOptions = [
 ]
 
 const searchItems = computed(() => [
-  { prop: 'no', label: '单号' },
+  { prop: 'orderNo', label: '订单号' },
   {
     prop: 'supplierId',
     label: '供应商',
@@ -148,7 +148,7 @@ const searchItems = computed(() => [
 ])
 
 const columns = [
-  { prop: 'no', label: '单号', minWidth: 160 },
+  { prop: 'orderNo', label: '订单号', minWidth: 160 },
   { prop: 'supplierName', label: '供应商', minWidth: 140 },
   { prop: 'orderTime', label: '下单时间', minWidth: 160, formatter: (row: any) => formatTime(row.orderTime) },
   { prop: 'status', label: '状态', width: 90, slot: true },
@@ -161,7 +161,7 @@ const pageApi = { page: pagePurchaseOrders }
 
 function exportParams() {
   const q = tableRef.value?.query || {}
-  return { no: q.no, supplierId: q.supplierId, status: q.status }
+  return { orderNo: q.orderNo, supplierId: q.supplierId, status: q.status }
 }
 
 // ---------- 新增/编辑 ----------
@@ -247,7 +247,7 @@ async function submit() {
 
 // ---------- 审核 / 反审核 / 删除 ----------
 async function doApprove(row: any) {
-  await ElMessageBox.confirm(`确认审核采购订单 ${row.no}？`, '审核确认', { type: 'warning' })
+  await ElMessageBox.confirm(`确认审核采购订单 ${row.orderNo}？`, '审核确认', { type: 'warning' })
   await updatePurchaseOrderStatus({ id: row.id, status: 20 })
   ElMessage.success('已审核')
   tableRef.value?.reload?.()
@@ -255,7 +255,7 @@ async function doApprove(row: any) {
 
 async function doUnapprove(row: any) {
   await ElMessageBox.confirm(
-    `确认反审核采购订单 ${row.no}？存在已审核入库/退货单时将被拒绝。`,
+    `确认反审核采购订单 ${row.orderNo}？存在已审核入库/退货单时将被拒绝。`,
     '反审核确认',
     { type: 'warning' },
   )
@@ -265,7 +265,7 @@ async function doUnapprove(row: any) {
 }
 
 async function doDelete(row: any) {
-  await ElMessageBox.confirm(`确认删除采购订单 ${row.no}？`, '删除确认', { type: 'warning' })
+  await ElMessageBox.confirm(`确认删除采购订单 ${row.orderNo}？`, '删除确认', { type: 'warning' })
   await deletePurchaseOrder(row.id)
   ElMessage.success('已删除')
   tableRef.value?.reload?.()

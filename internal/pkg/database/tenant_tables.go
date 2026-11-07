@@ -157,11 +157,11 @@ var TenantTables = []string{
 	// 三主三明，全量租户隔离（跨租户业务 ID 一律 404）；占用校验与进度回写
 	// 的聚合查询同样经租户插件限定。#92+ 的单据表落地迁移时同样追加到这里。
 	"erp_purchase_order",
-	"erp_purchase_order_item",
+	"erp_purchase_order_items",
 	"erp_purchase_in",
-	"erp_purchase_in_item",
+	"erp_purchase_in_items",
 	"erp_purchase_return",
-	"erp_purchase_return_item",
+	"erp_purchase_return_items",
 	// 销售三单（issue #92，迁移 00032，spec §3.4/§4.5）：销售订单/出库/退货
 	// 三主三明，全量租户隔离（跨租户业务 ID 一律 404）；占用统计的跨表聚合
 	// SQL 用显式租户参数（与库存入账原语同口径）。

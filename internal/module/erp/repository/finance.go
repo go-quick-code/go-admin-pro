@@ -615,10 +615,10 @@ func (r *Repository) UpdatePurchaseReturnRefundPrice(ctx context.Context, id int
 
 // FindSaleReturnNosIn 返回租户内销售退货单 ID→单号映射（核销明细展示用）。
 func (r *Repository) FindSaleReturnNosIn(ctx context.Context, ids []int64) (map[int64]string, error) {
-	return findNosIn(ctx, r.db, &model.SaleReturn{}, ids)
+	return findNosIn(ctx, r.db, &model.SaleReturn{}, "no", ids)
 }
 
 // FindPurchaseReturnNosIn 返回租户内采购退货单 ID→单号映射。
 func (r *Repository) FindPurchaseReturnNosIn(ctx context.Context, ids []int64) (map[int64]string, error) {
-	return findNosIn(ctx, r.db, &model.PurchaseReturn{}, ids)
+	return findNosIn(ctx, r.db, &model.PurchaseReturn{}, "no", ids)
 }

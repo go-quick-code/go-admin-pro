@@ -10,7 +10,8 @@ import (
 // purchase.go 是采购三单（订单 CG / 入库 RK / 退货 RT）的出入参（issue #91，
 // docs/erp-mvp-spec.md §3.3/§4.1/§4.4/§5）。契约要点与 #90 杂项单据一致：
 //   - 数量/单价以十进制字符串提交（qty/money 定点，不经 float64）；
-//   - 单号（no）由服务端经 erp_sequence 发放，创建/修改入参没有单号字段
+//   - 单号由服务端经 erp_sequence 发放，创建/修改入参没有单号字段；订单编号
+//     字段按 spec §3.3 字面为 orderNo（入库/退货沿 00030 的 no）
 //     ——客户端伪造从契约上不可采纳（spec §4.8）；
 //   - 行金额（totalPrice）与入库/退货主表金额服务端计算，入参没有该字段
 //     （spec §4.2 明细不变量）；
@@ -48,7 +49,7 @@ type PurchaseOrderUpdateReq struct {
 type PurchaseOrderPageReq struct {
 	PageNo     int    `form:"pageNo"`
 	PageSize   int    `form:"pageSize"`
-	No         string `form:"no"`
+	OrderNo    string `form:"orderNo"`
 	SupplierId int64  `form:"supplierId"`
 	Status     *int8  `form:"status"`
 	StartTime  string `form:"startTime"`
@@ -70,7 +71,7 @@ type PurchaseOrderItemRow struct {
 // PurchaseOrderRow 订单分页展示行。
 type PurchaseOrderRow struct {
 	ID           int64     `json:"id"`
-	No           string    `json:"no"`
+	OrderNo      string    `json:"orderNo"`
 	SupplierId   int64     `json:"supplierId"`
 	SupplierName string    `json:"supplierName"`
 	OrderTime    time.Time `json:"orderTime"`
@@ -83,7 +84,7 @@ type PurchaseOrderRow struct {
 // PurchaseOrderDetail 订单详情（头 + 明细 + 进度）。
 type PurchaseOrderDetail struct {
 	ID           int64                  `json:"id"`
-	No           string                 `json:"no"`
+	OrderNo      string                 `json:"orderNo"`
 	SupplierId   int64                  `json:"supplierId"`
 	SupplierName string                 `json:"supplierName"`
 	OrderTime    time.Time              `json:"orderTime"`
@@ -266,7 +267,7 @@ type PurchaseReturnDetail struct {
 
 // PurchaseOrderExportRow 采购订单导出列。
 type PurchaseOrderExportRow struct {
-	No            string    `excel:"单号,width=20"`
+	OrderNo       string    `excel:"单号,width=20"`
 	Supplier      string    `excel:"供应商,width=18"`
 	OrderTime     time.Time `excel:"下单时间,width=20"`
 	Status        string    `excel:"状态,width=10"`

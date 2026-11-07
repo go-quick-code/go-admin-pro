@@ -35,7 +35,7 @@ func (s *Service) ListPurchaseOrders(ctx context.Context, req *dto.PurchaseOrder
 	for _, row := range list {
 		out = append(out, dto.PurchaseOrderRow{
 			ID:           row.ID,
-			No:           row.No,
+			OrderNo:      row.OrderNo,
 			SupplierId:   row.SupplierID,
 			SupplierName: supplierNames[row.SupplierID],
 			OrderTime:    row.OrderTime,
@@ -62,7 +62,7 @@ func (s *Service) purchaseOrderFilter(ctx context.Context, req *dto.PurchaseOrde
 		return repository.PurchaseOrderFilter{}, err
 	}
 	filter := repository.PurchaseOrderFilter{
-		No:         req.No,
+		OrderNo:    req.OrderNo,
 		SupplierId: req.SupplierId,
 		Status:     req.Status,
 		StartTime:  start,
@@ -109,7 +109,7 @@ func (s *Service) GetPurchaseOrder(ctx context.Context, id int64) (*dto.Purchase
 	}
 	return &dto.PurchaseOrderDetail{
 		ID:           full.ID,
-		No:           full.No,
+		OrderNo:      full.OrderNo,
 		SupplierId:   full.SupplierID,
 		SupplierName: supplierNames[full.SupplierID],
 		OrderTime:    full.OrderTime,
@@ -148,7 +148,7 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, req *dto.PurchaseOrde
 			return err
 		}
 		doc = &model.PurchaseOrder{
-			No:          no,
+			OrderNo:     no,
 			SupplierID:  req.SupplierId,
 			OrderTime:   orderTime,
 			Status:      model.DocStatusUnaudited,
@@ -301,7 +301,7 @@ func (s *Service) ExportPurchaseOrders(ctx context.Context, req *dto.PurchaseOrd
 	rows := make([]dto.PurchaseOrderExportRow, 0, len(list))
 	for _, row := range list {
 		rows = append(rows, dto.PurchaseOrderExportRow{
-			No:            row.No,
+			OrderNo:       row.OrderNo,
 			Supplier:      supplierNames[row.SupplierID],
 			OrderTime:     row.OrderTime,
 			Status:        docStatusNames[row.Status],

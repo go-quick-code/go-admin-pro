@@ -27,7 +27,7 @@ import (
 
 // PurchaseOrderFilter 是采购订单列表查询条件（筛选 + 数据范围谓词，导出复用同一口径）。
 type PurchaseOrderFilter struct {
-	No         string
+	OrderNo    string
 	SupplierId int64
 	Status     *int8
 	StartTime  *time.Time
@@ -106,8 +106,8 @@ func (r *Repository) ListAllPurchaseOrders(ctx context.Context, f PurchaseOrderF
 // purchaseOrderQuery 构造订单列表/导出的公共查询。
 func (r *Repository) purchaseOrderQuery(ctx context.Context, f PurchaseOrderFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.PurchaseOrder{})
-	if f.No != "" {
-		q = q.Where("no LIKE ?", "%"+f.No+"%")
+	if f.OrderNo != "" {
+		q = q.Where("order_no LIKE ?", "%"+f.OrderNo+"%")
 	}
 	if f.SupplierId > 0 {
 		q = q.Where("supplier_id = ?", f.SupplierId)
@@ -528,16 +528,16 @@ func (r *Repository) FindSupplierNamesIn(ctx context.Context, ids []int64) (map[
 
 // FindPurchaseOrderNosIn 返回租户内采购订单 ID→单号映射（展示挂单订单号）。
 func (r *Repository) FindPurchaseOrderNosIn(ctx context.Context, ids []int64) (map[int64]string, error) {
-	return findNosIn(ctx, r.db, &model.PurchaseOrder{}, ids)
+	return findNosIn(ctx, r.db, &model.PurchaseOrder{}, "order_no", ids)
 }
 
 // FindPurchaseInNosIn 返回租户内采购入库单 ID→单号映射（展示挂单入库号）。
 func (r *Repository) FindPurchaseInNosIn(ctx context.Context, ids []int64) (map[int64]string, error) {
-	return findNosIn(ctx, r.db, &model.PurchaseIn{}, ids)
+	return findNosIn(ctx, r.db, &model.PurchaseIn{}, "no", ids)
 }
 
 // findNosIn 通用 ID→no 批量解析（租户插件自动带租户条件）。
-func findNosIn(ctx context.Context, db *gorm.DB, table any, ids []int64) (map[int64]string, error) {
+func findNosIn(ctx context.Context, db *gorm.DB, table any, column string, ids []int64) (map[int64]string, error) {
 	nos := make(map[int64]string, len(ids))
 	if len(ids) == 0 {
 		return nos, nil
@@ -547,7 +547,7 @@ func findNosIn(ctx context.Context, db *gorm.DB, table any, ids []int64) (map[in
 		No string
 	}
 	if err := db.WithContext(ctx).Model(table).
-		Select("id, no").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		Select("id, "+column+" AS `no`").Where("id IN ?", ids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, row := range rows {

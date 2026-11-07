@@ -156,7 +156,7 @@ func assertERPDemoChain(t *testing.T, db *gorm.DB) {
 	if order.Status != erpmodel.DocStatusApproved || order.SupplierID != 3001 || order.OwnerUserID != adminID {
 		t.Fatalf("采购订单状态/供应商/owner 不符：%+v", order)
 	}
-	assertERPDemoNoFormat(t, order.No, "CG", "采购订单")
+	assertERPDemoNoFormat(t, order.OrderNo, "CG", "采购订单")
 	var orderItems []erpmodel.PurchaseOrderItem
 	if err := tenant.Skip(db).Where("purchase_order_id = ?", order.ID).Order("id ASC").Find(&orderItems).Error; err != nil {
 		t.Fatalf("读取采购订单明细: %v", err)
@@ -356,7 +356,7 @@ func assertERPDemoSequences(t *testing.T, db *gorm.DB) {
 		column  string
 		bizType string
 	}{
-		{&erpmodel.PurchaseOrder{}, "no", "purchase_order"},
+		{&erpmodel.PurchaseOrder{}, "order_no", "purchase_order"},
 		{&erpmodel.PurchaseIn{}, "no", "purchase_in"},
 		{&erpmodel.StockCheck{}, "no", "stock_check"},
 		{&erpmodel.SaleOrder{}, "order_no", "sale_order"},

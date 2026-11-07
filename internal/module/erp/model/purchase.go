@@ -21,8 +21,8 @@ import (
 //（只计已审核单，审核/反审核重算，spec §4.4）；入库 payment_price / 退货
 // refund_price 是核销回写列（本票只落列，核销在 #94）。
 //
-// 单号 no 由 erp_sequence 事务内原子发放（spec §4.8），客户端提交不采纳——
-// DTO 上就没有单号字段。
+// 订单编号列按 spec §3.3 字面为 order_no（入库/退货沿 00030 单据的 no）；单号由
+// erp_sequence 事务内原子发放（spec §4.8），客户端提交不采纳——DTO 上就没有单号字段。
 
 // 采购单据的库存流水 biz_type（spec §4.3/§4.8：与单据表名一致 + _CANCEL 对，
 // 对齐 #90 的 stock_in/stock_out 处置；反审核新增 _CANCEL 反向流水，原流水保留）。
@@ -37,9 +37,9 @@ const (
 type PurchaseOrder struct {
 	model.BaseEntity
 	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
-	// No 是单号：CG + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一，
-	// erp_sequence 事务内原子发放。
-	No         string    `gorm:"size:32;not null" json:"no"`
+	// OrderNo 是订单号：CG + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一
+	//（spec §3.3 字面列名 order_no），erp_sequence 事务内原子发放。
+	OrderNo    string    `gorm:"column:order_no;size:32;not null" json:"orderNo"`
 	SupplierID int64     `gorm:"not null" json:"supplierId"`
 	OrderTime  time.Time `gorm:"not null" json:"orderTime"`
 	Status     int8      `gorm:"not null;default:10" json:"status"`
@@ -69,7 +69,7 @@ type PurchaseOrderItem struct {
 	ReturnCount qty.Qty `gorm:"type:decimal(24,3);not null;default:0" json:"returnCount"`
 }
 
-func (PurchaseOrderItem) TableName() string { return "erp_purchase_order_item" }
+func (PurchaseOrderItem) TableName() string { return "erp_purchase_order_items" }
 
 // PurchaseIn 是采购入库单主表。
 type PurchaseIn struct {
@@ -108,7 +108,7 @@ type PurchaseInItem struct {
 	TotalPrice   money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 }
 
-func (PurchaseInItem) TableName() string { return "erp_purchase_in_item" }
+func (PurchaseInItem) TableName() string { return "erp_purchase_in_items" }
 
 // PurchaseReturn 是采购退货单主表。WarehouseID 取自入库单（服务端回填，
 // 入参不收，spec §3.3）。
@@ -148,4 +148,4 @@ type PurchaseReturnItem struct {
 	TotalPrice       money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 }
 
-func (PurchaseReturnItem) TableName() string { return "erp_purchase_return_item" }
+func (PurchaseReturnItem) TableName() string { return "erp_purchase_return_items" }

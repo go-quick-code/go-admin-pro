@@ -41,9 +41,9 @@
 #                       erp_stock_in、erp_stock_in_item、erp_stock_out、
 #                       erp_stock_out_item（issue #90，7 张：库存账 3 +
 #                       杂项出入库单据 4；72→79），
-#                       00031 新增 erp_purchase_order、erp_purchase_order_item、
-#                       erp_purchase_in、erp_purchase_in_item、
-#                       erp_purchase_return、erp_purchase_return_item
+#                       00031 新增 erp_purchase_order、erp_purchase_order_items、
+#                       erp_purchase_in、erp_purchase_in_items、
+#                       erp_purchase_return、erp_purchase_return_items
 #                       （issue #91，采购三单三主三明；79→85），
 #                       00032 新增 erp_sale_order、erp_sale_order_items、
 #                       erp_sale_out、erp_sale_out_items、erp_sale_return、

@@ -385,7 +385,7 @@ func erpDemoSeedPurchase(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, 
 
 	order := erpmodel.PurchaseOrder{
 		BaseEntity: erpDemoBase(erpDemoPurchaseOrderID, orderTime, creator),
-		TenantID:   erpDemoTenantID, No: orderNo,
+		TenantID:   erpDemoTenantID, OrderNo: orderNo,
 		SupplierID: erpDemoSupplierHQID, OrderTime: orderTime,
 		Status: erpmodel.DocStatusApproved, Remark: "演示采购订单：已审核，已被采购入库占用",
 		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,

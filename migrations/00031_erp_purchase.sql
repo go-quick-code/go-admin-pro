@@ -16,7 +16,8 @@
 --（internal/pkg/qty 毫单位，ADR 0017）；实体底座 id/created_at/updated_at/
 -- deleted_at/creator/updater + tenant_id（ADR 0002），租户隔离靠租户插件
 --（六表登记 TenantTables）。外键语义关联，不设物理外键（与 00029/00030 同风格）。
--- 单号 no 由 erp_sequence 事务内原子发放（00030），客户端提交不采纳。
+-- 订单编号列按 spec §3.3 字面为 order_no；入库/退货主表 spec 未列编号列名，
+-- 沿 00030 杂项单据的 no。单号由 erp_sequence 事务内原子发放（00030），客户端提交不采纳。
 -- payment_price/refund_price 为核销回写列（DEFAULT 0），本票只落列，
 -- 收付款核销在财务票（#94）实现回写。
 -- 状态口径沿用 00030：10 未审核 / 20 已审核（芋道 erp_audit_status，
@@ -30,7 +31,7 @@ CREATE TABLE `erp_purchase_order` (
   `creator` varchar(64) NOT NULL DEFAULT '0',
   `updater` varchar(64) NOT NULL DEFAULT '0',
   `tenant_id` bigint NOT NULL DEFAULT '1' COMMENT '租户 ID（租户插件隔离）',
-  `no` varchar(32) NOT NULL COMMENT '单号：CG+yyyyMMdd+4位序号，租户内唯一（erp_sequence 原子发放，客户端不采纳）',
+  `order_no` varchar(32) NOT NULL COMMENT '订单号：CG+yyyyMMdd+4位序号，租户内唯一（erp_sequence 原子发放，客户端不采纳）',
   `supplier_id` bigint NOT NULL COMMENT '供应商 ID',
   `order_time` datetime(3) NOT NULL COMMENT '下单时间（业务时区）',
   `status` tinyint NOT NULL DEFAULT '10' COMMENT '审核状态：10 未审核 / 20 已审核（沿用 00030 口径；订单审核不动库存）',
@@ -38,14 +39,14 @@ CREATE TABLE `erp_purchase_order` (
   `owner_user_id` bigint NOT NULL DEFAULT '0' COMMENT '负责人用户 ID（= 创建人，owner 恒有值，spec §4.10）',
   `owner_dept_id` bigint NOT NULL DEFAULT '0' COMMENT '负责人部门快照（数据范围谓词列，ADR 0004）',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_erp_purchase_order_no` (`tenant_id`,`no`),
+  UNIQUE KEY `uq_erp_purchase_order_order_no` (`tenant_id`,`order_no`),
   KEY `idx_erp_purchase_order_tenant_supplier` (`tenant_id`,`supplier_id`),
   KEY `idx_erp_purchase_order_owner_user` (`tenant_id`,`owner_user_id`),
   KEY `idx_erp_purchase_order_owner_dept` (`tenant_id`,`owner_dept_id`),
   KEY `idx_erp_purchase_order_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `erp_purchase_order_item` (
+CREATE TABLE `erp_purchase_order_items` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -61,8 +62,8 @@ CREATE TABLE `erp_purchase_order_item` (
   `in_count` decimal(24,3) NOT NULL DEFAULT '0' COMMENT '已入库数量回写（只计已审核入库单，审核/反审核重算，spec §4.4）',
   `return_count` decimal(24,3) NOT NULL DEFAULT '0' COMMENT '已退货数量回写（只计已审核退货单，经入库单关联到本订单，spec §4.4）',
   PRIMARY KEY (`id`),
-  KEY `idx_erp_purchase_order_item_doc` (`tenant_id`,`purchase_order_id`),
-  KEY `idx_erp_purchase_order_item_product` (`tenant_id`,`product_id`)
+  KEY `idx_erp_purchase_order_items_doc` (`tenant_id`,`purchase_order_id`),
+  KEY `idx_erp_purchase_order_items_product` (`tenant_id`,`product_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `erp_purchase_in` (
@@ -94,7 +95,7 @@ CREATE TABLE `erp_purchase_in` (
   KEY `idx_erp_purchase_in_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `erp_purchase_in_item` (
+CREATE TABLE `erp_purchase_in_items` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -108,8 +109,8 @@ CREATE TABLE `erp_purchase_in_item` (
   `product_price` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT '单价（元，默认取订单行单价）',
   `total_price` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT '行金额 = 单价 × 数量（服务端按 Money.MulQty 计算，客户端不采纳）',
   PRIMARY KEY (`id`),
-  KEY `idx_erp_purchase_in_item_doc` (`tenant_id`,`purchase_in_id`),
-  KEY `idx_erp_purchase_in_item_product` (`tenant_id`,`product_id`)
+  KEY `idx_erp_purchase_in_items_doc` (`tenant_id`,`purchase_in_id`),
+  KEY `idx_erp_purchase_in_items_product` (`tenant_id`,`product_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `erp_purchase_return` (
@@ -140,7 +141,7 @@ CREATE TABLE `erp_purchase_return` (
   KEY `idx_erp_purchase_return_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `erp_purchase_return_item` (
+CREATE TABLE `erp_purchase_return_items` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -154,14 +155,14 @@ CREATE TABLE `erp_purchase_return_item` (
   `product_price` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT '单价（元）',
   `total_price` decimal(12,2) NOT NULL DEFAULT '0.00' COMMENT '行金额 = 单价 × 数量（服务端按 Money.MulQty 计算，客户端不采纳）',
   PRIMARY KEY (`id`),
-  KEY `idx_erp_purchase_return_item_doc` (`tenant_id`,`purchase_return_id`),
-  KEY `idx_erp_purchase_return_item_product` (`tenant_id`,`product_id`)
+  KEY `idx_erp_purchase_return_items_doc` (`tenant_id`,`purchase_return_id`),
+  KEY `idx_erp_purchase_return_items_product` (`tenant_id`,`product_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- +goose Down
-DROP TABLE IF EXISTS `erp_purchase_return_item`;
+DROP TABLE IF EXISTS `erp_purchase_return_items`;
 DROP TABLE IF EXISTS `erp_purchase_return`;
-DROP TABLE IF EXISTS `erp_purchase_in_item`;
+DROP TABLE IF EXISTS `erp_purchase_in_items`;
 DROP TABLE IF EXISTS `erp_purchase_in`;
-DROP TABLE IF EXISTS `erp_purchase_order_item`;
+DROP TABLE IF EXISTS `erp_purchase_order_items`;
 DROP TABLE IF EXISTS `erp_purchase_order`;
