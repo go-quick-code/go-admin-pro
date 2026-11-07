@@ -662,6 +662,27 @@ func seedMenus(db *gorm.DB) error {
 		btn(7433, 743, "退货删除", "erp:sale-return:delete", 3),
 		btn(7434, 743, "退货审核", "erp:sale-return:approve", 4),
 		btn(7435, 743, "退货导出", "erp:sale-return:export", 5),
+		// 财务（issue #94，spec §3.6/§6/§7）：750 结算账户、751 付款单、752
+		// 收款单。收付款页按单据页 query 菜单 + create/update/delete/approve/
+		// export 全套按钮（approve 为独立审核权限码，spec §4.1）；账户页
+		// query 菜单 + create/update/delete（无导出，spec §6 未列）。按钮 =
+		// 菜单ID×10+n，7501–7503/7511–7515/7521–7525 grep 去重确认未占用。
+		menu(750, 700, "结算账户", "finance-account", "erp/finance-account/index", "erp:finance-account:query", "Wallet", 14),
+		btn(7501, 750, "账户新增", "erp:finance-account:create", 1),
+		btn(7502, 750, "账户修改", "erp:finance-account:update", 2),
+		btn(7503, 750, "账户删除", "erp:finance-account:delete", 3),
+		menu(751, 700, "付款单", "finance-payment", "erp/finance-payment/index", "erp:finance-payment:query", "Money", 15),
+		btn(7511, 751, "付款新增", "erp:finance-payment:create", 1),
+		btn(7512, 751, "付款修改", "erp:finance-payment:update", 2),
+		btn(7513, 751, "付款删除", "erp:finance-payment:delete", 3),
+		btn(7514, 751, "付款审核", "erp:finance-payment:approve", 4),
+		btn(7515, 751, "付款导出", "erp:finance-payment:export", 5),
+		menu(752, 700, "收款单", "finance-receipt", "erp/finance-receipt/index", "erp:finance-receipt:query", "Coin", 16),
+		btn(7521, 752, "收款新增", "erp:finance-receipt:create", 1),
+		btn(7522, 752, "收款修改", "erp:finance-receipt:update", 2),
+		btn(7523, 752, "收款删除", "erp:finance-receipt:delete", 3),
+		btn(7524, 752, "收款审核", "erp:finance-receipt:approve", 4),
+		btn(7525, 752, "收款导出", "erp:finance-receipt:export", 5),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。

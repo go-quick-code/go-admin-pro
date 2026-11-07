@@ -53,6 +53,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterPurchaseOrderRoutes(rg)
 	h.RegisterPurchaseInRoutes(rg)
 	h.RegisterPurchaseReturnRoutes(rg)
+	// 财务域（issue #94，spec §3.6/§4.7/§5）：结算账户 + 收款单（SK）/付款单（FK）。
+	h.RegisterFinanceAccountRoutes(rg)
+	h.RegisterFinanceReceiptRoutes(rg)
+	h.RegisterFinancePaymentRoutes(rg)
 }
 
 // ---------- 通用绑定助手（与 system/crm 模块同构，保持模块自包含）----------
