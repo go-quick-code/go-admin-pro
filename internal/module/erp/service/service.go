@@ -20,6 +20,9 @@ type SystemGateway interface {
 	DataScopeFilter(ctx context.Context, userID int64) (datascope.Filter, error)
 	// UserDeptID 返回用户所属部门 ID；用户不存在时 ok=false。
 	UserDeptID(ctx context.Context, userID int64) (deptID int64, ok bool, err error)
+	// UserNicknames 批量返回用户昵称（issue #96：Excel 导出的负责人/销售员列
+	// 与 CRM 导出一致输出人名，缺失 ID 不在返回集合中）。
+	UserNicknames(ctx context.Context, userIDs []int64) (map[int64]string, error)
 }
 
 // Service 汇聚 erp 模块的业务能力。

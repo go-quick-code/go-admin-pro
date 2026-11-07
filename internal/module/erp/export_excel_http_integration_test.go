@@ -14,8 +14,11 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-// getExportRows 请求导出接口并解析「数据」工作表，返回表头与数据行（文本形态）。
-func getExportRows(t *testing.T, env *testutil.IntegrationEnv, token, path string) ([]string, [][]string) {
+// getExportSheet 请求导出接口并解析「数据」工作表，返回表头与数据行（文本形态）。
+// 允许空列表导出（只有表头）：租户隔离/数据范围用例会断言 0 数据行。
+// 同时校验中文文件名双编码：ASCII filename="..." 兼容旧客户端，
+// filename*=UTF-8”<percent-encoded> 提供中文名（spec §4.11）。
+func getExportSheet(t *testing.T, env *testutil.IntegrationEnv, token, path string) ([]string, [][]string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, env.APIPrefixURL(path), nil)
 	if err != nil {
@@ -31,6 +34,25 @@ func getExportRows(t *testing.T, env *testutil.IntegrationEnv, token, path strin
 	if !strings.HasPrefix(disposition, "attachment") || !strings.Contains(disposition, ".xlsx") {
 		t.Fatalf("GET %s: Content-Disposition=%q，期望 attachment 且带 .xlsx 文件名", path, disposition)
 	}
+	// 双编码：filename= 给 ASCII 名，filename*=UTF-8'' 给中文名（百分号编码后全 ASCII）。
+	const starPrefix = "filename*=UTF-8''"
+	starIdx := strings.Index(disposition, starPrefix)
+	if starIdx < 0 {
+		t.Fatalf("GET %s: Content-Disposition=%q，缺少 filename*=UTF-8'' 中文文件名", path, disposition)
+	}
+	encoded := disposition[starIdx+len(starPrefix):]
+	if i := strings.IndexByte(encoded, ';'); i >= 0 {
+		encoded = encoded[:i]
+	}
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		t.Fatalf("GET %s: filename* 中文文件名为空：%q", path, disposition)
+	}
+	for _, r := range encoded {
+		if r > 127 {
+			t.Fatalf("GET %s: filename* 应为百分号编码的 ASCII，实际含 %q：%q", path, r, disposition)
+		}
+	}
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "spreadsheetml") {
 		t.Fatalf("GET %s: Content-Type=%q，期望 xlsx MIME 类型", path, ct)
 	}
@@ -40,10 +62,20 @@ func getExportRows(t *testing.T, env *testutil.IntegrationEnv, token, path strin
 	}
 	t.Cleanup(func() { f.Close() })
 	rows, err := f.GetRows("数据")
-	if err != nil || len(rows) < 2 {
-		t.Fatalf("GET %s: 数据工作表应含表头与数据行，rows=%d err=%v", path, len(rows), err)
+	if err != nil || len(rows) < 1 {
+		t.Fatalf("GET %s: 数据工作表应至少含表头，rows=%d err=%v", path, len(rows), err)
 	}
 	return rows[0], rows[1:]
+}
+
+// getExportRows 请求导出接口并要求至少 1 条数据行。
+func getExportRows(t *testing.T, env *testutil.IntegrationEnv, token, path string) ([]string, [][]string) {
+	t.Helper()
+	header, rows := getExportSheet(t, env, token, path)
+	if len(rows) == 0 {
+		t.Fatalf("GET %s: 期望至少 1 条数据行，实际只有表头 %v", path, header)
+	}
+	return header, rows
 }
 
 // TestIntegrationProductExportExcel 产品导出：列标签、金额/数量十进制字符串、

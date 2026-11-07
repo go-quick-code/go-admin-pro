@@ -407,16 +407,20 @@ func (s *Service) ExportStockChecks(ctx context.Context, req *dto.StockCheckPage
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.StockCheck) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]dto.StockCheckExportRow, 0, len(list))
 	for _, row := range list {
 		rows = append(rows, dto.StockCheckExportRow{
-			No:          row.No,
-			Warehouse:   warehouseNames[row.WarehouseID],
-			CheckTime:   row.CheckTime,
-			Status:      docStatusNames[row.Status],
-			Remark:      row.Remark,
-			OwnerUserID: row.OwnerUserID,
-			CreateTime:  row.CreatedAt,
+			No:            row.No,
+			Warehouse:     warehouseNames[row.WarehouseID],
+			CheckTime:     row.CheckTime,
+			Status:        docStatusNames[row.Status],
+			Remark:        row.Remark,
+			OwnerUserName: ownerNames[row.OwnerUserID],
+			CreateTime:    row.CreatedAt,
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})

@@ -164,24 +164,24 @@ type StockOutDetail struct {
 
 // StockInExportRow 其它入库单导出列。
 type StockInExportRow struct {
-	No          string    `excel:"单号,width=20"`
-	Warehouse   string    `excel:"仓库,width=18"`
-	InTime      time.Time `excel:"入库时间,width=20"`
-	Type        string    `excel:"类型,width=10"`
-	Status      string    `excel:"状态,width=10"`
-	Remark      string    `excel:"备注,width=32"`
-	OwnerUserID int64     `excel:"负责人ID,width=10"`
-	CreateTime  time.Time `excel:"创建时间,width=20"`
+	No            string    `excel:"单号,width=20"`
+	Warehouse     string    `excel:"仓库,width=18"`
+	InTime        time.Time `excel:"入库时间,width=20"`
+	Type          string    `excel:"类型,width=10"`
+	Status        string    `excel:"状态,width=10"`
+	Remark        string    `excel:"备注,width=32"`
+	OwnerUserName string    `excel:"负责人,width=14"`
+	CreateTime    time.Time `excel:"创建时间,width=20"`
 }
 
 // StockOutExportRow 其它出库单导出列。
 type StockOutExportRow struct {
-	No          string    `excel:"单号,width=20"`
-	Warehouse   string    `excel:"仓库,width=18"`
-	OutTime     time.Time `excel:"出库时间,width=20"`
-	Type        string    `excel:"类型,width=10"`
-	Status      string    `excel:"状态,width=10"`
-	Remark      string    `excel:"备注,width=32"`
-	OwnerUserID int64     `excel:"负责人ID,width=10"`
-	CreateTime  time.Time `excel:"创建时间,width=20"`
+	No            string    `excel:"单号,width=20"`
+	Warehouse     string    `excel:"仓库,width=18"`
+	OutTime       time.Time `excel:"出库时间,width=20"`
+	Type          string    `excel:"类型,width=10"`
+	Status        string    `excel:"状态,width=10"`
+	Remark        string    `excel:"备注,width=32"`
+	OwnerUserName string    `excel:"负责人,width=14"`
+	CreateTime    time.Time `excel:"创建时间,width=20"`
 }

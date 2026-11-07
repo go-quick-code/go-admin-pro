@@ -463,18 +463,22 @@ func (s *Service) ExportSaleOuts(ctx context.Context, req *dto.SaleOutPageReq) (
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.SaleOut) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]dto.SaleOutExportRow, 0, len(list))
 	for _, row := range list {
 		rows = append(rows, dto.SaleOutExportRow{
-			No:          row.No,
-			OrderNo:     orderNos[row.OrderID],
-			Customer:    customerNames[row.CustomerID],
-			Warehouse:   warehouseNames[row.WarehouseID],
-			OutTime:     row.OutTime,
-			Status:      docStatusNames[row.Status],
-			TotalPrice:  row.TotalPrice,
-			OwnerUserID: row.OwnerUserID,
-			CreateTime:  row.CreatedAt,
+			No:            row.No,
+			OrderNo:       orderNos[row.OrderID],
+			Customer:      customerNames[row.CustomerID],
+			Warehouse:     warehouseNames[row.WarehouseID],
+			OutTime:       row.OutTime,
+			Status:        docStatusNames[row.Status],
+			TotalPrice:    row.TotalPrice,
+			OwnerUserName: ownerNames[row.OwnerUserID],
+			CreateTime:    row.CreatedAt,
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})

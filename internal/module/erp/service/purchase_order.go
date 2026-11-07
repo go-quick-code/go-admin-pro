@@ -294,16 +294,20 @@ func (s *Service) ExportPurchaseOrders(ctx context.Context, req *dto.PurchaseOrd
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.PurchaseOrder) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]dto.PurchaseOrderExportRow, 0, len(list))
 	for _, row := range list {
 		rows = append(rows, dto.PurchaseOrderExportRow{
-			No:          row.No,
-			Supplier:    supplierNames[row.SupplierID],
-			OrderTime:   row.OrderTime,
-			Status:      docStatusNames[row.Status],
-			Remark:      row.Remark,
-			OwnerUserID: row.OwnerUserID,
-			CreateTime:  row.CreatedAt,
+			No:            row.No,
+			Supplier:      supplierNames[row.SupplierID],
+			OrderTime:     row.OrderTime,
+			Status:        docStatusNames[row.Status],
+			Remark:        row.Remark,
+			OwnerUserName: ownerNames[row.OwnerUserID],
+			CreateTime:    row.CreatedAt,
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
