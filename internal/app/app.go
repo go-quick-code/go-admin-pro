@@ -254,6 +254,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// #91+ 的单据域引用类型（挂单/往来单位）继续以 RefCheckerChain 组合追加。
 	erpSvc.SetWarehouseRefChecker(erpSvc)
 	erpSvc.SetProductRefChecker(erpSvc)
+	// 采购单据引用（issue #91，spec §4.9）：产品被采购订单/入库/退货明细引用禁删
+	//（与 #90 库存实现经 RefCheckerChain 组合——后注册覆盖先注册）；供应商被采购
+	// 单据引用禁删（#89 扩展点首次落地）。#92+ 的单据域引用类型继续以 Chain 追加。
+	// 构造内联进 Set 调用（无中间变量），与 codegen fresh-module 检查的
+	// erpSvc.Set 装配行剪除适配兼容（延续 #88/#90 既有模式）。
+	erpSvc.SetProductRefChecker(erpservice.RefCheckerChain{erpSvc, erpservice.NewPurchaseDocRefChecker(erpSvc)})
+	erpSvc.SetSupplierRefChecker(erpservice.NewPurchaseDocRefChecker(erpSvc))
 	// 业务时区（ADR 0006）：单号日期键与单据业务时间解析的唯一口径。
 	erpSvc.SetLocation(cfg.Location())
 	erpAPI := erpapi.New(erpSvc, sysAPI.RequirePermission, cfg.Location())
