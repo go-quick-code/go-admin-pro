@@ -39,6 +39,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterWarehouseRoutes(rg)
 	h.RegisterCustomerRoutes(rg)
 	h.RegisterSupplierRoutes(rg)
+	// 库存核心与其它入库/出库单（issue #90，spec §3.2/§3.5/§5）。
+	h.RegisterStockRoutes(rg)
+	h.RegisterStockRecordRoutes(rg)
+	h.RegisterStockInRoutes(rg)
+	h.RegisterStockOutRoutes(rg)
 }
 
 // ---------- 通用绑定助手（与 system/crm 模块同构，保持模块自包含）----------
