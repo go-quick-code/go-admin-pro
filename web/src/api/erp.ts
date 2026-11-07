@@ -353,3 +353,75 @@ export function updatePurchaseReturnStatus(data: { id: number; status: number })
 export function exportPurchaseReturns(params?: Record<string, any>) {
   return downloadExcel('/erp/purchase-return/export-excel', params)
 }
+
+// ---------- ERP 结算账户（issue #94，spec §3.6/§4.7） ----------
+// 无余额入参：列表/详情返回「已审核收付款净额」实时余额列（不落库）；默认账户
+// 租户内唯一互斥（置默认取消原默认）；被收付款单引用时删除 409。
+export function pageFinanceAccounts(params: any) {
+  return request.get('/erp/finance-account/page', { params }) as Promise<any>
+}
+export function getFinanceAccount(id: number) {
+  return request.get(`/erp/finance-account/${id}`) as Promise<any>
+}
+export function createFinanceAccount(data: any) {
+  return request.post('/erp/finance-account', data) as Promise<any>
+}
+export function updateFinanceAccount(data: any) {
+  return request.put('/erp/finance-account', data) as Promise<any>
+}
+export function deleteFinanceAccount(id: number) {
+  return request.delete(`/erp/finance-account/${id}`) as Promise<any>
+}
+
+// ---------- ERP 收款单（SK，issue #94，spec §3.6/§4.7） ----------
+// 明细只挂已审核销售出库（bizType=sale_out）/销售退货（sale_return），price 为
+// 本次核销金额（审核时校验「本单合计 + 其它已审核核销 ≤ 单据总额」，超限 409）；
+// 审核回写 sale_out.receiptPrice / sale_return.refundPrice，反审核重算释放额度；
+// 单号服务端发放（入参无单号字段）。
+export function pageFinanceReceipts(params: any) {
+  return request.get('/erp/finance-receipt/page', { params }) as Promise<any>
+}
+export function getFinanceReceipt(id: number) {
+  return request.get(`/erp/finance-receipt/${id}`) as Promise<any>
+}
+export function createFinanceReceipt(data: any) {
+  return request.post('/erp/finance-receipt', data) as Promise<any>
+}
+export function updateFinanceReceipt(data: any) {
+  return request.put('/erp/finance-receipt', data) as Promise<any>
+}
+export function deleteFinanceReceipt(id: number) {
+  return request.delete(`/erp/finance-receipt/${id}`) as Promise<any>
+}
+export function updateFinanceReceiptStatus(data: { id: number; status: number }) {
+  return request.put('/erp/finance-receipt/update-status', data) as Promise<any>
+}
+export function exportFinanceReceipts(params?: Record<string, any>) {
+  return downloadExcel('/erp/finance-receipt/export-excel', params)
+}
+
+// ---------- ERP 付款单（FK，issue #94，spec §3.6/§4.7） ----------
+// 收款单镜像：明细只挂已审核采购入库（bizType=purchase_in）/采购退货
+// （purchase_return）；审核回写 purchase_in.paymentPrice /
+// purchase_return.refundPrice，反审核重算释放额度。
+export function pageFinancePayments(params: any) {
+  return request.get('/erp/finance-payment/page', { params }) as Promise<any>
+}
+export function getFinancePayment(id: number) {
+  return request.get(`/erp/finance-payment/${id}`) as Promise<any>
+}
+export function createFinancePayment(data: any) {
+  return request.post('/erp/finance-payment', data) as Promise<any>
+}
+export function updateFinancePayment(data: any) {
+  return request.put('/erp/finance-payment', data) as Promise<any>
+}
+export function deleteFinancePayment(id: number) {
+  return request.delete(`/erp/finance-payment/${id}`) as Promise<any>
+}
+export function updateFinancePaymentStatus(data: { id: number; status: number }) {
+  return request.put('/erp/finance-payment/update-status', data) as Promise<any>
+}
+export function exportFinancePayments(params?: Record<string, any>) {
+  return downloadExcel('/erp/finance-payment/export-excel', params)
+}
