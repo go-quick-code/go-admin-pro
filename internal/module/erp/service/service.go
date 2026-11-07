@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
@@ -25,6 +26,9 @@ type SystemGateway interface {
 type Service struct {
 	repo *repository.Repository
 	sys  SystemGateway
+	// location 是业务时区（ADR 0006）：编号日期键、单据业务时间与筛选区间
+	// 解析的唯一口径，app 装配时经 SetLocation 注入（与 crm 同构），见 location.go。
+	location *time.Location
 	// productRefs 是产品删除引用校验扩展点（issue #88，spec §4.9；本票为
 	// 骨架，单据域引用类型由 #90–#94 注册），见 product_refs.go。
 	productRefs ProductRefChecker

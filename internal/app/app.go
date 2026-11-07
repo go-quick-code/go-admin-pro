@@ -249,6 +249,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 本票为骨架，#90–#94 的单据域引用类型在各自装配处注册。
 	erpRepo := erprepo.New(db)
 	erpSvc := erpservice.New(erpRepo, sysSvc)
+	// 库存核心（issue #90，spec §4.9）：仓库被 erp_stock 非零记录/流水引用禁删、
+	// 产品被其它出入库单明细引用禁删——两组引用校验由 erp Service 自身实现并在此注册；
+	// #91+ 的单据域引用类型（挂单/往来单位）继续以 RefCheckerChain 组合追加。
+	erpSvc.SetWarehouseRefChecker(erpSvc)
+	erpSvc.SetProductRefChecker(erpSvc)
+	// 业务时区（ADR 0006）：单号日期键与单据业务时间解析的唯一口径。
+	erpSvc.SetLocation(cfg.Location())
 	erpAPI := erpapi.New(erpSvc, sysAPI.RequirePermission, cfg.Location())
 
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。

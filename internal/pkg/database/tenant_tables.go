@@ -142,4 +142,15 @@ var TenantTables = []string{
 	"erp_warehouse",
 	"erp_customer",
 	"erp_supplier",
+	// 库存核心与其它入库/出库单（issue #90，迁移 00030，spec §3.2/§3.5/§3.7）：
+	// 库存账（余额/流水 append-only）、序列表（单号按租户独立发放）、杂项
+	// 出入库单据两主两明，全量租户隔离（跨租户业务 ID 一律 404）；#91+ 的
+	// 单据表落地迁移时同样追加到这里。
+	"erp_stock",
+	"erp_stock_record",
+	"erp_sequence",
+	"erp_stock_in",
+	"erp_stock_in_item",
+	"erp_stock_out",
+	"erp_stock_out_item",
 }

@@ -65,9 +65,13 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
 	assertRoleMenus(t, db, 2, []int64{512, 5121, 5297, 5236, 5123}, true, "普通角色")
 	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
-	assertCount(t, db, &sysmodel.DictType{}, 4, "字典类型")
-	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。
-	assertCount(t, db, &sysmodel.DictData{}, 16, "字典数据")
+	// 字典类型：sys_user_sex / sys_normal_disable / crm_product_unit /
+	// oa_expense_category（issue #54）+ ERP 三类（issue #90：审核状态、
+	// 其它入库类型、其它出库类型）。
+	assertCount(t, db, &sysmodel.DictType{}, 7, "字典类型")
+	// 11 条基础字典项 + 报销类别 5 条（issue #54）+ ERP 12 条
+	//（issue #90：审核 2 + 入库 6 + 出库 4）。
+	assertCount(t, db, &sysmodel.DictData{}, 28, "字典数据")
 	// 默认「标准版」套餐（issue #69）：全部启用目录/菜单，配额不限。
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")

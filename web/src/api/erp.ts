@@ -131,3 +131,74 @@ export function exportCustomers(params?: Record<string, any>) {
 export function exportSuppliers(params?: Record<string, any>) {
   return downloadExcel('/erp/supplier/export-excel', params)
 }
+
+// ---------- ERP 产品库存（issue #90，spec §5：仓库×产品余额 + 全仓合计） ----------
+// count 为毫单位定点十进制字符串（如 "12.500"，ADR 0017）；库存行无 owner 语义
+//（仓库不做独立权限），租户内全量可见。get-count：带 warehouseId 返回单仓余额，
+// 不带返回产品全仓合计。
+export function pageStocks(params: any) {
+  return request.get('/erp/stock/page', { params }) as Promise<any>
+}
+export function getStockCount(params: { productId: number; warehouseId?: number }) {
+  return request.get('/erp/stock/get-count', { params }) as Promise<any>
+}
+export function exportStocks(params?: Record<string, any>) {
+  return downloadExcel('/erp/stock/export-excel', params)
+}
+
+// ---------- ERP 出入库流水（append-only，只读查询页） ----------
+// bizType 与单据表名一致 + _CANCEL 对（如 stock_in / stock_in_CANCEL）。
+export function pageStockRecords(params: any) {
+  return request.get('/erp/stock-record/page', { params }) as Promise<any>
+}
+export function exportStockRecords(params?: Record<string, any>) {
+  return downloadExcel('/erp/stock-record/export-excel', params)
+}
+
+// ---------- ERP 其它入库单（QR）/其它出库单（QC，issue #90，spec §3.5/§4.1） ----------
+// 单号由服务端经 erp_sequence 发放（入参无单号字段，伪造不可采纳）；行金额
+// 服务端按 单价×数量 计算（入参无 totalPrice 字段）。审核/反审核走
+// update-status（幂等目标态：20 审核 / 10 反审核），approve 为独立权限码。
+export function pageStockIns(params: any) {
+  return request.get('/erp/stock-in/page', { params }) as Promise<any>
+}
+export function getStockIn(id: number) {
+  return request.get(`/erp/stock-in/${id}`) as Promise<any>
+}
+export function createStockIn(data: any) {
+  return request.post('/erp/stock-in', data) as Promise<any>
+}
+export function updateStockIn(data: any) {
+  return request.put('/erp/stock-in', data) as Promise<any>
+}
+export function deleteStockIn(id: number) {
+  return request.delete(`/erp/stock-in/${id}`) as Promise<any>
+}
+export function updateStockInStatus(data: { id: number; status: number }) {
+  return request.put('/erp/stock-in/update-status', data) as Promise<any>
+}
+export function exportStockIns(params?: Record<string, any>) {
+  return downloadExcel('/erp/stock-in/export-excel', params)
+}
+
+export function pageStockOuts(params: any) {
+  return request.get('/erp/stock-out/page', { params }) as Promise<any>
+}
+export function getStockOut(id: number) {
+  return request.get(`/erp/stock-out/${id}`) as Promise<any>
+}
+export function createStockOut(data: any) {
+  return request.post('/erp/stock-out', data) as Promise<any>
+}
+export function updateStockOut(data: any) {
+  return request.put('/erp/stock-out', data) as Promise<any>
+}
+export function deleteStockOut(id: number) {
+  return request.delete(`/erp/stock-out/${id}`) as Promise<any>
+}
+export function updateStockOutStatus(data: { id: number; status: number }) {
+  return request.put('/erp/stock-out/update-status', data) as Promise<any>
+}
+export function exportStockOuts(params?: Record<string, any>) {
+  return downloadExcel('/erp/stock-out/export-excel', params)
+}

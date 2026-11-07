@@ -57,6 +57,10 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedExpenseCategoryDict(db); err != nil {
 		return err
 	}
+	// ERP 字典（issue #90，spec §7）：审核状态 + 其它入库/出库类型。
+	if err := seedErpDicts(db); err != nil {
+		return err
+	}
 	if err := seedConfigs(db); err != nil {
 		return err
 	}
@@ -589,6 +593,29 @@ func seedMenus(db *gorm.DB) error {
 		btn(7402, 740, "客户修改", "erp:customer:update", 2),
 		btn(7403, 740, "客户删除", "erp:customer:delete", 3),
 		btn(7404, 740, "客户导出", "erp:customer:export", 4),
+
+		// 库存核心与其它入库/出库单（issue #90，spec §6/§7）：721 产品库存、
+		// 722 出入库明细、723 其它入库、724 其它出库（spec §7 号段；721/722 是
+		// 查询页——库存行无 owner 语义，只有 query/export 按钮，无增删改）；
+		// 723/724 单据页按 query/create/update/delete/approve/export 全套按钮
+		//（approve 为独立审核权限码，spec §4.1）。按钮 = 菜单ID×10+n，
+		// 7211–7214/7221–7224/7231–7235/7241–7245 grep 去重确认未占用。
+		menu(721, 700, "产品库存", "stock", "erp/stock/index", "erp:stock:query", "Box", 7),
+		btn(7211, 721, "库存导出", "erp:stock:export", 1),
+		menu(722, 700, "出入库明细", "stock-record", "erp/stock-record/index", "erp:stock-record:query", "List", 8),
+		btn(7221, 722, "流水导出", "erp:stock-record:export", 1),
+		menu(723, 700, "其它入库", "stock-in", "erp/stock-in/index", "erp:stock-in:query", "Download", 9),
+		btn(7231, 723, "入库新增", "erp:stock-in:create", 1),
+		btn(7232, 723, "入库修改", "erp:stock-in:update", 2),
+		btn(7233, 723, "入库删除", "erp:stock-in:delete", 3),
+		btn(7234, 723, "入库审核", "erp:stock-in:approve", 4),
+		btn(7235, 723, "入库导出", "erp:stock-in:export", 5),
+		menu(724, 700, "其它出库", "stock-out", "erp/stock-out/index", "erp:stock-out:query", "Upload", 10),
+		btn(7241, 724, "出库新增", "erp:stock-out:create", 1),
+		btn(7242, 724, "出库修改", "erp:stock-out:update", 2),
+		btn(7243, 724, "出库删除", "erp:stock-out:delete", 3),
+		btn(7244, 724, "出库审核", "erp:stock-out:approve", 4),
+		btn(7245, 724, "出库导出", "erp:stock-out:export", 5),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
@@ -953,6 +980,102 @@ func seedExpenseCategoryDict(db *gorm.DB) error {
 		}
 		if err := tenant.Skip(db).Create(&row).Error; err != nil {
 			return fmt.Errorf("seed expense category dict data: %w", err)
+		}
+	}
+	return nil
+}
+
+// erpDictEntry 是 ERP 字典项描述（类型 + 项列表）。
+type erpDictEntry struct {
+	Type   string
+	Name   string
+	Remark string
+	Items  []erpDictItem
+}
+
+type erpDictItem struct {
+	Value string
+	Label string
+}
+
+// seedErpDicts 写入 ERP 字典（issue #90，docs/erp-mvp-spec.md §7：审核状态 +
+// 其它入库/出库类型），按字典类型与字典项逐行幂等（与 seedExpenseCategoryDict
+// 同策略：既有库升级补齐缺失项，管理员改过的不覆盖）。
+//
+// 取值来源（终审关注）：
+//   - erp_audit_status：对齐芋道字典（10 未审核 / 20 已审核，见芋道
+//     ruoyi-vue-pro sql/mysql 的 system_dict_data #323/#324）；
+//   - erp_stock_in_type / erp_stock_out_type：芋道 master 已把 ERP 杂项出入库
+//     重构为 MES（权威 SQL 中不再有 erp_stock_in_type），检索不可靠，按任务
+//     给定的合理中文枚举落地（数值风格对齐芋道 10/20 步进）：
+//     入库 采购/退货/借入/归还/赠品/其它；出库 报损/领用/借出/其它。
+func seedErpDicts(db *gorm.DB) error {
+	entries := []erpDictEntry{
+		{
+			Type: "erp_audit_status", Name: "ERP 单据审核状态",
+			Remark: "ERP 十二类单据共用（spec §4.1，对齐芋道 erp_audit_status）",
+			Items: []erpDictItem{
+				{Value: "10", Label: "未审核"},
+				{Value: "20", Label: "已审核"},
+			},
+		},
+		{
+			Type: "erp_stock_in_type", Name: "ERP 其它入库类型",
+			Remark: "其它入库单类型（issue #90，对齐芋道数值风格；芋道 master 无权威 SQL，枚举经终审确认）",
+			Items: []erpDictItem{
+				{Value: "10", Label: "采购"},
+				{Value: "20", Label: "退货"},
+				{Value: "30", Label: "借入"},
+				{Value: "40", Label: "归还"},
+				{Value: "50", Label: "赠品"},
+				{Value: "99", Label: "其它"},
+			},
+		},
+		{
+			Type: "erp_stock_out_type", Name: "ERP 其它出库类型",
+			Remark: "其它出库单类型（issue #90，对齐芋道数值风格；芋道 master 无权威 SQL，枚举经终审确认）",
+			Items: []erpDictItem{
+				{Value: "10", Label: "报损"},
+				{Value: "20", Label: "领用"},
+				{Value: "30", Label: "借出"},
+				{Value: "99", Label: "其它"},
+			},
+		},
+	}
+	for _, entry := range entries {
+		var typ sysmodel.DictType
+		err := tenant.Skip(db).Where("`type` = ?", entry.Type).First(&typ).Error
+		switch {
+		case err == nil:
+			// 已存在，保持管理员的修改。
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			row := sysmodel.DictType{
+				TenantID: 1, Name: entry.Name, Type: entry.Type,
+				Status: sysmodel.StatusEnable, Remark: entry.Remark,
+			}
+			if err := tenant.Skip(db).Create(&row).Error; err != nil {
+				return fmt.Errorf("seed erp dict type %s: %w", entry.Type, err)
+			}
+		default:
+			return fmt.Errorf("seed erp dict type %s: %w", entry.Type, err)
+		}
+		for i, item := range entry.Items {
+			var count int64
+			if err := tenant.Skip(db).Model(&sysmodel.DictData{}).
+				Where("`dict_type` = ? AND `value` = ?", entry.Type, item.Value).
+				Count(&count).Error; err != nil {
+				return fmt.Errorf("seed erp dict data %s: %w", entry.Type, err)
+			}
+			if count > 0 {
+				continue
+			}
+			row := sysmodel.DictData{
+				TenantID: 1, DictType: entry.Type, Label: item.Label, Value: item.Value,
+				Sort: i + 1, Status: sysmodel.StatusEnable,
+			}
+			if err := tenant.Skip(db).Create(&row).Error; err != nil {
+				return fmt.Errorf("seed erp dict data %s: %w", entry.Type, err)
+			}
 		}
 	}
 	return nil
