@@ -32,12 +32,13 @@ type Service struct {
 	// location 是业务时区（ADR 0006）：编号日期键、单据业务时间与筛选区间
 	// 解析的唯一口径，app 装配时经 SetLocation 注入（与 crm 同构），见 location.go。
 	location *time.Location
-	// productRefs 是产品删除引用校验扩展点（issue #88，spec §4.9；本票为
-	// 骨架，单据域引用类型由 #90–#94 注册），见 product_refs.go。
+	// productRefs 是产品删除引用校验扩展点（issue #88 预留，spec §4.9），
+	// 见 product_refs.go；app 装配处注册 RefCheckerChain{erpSvc, 采购域}，
+	// 覆盖库存/杂项单据明细 + 采购/销售单据明细的产品引用。
 	productRefs ProductRefChecker
-	// 仓库/客户/供应商删除引用校验扩展点（issue #89，spec §4.9）：三类引用
-	// 类型 erp_warehouse/erp_customer/erp_supplier 当前无单据引用源，
-	// #90–#92 实现 Checker 后在 app 装配处注册，见 party_refs.go。
+	// warehouseRefs/customerRefs/supplierRefs 是 #89 预留的引用校验扩展点
+	//（spec §4.9），见 party_refs.go；app 装配处已注册 #90 库存、#91 采购与
+	// #92 销售实现（仓库非零库存/流水、供应商/客户被单据引用）。
 	warehouseRefs WarehouseRefChecker
 	customerRefs  CustomerRefChecker
 	supplierRefs  SupplierRefChecker

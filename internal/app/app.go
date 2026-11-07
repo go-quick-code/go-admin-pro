@@ -246,14 +246,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// ERP 模块（issue #88，docs/erp-mvp-spec.md §2）：repo→service→api 顺序装配；
 	// 数据范围解析复用 system Service（datascope 引擎宿主，ADR 0004），依赖只指向
 	// 平台层，不依赖 crm/oa/bpm（ADR 0015）。产品删除引用校验扩展点（product_refs.go）
-	// 本票为骨架，#90–#94 的单据域引用类型在各自装配处注册。
+	// 在下方装配处与库存/采购/销售实现组合注册（后续域继续以 RefCheckerChain 追加）。
 	erpRepo := erprepo.New(db)
 	erpSvc := erpservice.New(erpRepo, sysSvc)
 	// 库存核心（issue #90，spec §4.9）：仓库被 erp_stock 非零记录/流水引用禁删、
-	// 产品被其它出入库单明细引用禁删——两组引用校验由 erp Service 自身实现并在此注册；
-	// #91+ 的单据域引用类型（挂单/往来单位）继续以 RefCheckerChain 组合追加。
+	// 产品被其它出入库单明细引用禁删——仓库校验由 erp Service 自身实现并在此注册；
+	// 产品校验在下方与 #91 采购实现以 RefCheckerChain 组合（后注册一次生效）。
 	erpSvc.SetWarehouseRefChecker(erpSvc)
-	erpSvc.SetProductRefChecker(erpSvc)
 	// 销售三单（issue #92，spec §4.9）：ERP 客户被销售订单/出库/退货引用禁删——
 	// CustomerRefChecker 由 erp Service 自身实现并在此注册；#91 供应商同构追加。
 	erpSvc.SetCustomerRefChecker(erpSvc)
