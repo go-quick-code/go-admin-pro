@@ -53,6 +53,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterPurchaseOrderRoutes(rg)
 	h.RegisterPurchaseInRoutes(rg)
 	h.RegisterPurchaseReturnRoutes(rg)
+	// 库存调拨/盘点（issue #93，spec §3.5/§4.6/§5）：DB 调拨、PD 盘点。
+	h.RegisterStockMoveRoutes(rg)
+	h.RegisterStockCheckRoutes(rg)
 	// 首页统计（issue #95，spec §5/§6）：销售/采购 × summary/time-summary。
 	h.RegisterStatisticsRoutes(rg)
 }

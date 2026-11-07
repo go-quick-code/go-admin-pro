@@ -59,5 +59,20 @@ func (s *Service) CheckProductRefs(ctx context.Context, productID int64) error {
 	if saleRows > 0 {
 		return xerr.Conflict("产品被销售单据明细引用，禁止删除")
 	}
+	// 库存调拨/盘点明细引用（issue #93，spec §4.9）：任一明细引用禁删。
+	moveRows, err := s.repo.CountStockMoveItemsByProduct(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if moveRows > 0 {
+		return xerr.Conflict("产品被库存调拨单明细引用，禁止删除")
+	}
+	checkRows, err := s.repo.CountStockCheckItemsByProduct(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if checkRows > 0 {
+		return xerr.Conflict("产品被库存盘点单明细引用，禁止删除")
+	}
 	return nil
 }
