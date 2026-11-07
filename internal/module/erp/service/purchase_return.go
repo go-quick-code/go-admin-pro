@@ -482,20 +482,24 @@ func (s *Service) ExportPurchaseReturns(ctx context.Context, req *dto.PurchaseRe
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.PurchaseReturn) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	out := make([]dto.PurchaseReturnExportRow, 0, len(list))
 	for _, row := range list {
 		out = append(out, dto.PurchaseReturnExportRow{
-			No:          row.No,
-			Supplier:    supplierNames[row.SupplierID],
-			InNo:        inNos[row.InID],
-			Warehouse:   warehouseNames[row.WarehouseID],
-			ReturnTime:  row.ReturnTime,
-			TotalPrice:  row.TotalPrice,
-			RefundPrice: row.RefundPrice,
-			Status:      docStatusNames[row.Status],
-			Remark:      row.Remark,
-			OwnerUserID: row.OwnerUserID,
-			CreateTime:  row.CreatedAt,
+			No:            row.No,
+			Supplier:      supplierNames[row.SupplierID],
+			InNo:          inNos[row.InID],
+			Warehouse:     warehouseNames[row.WarehouseID],
+			ReturnTime:    row.ReturnTime,
+			TotalPrice:    row.TotalPrice,
+			RefundPrice:   row.RefundPrice,
+			Status:        docStatusNames[row.Status],
+			Remark:        row.Remark,
+			OwnerUserName: ownerNames[row.OwnerUserID],
+			CreateTime:    row.CreatedAt,
 		})
 	}
 	return excel.Export(out, excel.ExportOptions{NativeDates: true})

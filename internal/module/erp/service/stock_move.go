@@ -411,6 +411,10 @@ func (s *Service) ExportStockMoves(ctx context.Context, req *dto.StockMovePageRe
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.StockMove) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]dto.StockMoveExportRow, 0, len(list))
 	for _, row := range list {
 		rows = append(rows, dto.StockMoveExportRow{
@@ -419,7 +423,7 @@ func (s *Service) ExportStockMoves(ctx context.Context, req *dto.StockMovePageRe
 			ToWarehouse:   warehouseNames[row.ToWarehouseID],
 			MoveTime:      row.MoveTime,
 			Status:        docStatusNames[row.Status],
-			OwnerUserID:   row.OwnerUserID,
+			OwnerUserName: ownerNames[row.OwnerUserID],
 			CreateTime:    row.CreatedAt,
 		})
 	}

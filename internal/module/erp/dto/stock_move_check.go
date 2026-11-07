@@ -173,17 +173,17 @@ type StockMoveExportRow struct {
 	ToWarehouse   string    `excel:"调入仓库,width=18"`
 	MoveTime      time.Time `excel:"调拨时间,width=20"`
 	Status        string    `excel:"状态,width=10"`
-	OwnerUserID   int64     `excel:"负责人ID,width=10"`
+	OwnerUserName string    `excel:"负责人,width=14"`
 	CreateTime    time.Time `excel:"创建时间,width=20"`
 }
 
 // StockCheckExportRow 库存盘点单导出列。
 type StockCheckExportRow struct {
-	No          string    `excel:"单号,width=20"`
-	Warehouse   string    `excel:"仓库,width=18"`
-	CheckTime   time.Time `excel:"盘点时间,width=20"`
-	Status      string    `excel:"状态,width=10"`
-	Remark      string    `excel:"备注,width=32"`
-	OwnerUserID int64     `excel:"负责人ID,width=10"`
-	CreateTime  time.Time `excel:"创建时间,width=20"`
+	No            string    `excel:"单号,width=20"`
+	Warehouse     string    `excel:"仓库,width=18"`
+	CheckTime     time.Time `excel:"盘点时间,width=20"`
+	Status        string    `excel:"状态,width=10"`
+	Remark        string    `excel:"备注,width=32"`
+	OwnerUserName string    `excel:"负责人,width=14"`
+	CreateTime    time.Time `excel:"创建时间,width=20"`
 }

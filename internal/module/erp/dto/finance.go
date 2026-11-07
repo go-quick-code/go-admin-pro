@@ -171,14 +171,14 @@ type FinanceReceiptDetail struct {
 
 // FinanceReceiptExportRow 收款单导出列。
 type FinanceReceiptExportRow struct {
-	No          string      `excel:"收款单号,width=20"`
-	Customer    string      `excel:"客户,width=20"`
-	Account     string      `excel:"结算账户,width=18"`
-	ReceiptTime time.Time   `excel:"收款时间,width=20"`
-	Status      string      `excel:"状态,width=10"`
-	TotalPrice  money.Money `excel:"核销金额合计,width=14"`
-	OwnerUserID int64       `excel:"负责人ID,width=10"`
-	CreateTime  time.Time   `excel:"创建时间,width=20"`
+	No            string      `excel:"收款单号,width=20"`
+	Customer      string      `excel:"客户,width=20"`
+	Account       string      `excel:"结算账户,width=18"`
+	ReceiptTime   time.Time   `excel:"收款时间,width=20"`
+	Status        string      `excel:"状态,width=10"`
+	TotalPrice    money.Money `excel:"核销金额合计,width=14"`
+	OwnerUserName string      `excel:"负责人,width=14"`
+	CreateTime    time.Time   `excel:"创建时间,width=20"`
 }
 
 // ---------- 付款单（FK） ----------
@@ -271,12 +271,12 @@ type FinancePaymentDetail struct {
 
 // FinancePaymentExportRow 付款单导出列。
 type FinancePaymentExportRow struct {
-	No          string      `excel:"付款单号,width=20"`
-	Supplier    string      `excel:"供应商,width=20"`
-	Account     string      `excel:"结算账户,width=18"`
-	PaymentTime time.Time   `excel:"付款时间,width=20"`
-	Status      string      `excel:"状态,width=10"`
-	TotalPrice  money.Money `excel:"核销金额合计,width=14"`
-	OwnerUserID int64       `excel:"负责人ID,width=10"`
-	CreateTime  time.Time   `excel:"创建时间,width=20"`
+	No            string      `excel:"付款单号,width=20"`
+	Supplier      string      `excel:"供应商,width=20"`
+	Account       string      `excel:"结算账户,width=18"`
+	PaymentTime   time.Time   `excel:"付款时间,width=20"`
+	Status        string      `excel:"状态,width=10"`
+	TotalPrice    money.Money `excel:"核销金额合计,width=14"`
+	OwnerUserName string      `excel:"负责人,width=14"`
+	CreateTime    time.Time   `excel:"创建时间,width=20"`
 }

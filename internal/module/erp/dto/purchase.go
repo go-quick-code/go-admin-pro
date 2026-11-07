@@ -266,41 +266,41 @@ type PurchaseReturnDetail struct {
 
 // PurchaseOrderExportRow 采购订单导出列。
 type PurchaseOrderExportRow struct {
-	No          string    `excel:"单号,width=20"`
-	Supplier    string    `excel:"供应商,width=18"`
-	OrderTime   time.Time `excel:"下单时间,width=20"`
-	Status      string    `excel:"状态,width=10"`
-	Remark      string    `excel:"备注,width=32"`
-	OwnerUserID int64     `excel:"负责人ID,width=10"`
-	CreateTime  time.Time `excel:"创建时间,width=20"`
+	No            string    `excel:"单号,width=20"`
+	Supplier      string    `excel:"供应商,width=18"`
+	OrderTime     time.Time `excel:"下单时间,width=20"`
+	Status        string    `excel:"状态,width=10"`
+	Remark        string    `excel:"备注,width=32"`
+	OwnerUserName string    `excel:"负责人,width=14"`
+	CreateTime    time.Time `excel:"创建时间,width=20"`
 }
 
 // PurchaseInExportRow 采购入库单导出列。
 type PurchaseInExportRow struct {
-	No           string      `excel:"单号,width=20"`
-	Supplier     string      `excel:"供应商,width=18"`
-	OrderNo      string      `excel:"采购订单号,width=20"`
-	Warehouse    string      `excel:"仓库,width=18"`
-	InTime       time.Time   `excel:"入库时间,width=20"`
-	TotalPrice   money.Money `excel:"单据金额,width=14"`
-	PaymentPrice money.Money `excel:"已核销金额,width=14"`
-	Status       string      `excel:"状态,width=10"`
-	Remark       string      `excel:"备注,width=32"`
-	OwnerUserID  int64       `excel:"负责人ID,width=10"`
-	CreateTime   time.Time   `excel:"创建时间,width=20"`
+	No            string      `excel:"单号,width=20"`
+	Supplier      string      `excel:"供应商,width=18"`
+	OrderNo       string      `excel:"采购订单号,width=20"`
+	Warehouse     string      `excel:"仓库,width=18"`
+	InTime        time.Time   `excel:"入库时间,width=20"`
+	TotalPrice    money.Money `excel:"单据金额,width=14"`
+	PaymentPrice  money.Money `excel:"已核销金额,width=14"`
+	Status        string      `excel:"状态,width=10"`
+	Remark        string      `excel:"备注,width=32"`
+	OwnerUserName string      `excel:"负责人,width=14"`
+	CreateTime    time.Time   `excel:"创建时间,width=20"`
 }
 
 // PurchaseReturnExportRow 采购退货单导出列。
 type PurchaseReturnExportRow struct {
-	No          string      `excel:"单号,width=20"`
-	Supplier    string      `excel:"供应商,width=18"`
-	InNo        string      `excel:"采购入库单号,width=20"`
-	Warehouse   string      `excel:"仓库,width=18"`
-	ReturnTime  time.Time   `excel:"退货时间,width=20"`
-	TotalPrice  money.Money `excel:"单据金额,width=14"`
-	RefundPrice money.Money `excel:"已核销退款,width=14"`
-	Status      string      `excel:"状态,width=10"`
-	Remark      string      `excel:"备注,width=32"`
-	OwnerUserID int64       `excel:"负责人ID,width=10"`
-	CreateTime  time.Time   `excel:"创建时间,width=20"`
+	No            string      `excel:"单号,width=20"`
+	Supplier      string      `excel:"供应商,width=18"`
+	InNo          string      `excel:"采购入库单号,width=20"`
+	Warehouse     string      `excel:"仓库,width=18"`
+	ReturnTime    time.Time   `excel:"退货时间,width=20"`
+	TotalPrice    money.Money `excel:"单据金额,width=14"`
+	RefundPrice   money.Money `excel:"已核销退款,width=14"`
+	Status        string      `excel:"状态,width=10"`
+	Remark        string      `excel:"备注,width=32"`
+	OwnerUserName string      `excel:"负责人,width=14"`
+	CreateTime    time.Time   `excel:"创建时间,width=20"`
 }

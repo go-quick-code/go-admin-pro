@@ -410,17 +410,21 @@ func (s *Service) ExportFinancePayments(ctx context.Context, req *dto.FinancePay
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.FinancePayment) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]dto.FinancePaymentExportRow, 0, len(list))
 	for _, row := range list {
 		rows = append(rows, dto.FinancePaymentExportRow{
-			No:          row.No,
-			Supplier:    supplierNames[row.SupplierID],
-			Account:     accountNames[row.AccountID],
-			PaymentTime: row.PaymentTime,
-			Status:      docStatusNames[row.Status],
-			TotalPrice:  totals[row.ID],
-			OwnerUserID: row.OwnerUserID,
-			CreateTime:  row.CreatedAt,
+			No:            row.No,
+			Supplier:      supplierNames[row.SupplierID],
+			Account:       accountNames[row.AccountID],
+			PaymentTime:   row.PaymentTime,
+			Status:        docStatusNames[row.Status],
+			TotalPrice:    totals[row.ID],
+			OwnerUserName: ownerNames[row.OwnerUserID],
+			CreateTime:    row.CreatedAt,
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})

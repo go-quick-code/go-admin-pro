@@ -105,14 +105,14 @@ type SaleOrderDetail struct {
 
 // SaleOrderExportRow 销售订单导出列。
 type SaleOrderExportRow struct {
-	OrderNo     string    `excel:"订单号,width=20"`
-	Customer    string    `excel:"客户,width=20"`
-	SaleUserID  int64     `excel:"销售员ID,width=10"`
-	OrderTime   time.Time `excel:"下单时间,width=20"`
-	Status      string    `excel:"状态,width=10"`
-	Remark      string    `excel:"备注,width=32"`
-	OwnerUserID int64     `excel:"负责人ID,width=10"`
-	CreateTime  time.Time `excel:"创建时间,width=20"`
+	OrderNo       string    `excel:"订单号,width=20"`
+	Customer      string    `excel:"客户,width=20"`
+	SaleUserName  string    `excel:"销售员,width=14"`
+	OrderTime     time.Time `excel:"下单时间,width=20"`
+	Status        string    `excel:"状态,width=10"`
+	Remark        string    `excel:"备注,width=32"`
+	OwnerUserName string    `excel:"负责人,width=14"`
+	CreateTime    time.Time `excel:"创建时间,width=20"`
 }
 
 // ---------- 销售出库（CK） ----------
@@ -198,15 +198,15 @@ type SaleOutItemRow struct {
 
 // SaleOutExportRow 销售出库单导出列。
 type SaleOutExportRow struct {
-	No          string      `excel:"出库单号,width=20"`
-	OrderNo     string      `excel:"销售订单号,width=20"`
-	Customer    string      `excel:"客户,width=20"`
-	Warehouse   string      `excel:"仓库,width=18"`
-	OutTime     time.Time   `excel:"出库时间,width=20"`
-	Status      string      `excel:"状态,width=10"`
-	TotalPrice  money.Money `excel:"出库总金额,width=14"`
-	OwnerUserID int64       `excel:"负责人ID,width=10"`
-	CreateTime  time.Time   `excel:"创建时间,width=20"`
+	No            string      `excel:"出库单号,width=20"`
+	OrderNo       string      `excel:"销售订单号,width=20"`
+	Customer      string      `excel:"客户,width=20"`
+	Warehouse     string      `excel:"仓库,width=18"`
+	OutTime       time.Time   `excel:"出库时间,width=20"`
+	Status        string      `excel:"状态,width=10"`
+	TotalPrice    money.Money `excel:"出库总金额,width=14"`
+	OwnerUserName string      `excel:"负责人,width=14"`
+	CreateTime    time.Time   `excel:"创建时间,width=20"`
 }
 
 // ---------- 销售退货（ST） ----------
@@ -289,13 +289,13 @@ type SaleReturnDetail struct {
 
 // SaleReturnExportRow 销售退货单导出列。
 type SaleReturnExportRow struct {
-	No          string      `excel:"退货单号,width=20"`
-	OutNo       string      `excel:"销售出库单号,width=20"`
-	Customer    string      `excel:"客户,width=20"`
-	Warehouse   string      `excel:"仓库,width=18"`
-	ReturnTime  time.Time   `excel:"退货时间,width=20"`
-	Status      string      `excel:"状态,width=10"`
-	TotalPrice  money.Money `excel:"退货总金额,width=14"`
-	OwnerUserID int64       `excel:"负责人ID,width=10"`
-	CreateTime  time.Time   `excel:"创建时间,width=20"`
+	No            string      `excel:"退货单号,width=20"`
+	OutNo         string      `excel:"销售出库单号,width=20"`
+	Customer      string      `excel:"客户,width=20"`
+	Warehouse     string      `excel:"仓库,width=18"`
+	ReturnTime    time.Time   `excel:"退货时间,width=20"`
+	Status        string      `excel:"状态,width=10"`
+	TotalPrice    money.Money `excel:"退货总金额,width=14"`
+	OwnerUserName string      `excel:"负责人,width=14"`
+	CreateTime    time.Time   `excel:"创建时间,width=20"`
 }

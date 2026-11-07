@@ -469,20 +469,24 @@ func (s *Service) ExportPurchaseIns(ctx context.Context, req *dto.PurchaseInPage
 	if err != nil {
 		return nil, err
 	}
+	ownerNames, err := s.userNicknames(ctx, collectOwnerIDs(list, func(row model.PurchaseIn) int64 { return row.OwnerUserID }))
+	if err != nil {
+		return nil, err
+	}
 	out := make([]dto.PurchaseInExportRow, 0, len(list))
 	for _, row := range list {
 		out = append(out, dto.PurchaseInExportRow{
-			No:           row.No,
-			Supplier:     supplierNames[row.SupplierID],
-			OrderNo:      orderNos[row.OrderID],
-			Warehouse:    warehouseNames[row.WarehouseID],
-			InTime:       row.InTime,
-			TotalPrice:   row.TotalPrice,
-			PaymentPrice: row.PaymentPrice,
-			Status:       docStatusNames[row.Status],
-			Remark:       row.Remark,
-			OwnerUserID:  row.OwnerUserID,
-			CreateTime:   row.CreatedAt,
+			No:            row.No,
+			Supplier:      supplierNames[row.SupplierID],
+			OrderNo:       orderNos[row.OrderID],
+			Warehouse:     warehouseNames[row.WarehouseID],
+			InTime:        row.InTime,
+			TotalPrice:    row.TotalPrice,
+			PaymentPrice:  row.PaymentPrice,
+			Status:        docStatusNames[row.Status],
+			Remark:        row.Remark,
+			OwnerUserName: ownerNames[row.OwnerUserID],
+			CreateTime:    row.CreatedAt,
 		})
 	}
 	return excel.Export(out, excel.ExportOptions{NativeDates: true})
