@@ -88,6 +88,14 @@ func Run(db *gorm.DB, withDemo bool) error {
 				return err
 			}
 		}
+		// ERP 演示数据（issue #97，docs/erp-mvp-spec.md §7/§9）：主数据 →
+		// 采购订单/入库 → 盘点 → 销售订单/出库 → 收付款 → 首页统计可见。
+		// 独立于 CRM/OA 演示数据（只依赖基础种子的 admin 账号），放在最后。
+		if seedERPDemoFunc != nil {
+			if err := seedERPDemoFunc(db); err != nil {
+				return err
+			}
+		}
 		// 平台能力演示数据（issue #85，spec §7.3/§9）：渠道/模板/套餐/敏感词/
 		// 社交客户端（停用）/演示消息日志，配置与密钥全部占位符。不依赖 CRM/OA
 		// 演示组织，顺序无关，放最后。
@@ -110,6 +118,11 @@ var seedCRMDemoFunc func(*gorm.DB) error
 // OA 演示数据依赖 CRM 演示组织（sales1/sales2/manager）与基础种子（默认
 // 班次/考勤组、默认审批流程、报销类别字典），因此固定排在 CRM 演示数据之后。
 var seedOADemoFunc func(*gorm.DB) error
+
+// seedERPDemoFunc 是 ERP 演示数据的写入入口，由 erp_demo.go 的 init 注册。
+// 不依赖 CRM/OA 演示数据（只依赖基础种子的 admin 账号），顺序无关；用函数
+// 变量是为了代码生成器的 fresh-module 编译校验能连同真实 erp 模块剪除本文件。
+var seedERPDemoFunc func(*gorm.DB) error
 
 // seedPlatformDemoFunc 是平台能力演示数据的写入入口，由 platform_demo.go 的
 // init 注册。不依赖 CRM/OA 演示数据（自带渠道/模板/套餐兜底），顺序无关。

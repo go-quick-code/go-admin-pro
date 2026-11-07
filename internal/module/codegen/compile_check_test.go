@@ -138,11 +138,19 @@ func TestGeneratedFreshModuleCompiles(t *testing.T) {
 // 调用 SetWarehouseRefChecker/SetProductRefChecker/SetLocation（库存域引用
 // 校验与业务时区装配），生成的全新骨架没有这些接缝——剪除模块的同时剔除
 // 这些装配行，保持「全新模块自洽可编译」的检查语义。
+//
+// issue #97：ERP 演示种子（internal/seed/erp_demo.go）import 真实 erp
+// model/service，必须随模块一并剪除（seed.Run 通过函数变量调用，缺失时
+// 自动跳过 ERP 演示数据）。
 func pruneRealErpModule(t *testing.T, tmp string) {
 	t.Helper()
 	dir := filepath.Join(tmp, "internal", "module", "erp")
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("剪除真实 erp 模块: %v", err)
+	}
+	demoSeed := filepath.Join(tmp, "internal", "seed", "erp_demo.go")
+	if err := os.Remove(demoSeed); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("剪除 ERP 演示种子: %v", err)
 	}
 	appPath := filepath.Join(tmp, "internal", "app", "app.go")
 	raw, err := os.ReadFile(appPath)
