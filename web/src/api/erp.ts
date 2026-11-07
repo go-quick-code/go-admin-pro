@@ -426,6 +426,24 @@ export function exportFinancePayments(params?: Record<string, any>) {
   return downloadExcel('/erp/finance-payment/export-excel', params)
 }
 
+// ---------- ERP 首页统计（issue #95，spec §5/§6：菜单 701，权限码 erp:statistics:query） ----------
+// 口径：销售额 = Σ已审核销售出库 totalPrice（按 outTime 落区间）− Σ已审核销售退货
+// totalPrice（按 returnTime）；采购 = 采购入库 − 采购退货（inTime/returnTime）。
+// summary 返回今日/昨日/本月/今年四值；time-summary 返回近 N 个月（默认 6）按月，
+// 金额均为十进制字符串（ADR 0007），数据范围与租户隔离由后端保证。
+export function getSaleStatisticsSummary() {
+  return request.get('/erp/sale-statistics/summary') as Promise<any>
+}
+export function getSaleStatisticsTimeSummary(params?: { months?: number }) {
+  return request.get('/erp/sale-statistics/time-summary', { params }) as Promise<any>
+}
+export function getPurchaseStatisticsSummary() {
+  return request.get('/erp/purchase-statistics/summary') as Promise<any>
+}
+export function getPurchaseStatisticsTimeSummary(params?: { months?: number }) {
+  return request.get('/erp/purchase-statistics/time-summary', { params }) as Promise<any>
+}
+
 // ---------- ERP 库存调拨单（DB，issue #93，spec §3.5/§4.6） ----------
 // 单号由服务端经 erp_sequence 发放（入参无单号字段）；审核时同一事务内出仓
 // 负、入仓正两笔流水同额成对（两仓必须不同、源仓不足 409）；反审核各生成
