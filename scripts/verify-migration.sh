@@ -41,6 +41,10 @@
 #                       erp_stock_in、erp_stock_in_item、erp_stock_out、
 #                       erp_stock_out_item（issue #90，7 张：库存账 3 +
 #                       杂项出入库单据 4；72→79），
+#                       00032 新增 erp_sale_order、erp_sale_order_items、
+#                       erp_sale_out、erp_sale_out_items、erp_sale_return、
+#                       erp_sale_return_items（issue #92，6 张：销售三单三主
+#                       三明；79→85；#91 采购 00031 合入后为 85→91），
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -48,7 +52,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-79}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-85}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

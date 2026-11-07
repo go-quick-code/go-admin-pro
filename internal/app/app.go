@@ -254,6 +254,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// #91+ 的单据域引用类型（挂单/往来单位）继续以 RefCheckerChain 组合追加。
 	erpSvc.SetWarehouseRefChecker(erpSvc)
 	erpSvc.SetProductRefChecker(erpSvc)
+	// 销售三单（issue #92，spec §4.9）：ERP 客户被销售订单/出库/退货引用禁删——
+	// CustomerRefChecker 由 erp Service 自身实现并在此注册；#91 供应商同构追加。
+	erpSvc.SetCustomerRefChecker(erpSvc)
 	// 业务时区（ADR 0006）：单号日期键与单据业务时间解析的唯一口径。
 	erpSvc.SetLocation(cfg.Location())
 	erpAPI := erpapi.New(erpSvc, sysAPI.RequirePermission, cfg.Location())

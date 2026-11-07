@@ -202,3 +202,75 @@ export function updateStockOutStatus(data: { id: number; status: number }) {
 export function exportStockOuts(params?: Record<string, any>) {
   return downloadExcel('/erp/stock-out/export-excel', params)
 }
+
+// ---------- ERP 销售三单（issue #92，spec §3.4/§4.1/§4.5） ----------
+// 销售订单（XS）/ 销售出库（CK）/ 销售退货（ST）：单号由服务端经 erp_sequence
+// 发放（入参无单号/行金额字段，伪造不可采纳）；出库必挂已审核销售订单（orderId），
+// 退货必挂已审核销售出库（outId，仓库服务端取自出库单，入参不传）；审核/反审核
+// 走 update-status（幂等目标态：20 审核 / 10 反审核），approve 为独立权限码；
+// 进度（outCount/returnCount）与核销金额（receiptPrice/refundPrice）服务端回写。
+export function pageSaleOrders(params: any) {
+  return request.get('/erp/sale-order/page', { params }) as Promise<any>
+}
+export function getSaleOrder(id: number) {
+  return request.get(`/erp/sale-order/${id}`) as Promise<any>
+}
+export function createSaleOrder(data: any) {
+  return request.post('/erp/sale-order', data) as Promise<any>
+}
+export function updateSaleOrder(data: any) {
+  return request.put('/erp/sale-order', data) as Promise<any>
+}
+export function deleteSaleOrder(id: number) {
+  return request.delete(`/erp/sale-order/${id}`) as Promise<any>
+}
+export function updateSaleOrderStatus(data: { id: number; status: number }) {
+  return request.put('/erp/sale-order/update-status', data) as Promise<any>
+}
+export function exportSaleOrders(params?: Record<string, any>) {
+  return downloadExcel('/erp/sale-order/export-excel', params)
+}
+
+export function pageSaleOuts(params: any) {
+  return request.get('/erp/sale-out/page', { params }) as Promise<any>
+}
+export function getSaleOut(id: number) {
+  return request.get(`/erp/sale-out/${id}`) as Promise<any>
+}
+export function createSaleOut(data: any) {
+  return request.post('/erp/sale-out', data) as Promise<any>
+}
+export function updateSaleOut(data: any) {
+  return request.put('/erp/sale-out', data) as Promise<any>
+}
+export function deleteSaleOut(id: number) {
+  return request.delete(`/erp/sale-out/${id}`) as Promise<any>
+}
+export function updateSaleOutStatus(data: { id: number; status: number }) {
+  return request.put('/erp/sale-out/update-status', data) as Promise<any>
+}
+export function exportSaleOuts(params?: Record<string, any>) {
+  return downloadExcel('/erp/sale-out/export-excel', params)
+}
+
+export function pageSaleReturns(params: any) {
+  return request.get('/erp/sale-return/page', { params }) as Promise<any>
+}
+export function getSaleReturn(id: number) {
+  return request.get(`/erp/sale-return/${id}`) as Promise<any>
+}
+export function createSaleReturn(data: any) {
+  return request.post('/erp/sale-return', data) as Promise<any>
+}
+export function updateSaleReturn(data: any) {
+  return request.put('/erp/sale-return', data) as Promise<any>
+}
+export function deleteSaleReturn(id: number) {
+  return request.delete(`/erp/sale-return/${id}`) as Promise<any>
+}
+export function updateSaleReturnStatus(data: { id: number; status: number }) {
+  return request.put('/erp/sale-return/update-status', data) as Promise<any>
+}
+export function exportSaleReturns(params?: Record<string, any>) {
+  return downloadExcel('/erp/sale-return/export-excel', params)
+}

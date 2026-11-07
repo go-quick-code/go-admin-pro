@@ -50,5 +50,14 @@ func (s *Service) CheckProductRefs(ctx context.Context, productID int64) error {
 	if outRows > 0 {
 		return xerr.Conflict("产品被其它出库单明细引用，禁止删除")
 	}
+	// 销售三单明细引用（issue #92，spec §4.9）：订单/出库/退货任一明细引用禁删；
+	// #91 采购明细引用以同样方式追加。
+	saleRows, err := s.countSaleProductRefs(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if saleRows > 0 {
+		return xerr.Conflict("产品被销售单据明细引用，禁止删除")
+	}
 	return nil
 }

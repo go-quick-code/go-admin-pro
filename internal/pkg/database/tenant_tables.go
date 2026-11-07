@@ -153,4 +153,13 @@ var TenantTables = []string{
 	"erp_stock_in_item",
 	"erp_stock_out",
 	"erp_stock_out_item",
+	// 销售三单（issue #92，迁移 00032，spec §3.4/§4.5）：销售订单/出库/退货
+	// 三主三明，全量租户隔离（跨租户业务 ID 一律 404）；占用统计的跨表聚合
+	// SQL 用显式租户参数（与库存入账原语同口径）。
+	"erp_sale_order",
+	"erp_sale_order_items",
+	"erp_sale_out",
+	"erp_sale_out_items",
+	"erp_sale_return",
+	"erp_sale_return_items",
 }
