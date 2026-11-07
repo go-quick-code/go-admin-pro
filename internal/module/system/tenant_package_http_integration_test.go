@@ -107,6 +107,32 @@ func TestIntegrationTenantPackageCRUD(t *testing.T) {
 	}
 }
 
+// TestIntegrationTenantPackageSoftDeletedNameConflict 软删同名后新建应 409
+// （PR #86 审查意见）：CountTenantPackageByName 原走 gorm 软删作用域只数活行，
+// 与唯一键 uk_system_tenant_package_name（含软删行）口径不一致——复用软删名
+// 绕过重名校验后撞 DB 唯一键，返回未映射的 500。
+func TestIntegrationTenantPackageSoftDeletedNameConflict(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	status, api := env.Request(t, http.MethodPost, "/system/tenant-package", admin, map[string]any{
+		"name": "软删重名套餐", "status": 0, "menuIds": []int64{110, 101},
+	})
+	mustOK(t, "创建套餐", status, api)
+	pkgID := tenantPackageIDForTest(t, env, admin, "软删重名套餐")
+
+	status, api = env.Request(t, http.MethodDelete, fmt.Sprintf("/system/tenant-package/%d", pkgID), admin, nil)
+	mustOK(t, "软删除套餐", status, api)
+
+	// 新建同名：应 409「套餐名称已存在」（修复前 Count 只数活行放行，Create 撞唯一键 500）。
+	status, api = env.Request(t, http.MethodPost, "/system/tenant-package", admin, map[string]any{
+		"name": "软删重名套餐", "status": 0, "menuIds": []int64{110, 101},
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("新建软删同名套餐：HTTP %d code %d msg %q，期望 %d", status, api.Code, api.Msg, http.StatusConflict)
+	}
+}
+
 func TestIntegrationTenantPackagePlatformOnly(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	admin := env.Login(t, "admin", "123456")
