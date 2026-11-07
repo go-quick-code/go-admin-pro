@@ -617,6 +617,28 @@ func seedMenus(db *gorm.DB) error {
 		btn(7244, 724, "出库审核", "erp:stock-out:approve", 4),
 		btn(7245, 724, "出库导出", "erp:stock-out:export", 5),
 
+		// 采购三单（issue #91，spec §6/§7）：731 采购订单、732 采购入库、733
+		// 采购退货（spec §7 号段；单据页按 query/create/update/delete/approve/
+		// export 全套按钮，query 挂菜单自身）；按钮 7311–7315/7321–7325/
+		// 7331–7335（菜单ID×10+n，grep 去重确认未占用）。
+		menu(731, 700, "采购订单", "purchase-order", "erp/purchase-order/index", "erp:purchase-order:query", "Tickets", 11),
+		btn(7311, 731, "订单新增", "erp:purchase-order:create", 1),
+		btn(7312, 731, "订单修改", "erp:purchase-order:update", 2),
+		btn(7313, 731, "订单删除", "erp:purchase-order:delete", 3),
+		btn(7314, 731, "订单审核", "erp:purchase-order:approve", 4),
+		btn(7315, 731, "订单导出", "erp:purchase-order:export", 5),
+		menu(732, 700, "采购入库", "purchase-in", "erp/purchase-in/index", "erp:purchase-in:query", "GoodsFilled", 12),
+		btn(7321, 732, "入库新增", "erp:purchase-in:create", 1),
+		btn(7322, 732, "入库修改", "erp:purchase-in:update", 2),
+		btn(7323, 732, "入库删除", "erp:purchase-in:delete", 3),
+		btn(7324, 732, "入库审核", "erp:purchase-in:approve", 4),
+		btn(7325, 732, "入库导出", "erp:purchase-in:export", 5),
+		menu(733, 700, "采购退货", "purchase-return", "erp/purchase-return/index", "erp:purchase-return:query", "RefreshLeft", 13),
+		btn(7331, 733, "退货新增", "erp:purchase-return:create", 1),
+		btn(7332, 733, "退货修改", "erp:purchase-return:update", 2),
+		btn(7333, 733, "退货删除", "erp:purchase-return:delete", 3),
+		btn(7334, 733, "退货审核", "erp:purchase-return:approve", 4),
+		btn(7335, 733, "退货导出", "erp:purchase-return:export", 5),
 		// 销售三单（issue #92，spec §6/§7）：741 销售订单、742 销售出库、743 销售
 		// 退货（spec §7 号段；#91 采购 731–733 同构）。单据页按 query 菜单 +
 		// create/update/delete/approve/export 全套按钮（approve 为独立审核权限码，

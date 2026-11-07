@@ -321,4 +321,9 @@ var stockRecordBizNames = map[string]string{
 	model.StockRecordBizStockInCancel:  "其它入库（反审核）",
 	model.StockRecordBizStockOut:       "其它出库",
 	model.StockRecordBizStockOutCancel: "其它出库（反审核）",
+	// 采购三单（issue #91，spec §4.3：biz_type 与表名一致 + _CANCEL 对）。
+	model.StockRecordBizPurchaseIn:           "采购入库",
+	model.StockRecordBizPurchaseInCancel:     "采购入库（反审核）",
+	model.StockRecordBizPurchaseReturn:       "采购退货",
+	model.StockRecordBizPurchaseReturnCancel: "采购退货（反审核）",
 }

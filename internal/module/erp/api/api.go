@@ -49,6 +49,10 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterSaleOrderRoutes(rg)
 	h.RegisterSaleOutRoutes(rg)
 	h.RegisterSaleReturnRoutes(rg)
+	// 采购三单（issue #91，spec §3.3/§4.4/§5）：订单/入库/退货。
+	h.RegisterPurchaseOrderRoutes(rg)
+	h.RegisterPurchaseInRoutes(rg)
+	h.RegisterPurchaseReturnRoutes(rg)
 }
 
 // ---------- 通用绑定助手（与 system/crm 模块同构，保持模块自包含）----------

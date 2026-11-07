@@ -274,3 +274,82 @@ export function updateSaleReturnStatus(data: { id: number; status: number }) {
 export function exportSaleReturns(params?: Record<string, any>) {
   return downloadExcel('/erp/sale-return/export-excel', params)
 }
+
+// ---------- ERP 采购订单（CG，issue #91，spec §3.3/§4.4） ----------
+// 单号由服务端经 erp_sequence 发放（入参无单号字段，伪造不可采纳）；行金额服务端
+// 按 单价×数量 计算（入参无 totalPrice 字段）；明细 inCount/returnCount 为服务端
+// 重算的进度回写（只计已审核单）。审核/反审核走 update-status（幂等目标态：
+// 20 审核 / 10 反审核），approve 为独立权限码；存在已审核入库/退货时订单不可反审核（409）。
+export function pagePurchaseOrders(params: any) {
+  return request.get('/erp/purchase-order/page', { params }) as Promise<any>
+}
+export function getPurchaseOrder(id: number) {
+  return request.get(`/erp/purchase-order/${id}`) as Promise<any>
+}
+export function createPurchaseOrder(data: any) {
+  return request.post('/erp/purchase-order', data) as Promise<any>
+}
+export function updatePurchaseOrder(data: any) {
+  return request.put('/erp/purchase-order', data) as Promise<any>
+}
+export function deletePurchaseOrder(id: number) {
+  return request.delete(`/erp/purchase-order/${id}`) as Promise<any>
+}
+export function updatePurchaseOrderStatus(data: { id: number; status: number }) {
+  return request.put('/erp/purchase-order/update-status', data) as Promise<any>
+}
+export function exportPurchaseOrders(params?: Record<string, any>) {
+  return downloadExcel('/erp/purchase-order/export-excel', params)
+}
+
+// ---------- ERP 采购入库单（RK，issue #91，spec §3.3/§4.4） ----------
+// 必挂已审核采购订单（orderId 必填，前端挂单选择只出已审核单 status=20）；审核后
+// 增库存并回写订单 in_count；反审核生成反向流水回滚（存在已审核退货时 409）。
+// paymentPrice 为核销回写列（#94），只读展示。
+export function pagePurchaseIns(params: any) {
+  return request.get('/erp/purchase-in/page', { params }) as Promise<any>
+}
+export function getPurchaseIn(id: number) {
+  return request.get(`/erp/purchase-in/${id}`) as Promise<any>
+}
+export function createPurchaseIn(data: any) {
+  return request.post('/erp/purchase-in', data) as Promise<any>
+}
+export function updatePurchaseIn(data: any) {
+  return request.put('/erp/purchase-in', data) as Promise<any>
+}
+export function deletePurchaseIn(id: number) {
+  return request.delete(`/erp/purchase-in/${id}`) as Promise<any>
+}
+export function updatePurchaseInStatus(data: { id: number; status: number }) {
+  return request.put('/erp/purchase-in/update-status', data) as Promise<any>
+}
+export function exportPurchaseIns(params?: Record<string, any>) {
+  return downloadExcel('/erp/purchase-in/export-excel', params)
+}
+
+// ---------- ERP 采购退货单（RT，issue #91，spec §3.3/§4.4） ----------
+// 必挂已审核采购入库单（inId 必填，前端挂单选择只出已审核单 status=20）；仓库取自
+// 入库单（入参无仓库字段）；审核后减库存并回写订单 return_count（经入库单关联）。
+// refundPrice 为核销回写列（#94），只读展示。
+export function pagePurchaseReturns(params: any) {
+  return request.get('/erp/purchase-return/page', { params }) as Promise<any>
+}
+export function getPurchaseReturn(id: number) {
+  return request.get(`/erp/purchase-return/${id}`) as Promise<any>
+}
+export function createPurchaseReturn(data: any) {
+  return request.post('/erp/purchase-return', data) as Promise<any>
+}
+export function updatePurchaseReturn(data: any) {
+  return request.put('/erp/purchase-return', data) as Promise<any>
+}
+export function deletePurchaseReturn(id: number) {
+  return request.delete(`/erp/purchase-return/${id}`) as Promise<any>
+}
+export function updatePurchaseReturnStatus(data: { id: number; status: number }) {
+  return request.put('/erp/purchase-return/update-status', data) as Promise<any>
+}
+export function exportPurchaseReturns(params?: Record<string, any>) {
+  return downloadExcel('/erp/purchase-return/export-excel', params)
+}
