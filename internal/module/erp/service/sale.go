@@ -73,11 +73,11 @@ func (s *Service) checkSaleOutOccupancy(ctx context.Context, tx *repository.Repo
 	need := itemCountByProduct(orderCounts,
 		func(it model.SaleOrderItem) int64 { return it.ProductID },
 		func(it model.SaleOrderItem) qty.Qty { return it.Count })
-	outRows, err := mustSumSaleOutByOrder(ctx, tx, tenantID, order.ID, excludeOutID)
+	outRows, err := tx.SumSaleOutCountByOrder(ctx, tenantID, order.ID, excludeOutID)
 	if err != nil {
 		return err
 	}
-	retRows, err := mustSumSaleReturnByOrder(ctx, tx, tenantID, order.ID)
+	retRows, err := tx.SumSaleReturnCountByOrder(ctx, tenantID, order.ID)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (s *Service) checkSaleReturnOccupancy(ctx context.Context, tx *repository.R
 	need := itemCountByProduct(outItems.Items,
 		func(it model.SaleOutItem) int64 { return it.ProductID },
 		func(it model.SaleOutItem) qty.Qty { return it.Count })
-	retRows, err := mustSumSaleReturnByOut(ctx, tx, tenantID, out.ID, excludeReturnID)
+	retRows, err := tx.SumSaleReturnCountByOut(ctx, tenantID, out.ID, excludeReturnID)
 	if err != nil {
 		return err
 	}
@@ -142,11 +142,11 @@ func (s *Service) assertSaleRemaining(ctx context.Context, tx *repository.Reposi
 func (s *Service) recheckSaleOrderOccupancy(ctx context.Context, tx *repository.Repository, order *model.SaleOrder, drafts []docItemDraft) error {
 	tenantID := erpTenantID(ctx)
 	newCounts := draftCountByProduct(drafts)
-	outRows, err := mustSumSaleOutByOrder(ctx, tx, tenantID, order.ID, 0)
+	outRows, err := tx.SumSaleOutCountByOrder(ctx, tenantID, order.ID, 0)
 	if err != nil {
 		return err
 	}
-	retRows, err := mustSumSaleReturnByOrder(ctx, tx, tenantID, order.ID)
+	retRows, err := tx.SumSaleReturnCountByOrder(ctx, tenantID, order.ID)
 	if err != nil {
 		return err
 	}
@@ -174,20 +174,6 @@ func (s *Service) recheckSaleOrderOccupancy(ctx context.Context, tx *repository.
 	// assertSaleRemaining 比较 add ≤ base − occ；这里 add=0、base=新订单数量，
 	// 语义即「新订单数量 ≥ 出库占用 + 退货占用」。
 	return nil
-}
-
-// mustSumSaleOutByOrder / mustSumSaleReturnByOrder / mustSumSaleReturnByOut
-// 是占用聚合的薄封装（占用查询失败直接中止事务，不吞错）。
-func mustSumSaleOutByOrder(ctx context.Context, tx *repository.Repository, tenantID, orderID, excludeOutID int64) ([]repository.ProductCountSum, error) {
-	return tx.SumSaleOutCountByOrder(ctx, tenantID, orderID, excludeOutID)
-}
-
-func mustSumSaleReturnByOrder(ctx context.Context, tx *repository.Repository, tenantID, orderID int64) ([]repository.ProductCountSum, error) {
-	return tx.SumSaleReturnCountByOrder(ctx, tenantID, orderID)
-}
-
-func mustSumSaleReturnByOut(ctx context.Context, tx *repository.Repository, tenantID, outID, excludeReturnID int64) ([]repository.ProductCountSum, error) {
-	return tx.SumSaleReturnCountByOut(ctx, tenantID, outID, excludeReturnID)
 }
 
 func maxInt64(a, b int64) int64 {
