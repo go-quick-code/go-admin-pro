@@ -57,6 +57,10 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedExpenseCategoryDict(db); err != nil {
 		return err
 	}
+	// ERP 字典（issue #90，spec §7）：审核状态 + 其它入库/出库类型。
+	if err := seedErpDicts(db); err != nil {
+		return err
+	}
 	if err := seedConfigs(db); err != nil {
 		return err
 	}
@@ -546,6 +550,159 @@ func seedMenus(db *gorm.DB) error {
 		menu(603, 600, "发送日志", "log", "message/log/index", "message:log:query", "Tickets", 3),
 		btn(6031, 603, "日志重发", "message:log:resend", 1),
 		btn(6032, 603, "日志删除", "message:log:delete", 2),
+
+		// ERP（issue #88/#89，docs/erp-mvp-spec.md §6/§7）：700 段（协调台账分配）。
+		// #88：700 dir、710–712（分类/单位/产品）+ 按钮 7101–7124；
+		// #89：720 仓库 / 730 供应商 / 740 客户 + 按钮 7201–7204/7301–7304/
+		// 7401–7404（菜单ID×10+n，grep 去重确认未占用）；后续票追加 701 首页
+		// 统计、721–722 库存、723–726 其它出入库/调拨/盘点、731–733 采购、
+		// 741–743 销售、750 结算账户/751–752 收付款；按钮 = 菜单ID×10+n
+		//（query/create/update/delete/export）。
+		// 财务与库存敏感：内置普通角色（role id=2）默认不授予任何 ERP 菜单
+		//（spec §7，见 seedRoles 的 roleMenus——刻意无 700 段条目）。
+		dir(700, 0, "ERP 进销存", "/erp", "ShoppingCart", 70),
+		// 首页统计（issue #95，spec §6/§7）：701 挂 erp:statistics:query；按钮
+		// 7011 与菜单同码（对齐 CRM 仪表盘 4140/4141 的形态，grep 去重确认未占用）。
+		menu(701, 700, "首页统计", "statistics", "erp/statistics/index", "erp:statistics:query", "DataLine", 0),
+		btn(7011, 701, "统计查询", "erp:statistics:query", 1),
+		menu(710, 700, "产品分类", "product-category", "erp/product-category/index", "erp:product-category:query", "Files", 1),
+		btn(7101, 710, "分类新增", "erp:product-category:create", 1),
+		btn(7102, 710, "分类修改", "erp:product-category:update", 2),
+		btn(7103, 710, "分类删除", "erp:product-category:delete", 3),
+		btn(7104, 710, "分类导出", "erp:product-category:export", 4),
+		menu(711, 700, "产品单位", "product-unit", "erp/product-unit/index", "erp:product-unit:query", "CollectionTag", 2),
+		btn(7111, 711, "单位新增", "erp:product-unit:create", 1),
+		btn(7112, 711, "单位修改", "erp:product-unit:update", 2),
+		btn(7113, 711, "单位删除", "erp:product-unit:delete", 3),
+		btn(7114, 711, "单位导出", "erp:product-unit:export", 4),
+		menu(712, 700, "产品管理", "product", "erp/product/index", "erp:product:query", "Goods", 3),
+		btn(7121, 712, "产品新增", "erp:product:create", 1),
+		btn(7122, 712, "产品修改", "erp:product:update", 2),
+		btn(7123, 712, "产品删除", "erp:product:delete", 3),
+		btn(7124, 712, "产品导出", "erp:product:export", 4),
+		// 仓库/供应商/客户主数据（issue #89，spec §3.1/§7）：仓库管理员/采购员/
+		// 销售员维护；权限码 erp:warehouse:* / erp:supplier:* / erp:customer:*。
+		menu(720, 700, "仓库管理", "warehouse", "erp/warehouse/index", "erp:warehouse:query", "House", 4),
+		btn(7201, 720, "仓库新增", "erp:warehouse:create", 1),
+		btn(7202, 720, "仓库修改", "erp:warehouse:update", 2),
+		btn(7203, 720, "仓库删除", "erp:warehouse:delete", 3),
+		btn(7204, 720, "仓库导出", "erp:warehouse:export", 4),
+		menu(730, 700, "供应商管理", "supplier", "erp/supplier/index", "erp:supplier:query", "Shop", 5),
+		btn(7301, 730, "供应商新增", "erp:supplier:create", 1),
+		btn(7302, 730, "供应商修改", "erp:supplier:update", 2),
+		btn(7303, 730, "供应商删除", "erp:supplier:delete", 3),
+		btn(7304, 730, "供应商导出", "erp:supplier:export", 4),
+		menu(740, 700, "客户管理", "customer", "erp/customer/index", "erp:customer:query", "User", 6),
+		btn(7401, 740, "客户新增", "erp:customer:create", 1),
+		btn(7402, 740, "客户修改", "erp:customer:update", 2),
+		btn(7403, 740, "客户删除", "erp:customer:delete", 3),
+		btn(7404, 740, "客户导出", "erp:customer:export", 4),
+
+		// 库存核心与其它入库/出库单（issue #90，spec §6/§7）：721 产品库存、
+		// 722 出入库明细、723 其它入库、724 其它出库（spec §7 号段；721/722 是
+		// 查询页——库存行无 owner 语义，只有 query/export 按钮，无增删改）；
+		// 723/724 单据页按 query/create/update/delete/approve/export 全套按钮
+		//（approve 为独立审核权限码，spec §4.1）。按钮 = 菜单ID×10+n，
+		// 7211–7214/7221–7224/7231–7235/7241–7245 grep 去重确认未占用。
+		menu(721, 700, "产品库存", "stock", "erp/stock/index", "erp:stock:query", "Box", 7),
+		btn(7211, 721, "库存导出", "erp:stock:export", 1),
+		menu(722, 700, "出入库明细", "stock-record", "erp/stock-record/index", "erp:stock-record:query", "List", 8),
+		btn(7221, 722, "流水导出", "erp:stock-record:export", 1),
+		menu(723, 700, "其它入库", "stock-in", "erp/stock-in/index", "erp:stock-in:query", "Download", 9),
+		btn(7231, 723, "入库新增", "erp:stock-in:create", 1),
+		btn(7232, 723, "入库修改", "erp:stock-in:update", 2),
+		btn(7233, 723, "入库删除", "erp:stock-in:delete", 3),
+		btn(7234, 723, "入库审核", "erp:stock-in:approve", 4),
+		btn(7235, 723, "入库导出", "erp:stock-in:export", 5),
+		menu(724, 700, "其它出库", "stock-out", "erp/stock-out/index", "erp:stock-out:query", "Upload", 10),
+		btn(7241, 724, "出库新增", "erp:stock-out:create", 1),
+		btn(7242, 724, "出库修改", "erp:stock-out:update", 2),
+		btn(7243, 724, "出库删除", "erp:stock-out:delete", 3),
+		btn(7244, 724, "出库审核", "erp:stock-out:approve", 4),
+		btn(7245, 724, "出库导出", "erp:stock-out:export", 5),
+
+		// 采购三单（issue #91，spec §6/§7）：731 采购订单、732 采购入库、733
+		// 采购退货（spec §7 号段；单据页按 query/create/update/delete/approve/
+		// export 全套按钮，query 挂菜单自身）；按钮 7311–7315/7321–7325/
+		// 7331–7335（菜单ID×10+n，grep 去重确认未占用）。
+		menu(731, 700, "采购订单", "purchase-order", "erp/purchase-order/index", "erp:purchase-order:query", "Tickets", 11),
+		btn(7311, 731, "订单新增", "erp:purchase-order:create", 1),
+		btn(7312, 731, "订单修改", "erp:purchase-order:update", 2),
+		btn(7313, 731, "订单删除", "erp:purchase-order:delete", 3),
+		btn(7314, 731, "订单审核", "erp:purchase-order:approve", 4),
+		btn(7315, 731, "订单导出", "erp:purchase-order:export", 5),
+		menu(732, 700, "采购入库", "purchase-in", "erp/purchase-in/index", "erp:purchase-in:query", "GoodsFilled", 12),
+		btn(7321, 732, "入库新增", "erp:purchase-in:create", 1),
+		btn(7322, 732, "入库修改", "erp:purchase-in:update", 2),
+		btn(7323, 732, "入库删除", "erp:purchase-in:delete", 3),
+		btn(7324, 732, "入库审核", "erp:purchase-in:approve", 4),
+		btn(7325, 732, "入库导出", "erp:purchase-in:export", 5),
+		menu(733, 700, "采购退货", "purchase-return", "erp/purchase-return/index", "erp:purchase-return:query", "RefreshLeft", 13),
+		btn(7331, 733, "退货新增", "erp:purchase-return:create", 1),
+		btn(7332, 733, "退货修改", "erp:purchase-return:update", 2),
+		btn(7333, 733, "退货删除", "erp:purchase-return:delete", 3),
+		btn(7334, 733, "退货审核", "erp:purchase-return:approve", 4),
+		btn(7335, 733, "退货导出", "erp:purchase-return:export", 5),
+		// 销售三单（issue #92，spec §6/§7）：741 销售订单、742 销售出库、743 销售
+		// 退货（spec §7 号段；#91 采购 731–733 同构）。单据页按 query 菜单 +
+		// create/update/delete/approve/export 全套按钮（approve 为独立审核权限码，
+		// spec §4.1）。按钮 = 菜单ID×10+n，7411–7415/7421–7425/7431–7435 grep
+		// 去重确认未占用。
+		menu(741, 700, "销售订单", "sale-order", "erp/sale-order/index", "erp:sale-order:query", "Ticket", 11),
+		btn(7411, 741, "订单新增", "erp:sale-order:create", 1),
+		btn(7412, 741, "订单修改", "erp:sale-order:update", 2),
+		btn(7413, 741, "订单删除", "erp:sale-order:delete", 3),
+		btn(7414, 741, "订单审核", "erp:sale-order:approve", 4),
+		btn(7415, 741, "订单导出", "erp:sale-order:export", 5),
+		menu(742, 700, "销售出库", "sale-out", "erp/sale-out/index", "erp:sale-out:query", "Position", 12),
+		btn(7421, 742, "出库新增", "erp:sale-out:create", 1),
+		btn(7422, 742, "出库修改", "erp:sale-out:update", 2),
+		btn(7423, 742, "出库删除", "erp:sale-out:delete", 3),
+		btn(7424, 742, "出库审核", "erp:sale-out:approve", 4),
+		btn(7425, 742, "出库导出", "erp:sale-out:export", 5),
+		menu(743, 700, "销售退货", "sale-return", "erp/sale-return/index", "erp:sale-return:query", "RefreshLeft", 13),
+		btn(7431, 743, "退货新增", "erp:sale-return:create", 1),
+		btn(7432, 743, "退货修改", "erp:sale-return:update", 2),
+		btn(7433, 743, "退货删除", "erp:sale-return:delete", 3),
+		btn(7434, 743, "退货审核", "erp:sale-return:approve", 4),
+		btn(7435, 743, "退货导出", "erp:sale-return:export", 5),
+		// 财务（issue #94，spec §3.6/§6/§7）：750 结算账户、751 付款单、752
+		// 收款单。收付款页按单据页 query 菜单 + create/update/delete/approve/
+		// export 全套按钮（approve 为独立审核权限码，spec §4.1）；账户页
+		// query 菜单 + create/update/delete（无导出，spec §6 未列）。按钮 =
+		// 菜单ID×10+n，7501–7503/7511–7515/7521–7525 grep 去重确认未占用。
+		menu(750, 700, "结算账户", "finance-account", "erp/finance-account/index", "erp:finance-account:query", "Wallet", 14),
+		btn(7501, 750, "账户新增", "erp:finance-account:create", 1),
+		btn(7502, 750, "账户修改", "erp:finance-account:update", 2),
+		btn(7503, 750, "账户删除", "erp:finance-account:delete", 3),
+		menu(751, 700, "付款单", "finance-payment", "erp/finance-payment/index", "erp:finance-payment:query", "Money", 15),
+		btn(7511, 751, "付款新增", "erp:finance-payment:create", 1),
+		btn(7512, 751, "付款修改", "erp:finance-payment:update", 2),
+		btn(7513, 751, "付款删除", "erp:finance-payment:delete", 3),
+		btn(7514, 751, "付款审核", "erp:finance-payment:approve", 4),
+		btn(7515, 751, "付款导出", "erp:finance-payment:export", 5),
+		menu(752, 700, "收款单", "finance-receipt", "erp/finance-receipt/index", "erp:finance-receipt:query", "Coin", 16),
+		btn(7521, 752, "收款新增", "erp:finance-receipt:create", 1),
+		btn(7522, 752, "收款修改", "erp:finance-receipt:update", 2),
+		btn(7523, 752, "收款删除", "erp:finance-receipt:delete", 3),
+		btn(7524, 752, "收款审核", "erp:finance-receipt:approve", 4),
+		btn(7525, 752, "收款导出", "erp:finance-receipt:export", 5),
+		// 库存调拨/盘点（issue #93，spec §6/§7）：725 库存调拨（DB）、726 库存
+		// 盘点（PD）（spec §7 号段）。单据页按 query 菜单 + create/update/delete/
+		// approve/export 全套按钮（approve 为独立审核权限码，spec §4.1）。
+		// 按钮 = 菜单ID×10+n，7251–7255/7261–7265 grep 去重确认未占用。
+		menu(725, 700, "库存调拨", "stock-move", "erp/stock-move/index", "erp:stock-move:query", "Switch", 11),
+		btn(7251, 725, "调拨新增", "erp:stock-move:create", 1),
+		btn(7252, 725, "调拨修改", "erp:stock-move:update", 2),
+		btn(7253, 725, "调拨删除", "erp:stock-move:delete", 3),
+		btn(7254, 725, "调拨审核", "erp:stock-move:approve", 4),
+		btn(7255, 725, "调拨导出", "erp:stock-move:export", 5),
+		menu(726, 700, "库存盘点", "stock-check", "erp/stock-check/index", "erp:stock-check:query", "Finished", 12),
+		btn(7261, 726, "盘点新增", "erp:stock-check:create", 1),
+		btn(7262, 726, "盘点修改", "erp:stock-check:update", 2),
+		btn(7263, 726, "盘点删除", "erp:stock-check:delete", 3),
+		btn(7264, 726, "盘点审核", "erp:stock-check:approve", 4),
+		btn(7265, 726, "盘点导出", "erp:stock-check:export", 5),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
@@ -910,6 +1067,102 @@ func seedExpenseCategoryDict(db *gorm.DB) error {
 		}
 		if err := tenant.Skip(db).Create(&row).Error; err != nil {
 			return fmt.Errorf("seed expense category dict data: %w", err)
+		}
+	}
+	return nil
+}
+
+// erpDictEntry 是 ERP 字典项描述（类型 + 项列表）。
+type erpDictEntry struct {
+	Type   string
+	Name   string
+	Remark string
+	Items  []erpDictItem
+}
+
+type erpDictItem struct {
+	Value string
+	Label string
+}
+
+// seedErpDicts 写入 ERP 字典（issue #90，docs/erp-mvp-spec.md §7：审核状态 +
+// 其它入库/出库类型），按字典类型与字典项逐行幂等（与 seedExpenseCategoryDict
+// 同策略：既有库升级补齐缺失项，管理员改过的不覆盖）。
+//
+// 取值来源（终审关注）：
+//   - erp_audit_status：对齐芋道字典（10 未审核 / 20 已审核，见芋道
+//     ruoyi-vue-pro sql/mysql 的 system_dict_data #323/#324）；
+//   - erp_stock_in_type / erp_stock_out_type：芋道 master 已把 ERP 杂项出入库
+//     重构为 MES（权威 SQL 中不再有 erp_stock_in_type），检索不可靠，按任务
+//     给定的合理中文枚举落地（数值风格对齐芋道 10/20 步进）：
+//     入库 采购/退货/借入/归还/赠品/其它；出库 报损/领用/借出/其它。
+func seedErpDicts(db *gorm.DB) error {
+	entries := []erpDictEntry{
+		{
+			Type: "erp_audit_status", Name: "ERP 单据审核状态",
+			Remark: "ERP 十二类单据共用（spec §4.1，对齐芋道 erp_audit_status）",
+			Items: []erpDictItem{
+				{Value: "10", Label: "未审核"},
+				{Value: "20", Label: "已审核"},
+			},
+		},
+		{
+			Type: "erp_stock_in_type", Name: "ERP 其它入库类型",
+			Remark: "其它入库单类型（issue #90，对齐芋道数值风格；芋道 master 无权威 SQL，枚举经终审确认）",
+			Items: []erpDictItem{
+				{Value: "10", Label: "采购"},
+				{Value: "20", Label: "退货"},
+				{Value: "30", Label: "借入"},
+				{Value: "40", Label: "归还"},
+				{Value: "50", Label: "赠品"},
+				{Value: "99", Label: "其它"},
+			},
+		},
+		{
+			Type: "erp_stock_out_type", Name: "ERP 其它出库类型",
+			Remark: "其它出库单类型（issue #90，对齐芋道数值风格；芋道 master 无权威 SQL，枚举经终审确认）",
+			Items: []erpDictItem{
+				{Value: "10", Label: "报损"},
+				{Value: "20", Label: "领用"},
+				{Value: "30", Label: "借出"},
+				{Value: "99", Label: "其它"},
+			},
+		},
+	}
+	for _, entry := range entries {
+		var typ sysmodel.DictType
+		err := tenant.Skip(db).Where("`type` = ?", entry.Type).First(&typ).Error
+		switch {
+		case err == nil:
+			// 已存在，保持管理员的修改。
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			row := sysmodel.DictType{
+				TenantID: 1, Name: entry.Name, Type: entry.Type,
+				Status: sysmodel.StatusEnable, Remark: entry.Remark,
+			}
+			if err := tenant.Skip(db).Create(&row).Error; err != nil {
+				return fmt.Errorf("seed erp dict type %s: %w", entry.Type, err)
+			}
+		default:
+			return fmt.Errorf("seed erp dict type %s: %w", entry.Type, err)
+		}
+		for i, item := range entry.Items {
+			var count int64
+			if err := tenant.Skip(db).Model(&sysmodel.DictData{}).
+				Where("`dict_type` = ? AND `value` = ?", entry.Type, item.Value).
+				Count(&count).Error; err != nil {
+				return fmt.Errorf("seed erp dict data %s: %w", entry.Type, err)
+			}
+			if count > 0 {
+				continue
+			}
+			row := sysmodel.DictData{
+				TenantID: 1, DictType: entry.Type, Label: item.Label, Value: item.Value,
+				Sort: i + 1, Status: sysmodel.StatusEnable,
+			}
+			if err := tenant.Skip(db).Create(&row).Error; err != nil {
+				return fmt.Errorf("seed erp dict data %s: %w", entry.Type, err)
+			}
 		}
 	}
 	return nil

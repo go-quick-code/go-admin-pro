@@ -130,4 +130,60 @@ var TenantTables = []string{
 	// 插件隔离，跨租户业务 ID 一律 404；匹配缓存按租户快照构建
 	//（system/service sensitive_word.go），CRUD 后失效。
 	"system_sensitive_word",
+
+	// ERP 主数据（issue #88，迁移 00029，docs/erp-mvp-spec.md §3.1/§4.10）：
+	// 六表一次建齐（分类/单位/产品 + 仓库/客户/供应商先建后用），全量租户
+	// 隔离（跨租户业务 ID 一律 404）；owner_user_id/owner_dept_id 承载数据
+	// 范围谓词（owner = 创建人，owner 恒有值，spec §4.10）。后续票的单据表
+	// 落地迁移时把表名追加到这里并补租户隔离用例。
+	"erp_product_category",
+	"erp_product_unit",
+	"erp_product",
+	"erp_warehouse",
+	"erp_customer",
+	"erp_supplier",
+	// 库存核心与其它入库/出库单（issue #90，迁移 00030，spec §3.2/§3.5/§3.7）：
+	// 库存账（余额/流水 append-only）、序列表（单号按租户独立发放）、杂项
+	// 出入库单据两主两明，全量租户隔离（跨租户业务 ID 一律 404）；#91+ 的
+	// 单据表落地迁移时同样追加到这里。
+	"erp_stock",
+	"erp_stock_record",
+	"erp_sequence",
+	"erp_stock_in",
+	"erp_stock_in_item",
+	"erp_stock_out",
+	"erp_stock_out_item",
+	// 采购三单（issue #91，迁移 00031，spec §3.3/§4.4）：采购订单/入库/退货
+	// 三主三明，全量租户隔离（跨租户业务 ID 一律 404）；占用校验与进度回写
+	// 的聚合查询同样经租户插件限定。#92+ 的单据表落地迁移时同样追加到这里。
+	"erp_purchase_order",
+	"erp_purchase_order_item",
+	"erp_purchase_in",
+	"erp_purchase_in_item",
+	"erp_purchase_return",
+	"erp_purchase_return_item",
+	// 销售三单（issue #92，迁移 00032，spec §3.4/§4.5）：销售订单/出库/退货
+	// 三主三明，全量租户隔离（跨租户业务 ID 一律 404）；占用统计的跨表聚合
+	// SQL 用显式租户参数（与库存入账原语同口径）。
+	"erp_sale_order",
+	"erp_sale_order_items",
+	"erp_sale_out",
+	"erp_sale_out_items",
+	"erp_sale_return",
+	"erp_sale_return_items",
+	// 财务域（issue #94，迁移 00034，spec §3.6/§4.7）：结算账户 + 收款/付款
+	// 两主两明，全量租户隔离（跨租户业务 ID 一律 404）；账户余额列按租户内
+	// 已审核收付款实时汇总，默认账户唯一互斥按租户生效。
+	"erp_finance_account",
+	"erp_finance_receipt",
+	"erp_finance_receipt_items",
+	"erp_finance_payment",
+	"erp_finance_payment_items",
+	// 库存调拨与盘点（issue #93，迁移 00033，spec §3.5/§4.6）：调拨/盘点两主
+	// 两明，全量租户隔离（跨租户业务 ID 一律 404）；库存入账原语与流水查询
+	// 走显式租户参数（与 00030 同口径）。
+	"erp_stock_move",
+	"erp_stock_move_item",
+	"erp_stock_check",
+	"erp_stock_check_item",
 }
