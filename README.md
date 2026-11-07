@@ -94,7 +94,7 @@ go-admin-pro
 │       ├── database/           # GORM 连接、迁移校验 + 多租户/审计插件
 │       ├── model/              # 实体底座 BaseEntity（时间戳、软删除、creator/updater）
 │       ├── tenant/             # 租户上下文与 Skip
-│       ├── jwt/ authn/         # 令牌与登录主体
+│       ├── jwt/ authn/         # 令牌、登录主体与 Bearer 提取
 │       ├── middleware/         # CORS、日志、Recovery
 │       ├── logger/             # 全局 slog 装配（级别/格式）
 │       ├── excel/              # Excel 导入导出与模板

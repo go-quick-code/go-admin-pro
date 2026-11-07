@@ -48,8 +48,11 @@ func (r *Repository) FindTenantPackageByID(ctx context.Context, id int64) (*mode
 	return &pkg, nil
 }
 
+// CountTenantPackageByName 统计同名套餐数（PR #86 审查意见：必须 Unscoped
+// 计入软删行）——唯一键 uk_system_tenant_package_name 含软删行，重名校验若只
+// 数活行，复用软删名会绕过 409 并在 Create 时撞 DB 唯一键，返回未映射的 500。
 func (r *Repository) CountTenantPackageByName(ctx context.Context, name string, excludeID int64) (int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.TenantPackage{}).Where("name = ?", name)
+	q := r.db.WithContext(ctx).Unscoped().Model(&model.TenantPackage{}).Where("name = ?", name)
 	if excludeID > 0 {
 		q = q.Where("id <> ?", excludeID)
 	}

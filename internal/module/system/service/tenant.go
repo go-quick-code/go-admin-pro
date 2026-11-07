@@ -144,10 +144,15 @@ func (s *Service) UpdateTenant(ctx context.Context, req *dto.TenantUpdateReq) er
 	if t.ID == 1 && req.Status == model.StatusDisable {
 		return xerr.Business(1701, "内置租户不能被禁用")
 	}
-	if err := s.validateTenantPackageForAssign(ctx, req.PackageID, t.ID); err != nil {
-		return err
-	}
 	packageChanged := t.PackageID != req.PackageID
+	// 套餐可绑定校验只在「真的换了套餐」时执行（PR #86 审查意见）：未改套餐
+	// 的编辑原样回传 packageId，不做停用校验——否则套餐停用后，所有绑定该
+	// 套餐的租户编辑入口会被 400 锁死；改绑到停用/不存在的套餐仍然报错。
+	if packageChanged {
+		if err := s.validateTenantPackageForAssign(ctx, req.PackageID, t.ID); err != nil {
+			return err
+		}
+	}
 	t.Name = req.Name
 	t.ContactName = req.ContactName
 	t.ContactMobile = req.ContactMobile

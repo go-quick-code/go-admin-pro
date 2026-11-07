@@ -47,7 +47,7 @@ func New(svc *service.Service, social *service.SocialService, sensitive *service
 // Auth 校验 JWT 并把登录信息写入请求上下文。
 func (h *Handler) Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := bearerToken(c)
+		token := authn.BearerToken(c.GetHeader("Authorization"))
 		if token == "" {
 			response.Abort(c, xerr.Unauthorized(""))
 			return
@@ -182,18 +182,6 @@ func (h *Handler) OperateLog() gin.HandlerFunc {
 		}
 		h.svc.RecordOperateLog(ctx, log)
 	}
-}
-
-func bearerToken(c *gin.Context) string {
-	header := c.GetHeader("Authorization")
-	if header == "" {
-		return ""
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
-		return strings.TrimSpace(parts[1])
-	}
-	return strings.TrimSpace(header)
 }
 
 func maskedParams(body []byte, query string) string {

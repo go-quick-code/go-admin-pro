@@ -111,7 +111,7 @@ func userRateKey(tenantID, userID int64) string {
 func (h *PushHandler) authTicket(c *gin.Context) (*push.TicketIdentity, bool) {
 	// 第二身份（可选）：带 Bearer 时必须与票据绑定一致。
 	var wantTenant, wantUser int64
-	if token := bearerToken(c); token != "" {
+	if token := authn.BearerToken(c.GetHeader("Authorization")); token != "" {
 		if h.resolvePrincipal == nil {
 			response.Fail(c, xerr.Unauthorized("推送票据无效"))
 			return nil, false
@@ -278,18 +278,4 @@ func (h *PushHandler) WS(c *gin.Context) {
 			return
 		}
 	}
-}
-
-// bearerToken 解析 Authorization 头中的 Bearer token（与 system 中间件同构，
-// 保持模块自包含）。
-func bearerToken(c *gin.Context) string {
-	header := c.GetHeader("Authorization")
-	if header == "" {
-		return ""
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
-		return strings.TrimSpace(parts[1])
-	}
-	return strings.TrimSpace(header)
 }
