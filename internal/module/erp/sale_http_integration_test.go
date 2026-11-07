@@ -336,6 +336,77 @@ func TestIntegrationSaleStockLifecycle(t *testing.T) {
 	}
 }
 
+// TestIntegrationSaleApproveRechecksLink 审核子单时必须复核挂单仍为已审核
+// （spec §4.5，镜像采购 approvePurchaseIn/approvePurchaseReturn 的
+// lockApprovedOrder/lockApprovedIn）：
+//   - 审核订单 → 建出库（未审核）→ 反审核订单（禁令只看已审核挂单，允许）→
+//     审核出库必须 409，且不落库存/不回写进度；
+//   - 订单恢复已审核 → 出库审核成功；建退货（未审核）→ 反审核出库（无已审核
+//     退货，允许）→ 审核退货必须 409。
+func TestIntegrationSaleApproveRechecksLink(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID, customerID := setupSaleEnv(t, env, token, "复核")
+	padSaleStock(t, env, token, warehouseID, productID, "10")
+
+	order := createSaleOrderDoc(t, env, token, map[string]any{
+		"customerId": customerID,
+		"orderTime":  env.Date() + " 09:00:00",
+		"items":      []map[string]any{saleItemJSON(productID, "10", "3.00")},
+	})
+	orderID := int64(order["id"].(float64))
+	mustApproveSale(t, env, token, "sale-order", orderID, 20)
+
+	out := createSaleOutDoc(t, env, token, map[string]any{
+		"customerId": customerID, "orderId": orderID, "warehouseId": warehouseID,
+		"outTime": env.Date() + " 10:00:00",
+		"items":   []map[string]any{saleItemJSON(productID, "5", "3.00")},
+	})
+	outID := int64(out["id"].(float64))
+
+	// 未审核出库不触发反审核禁令：订单可回到未审核。
+	mustApproveSale(t, env, token, "sale-order", orderID, 10)
+
+	// 关键断言：出库审核先复核挂单订单，父单已未审核 → 409；库存不落账、
+	// 进度不回写（检查发生在乐观认领与入账之前）。
+	status, api := approveSaleDoc(t, env, token, "sale-out", outID, 20)
+	if status != http.StatusConflict {
+		t.Fatalf("挂未审核订单审核出库：HTTP %d，期望 409（msg=%q）", status, api.Msg)
+	}
+	if !strings.Contains(api.Msg, "销售订单不存在或未审核") {
+		t.Fatalf("出库审核复核文案不符：%q", api.Msg)
+	}
+	if got := getStockCount(t, env, token, productID, warehouseID); got != "10.000" {
+		t.Fatalf("复核失败不应落库存：库存 = %s，期望 10.000", got)
+	}
+	if progress := orderItemProgress(t, env, token, orderID, productID); fmt.Sprint(progress["outCount"]) != "0.000" {
+		t.Fatalf("复核失败不应回写进度：outCount = %v，期望 0.000", progress["outCount"])
+	}
+
+	// 订单恢复已审核后出库可正常审核；再建退货并反审核出库（无已审核退货）。
+	mustApproveSale(t, env, token, "sale-order", orderID, 20)
+	mustApproveSale(t, env, token, "sale-out", outID, 20)
+	ret := createSaleReturnDoc(t, env, token, map[string]any{
+		"customerId": customerID, "outId": outID,
+		"returnTime": env.Date() + " 11:00:00",
+		"items":      []map[string]any{saleItemJSON(productID, "2", "3.00")},
+	})
+	retID := int64(ret["id"].(float64))
+	mustApproveSale(t, env, token, "sale-out", outID, 10)
+
+	// 关键断言：退货审核先复核挂单出库，出库已未审核 → 409；库存不因退货增加。
+	status, api = approveSaleDoc(t, env, token, "sale-return", retID, 20)
+	if status != http.StatusConflict {
+		t.Fatalf("挂未审核出库审核退货：HTTP %d，期望 409（msg=%q）", status, api.Msg)
+	}
+	if !strings.Contains(api.Msg, "销售出库单不存在或未审核") {
+		t.Fatalf("退货审核复核文案不符：%q", api.Msg)
+	}
+	if got := getStockCount(t, env, token, productID, warehouseID); got != "10.000" {
+		t.Fatalf("复核失败不应回库存：库存 = %s，期望 10.000（出库反审核已回补）", got)
+	}
+}
+
 // TestIntegrationSaleOccupancy 占用校验（spec §4.5，镜像采购 §4.4）：未审核出库/
 // 退货都占用；超量 409；删除未审核单释放占用。
 func TestIntegrationSaleOccupancy(t *testing.T) {

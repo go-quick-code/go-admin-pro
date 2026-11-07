@@ -346,9 +346,11 @@ func (s *Service) UpdateSaleReturnStatus(ctx context.Context, req *dto.SaleDocUp
 	return s.unapproveSaleReturn(ctx, row)
 }
 
-// approveSaleReturn 审核落账：事务内先乐观认领状态（防并发双重审核）→ 重读
-// 明细 → 逐行经唯一入账入口入账（biz_type=sale_return，正流水回库存）→ 重算
-// 订单进度（return_count 只计已审核，spec §4.5）。
+// approveSaleReturn 审核落账：事务内先锁挂单出库并复核仍为已审核（创建后退货
+// 挂单被反审核则 409，堵「审核父单→建子单→反审核父单→审核子单」窗口）→ 乐观
+// 认领状态（防并发双重审核）→ 重读明细 → 逐行经唯一入账入口入账
+// （biz_type=sale_return，正流水回库存）→ 重算订单进度（return_count 只计
+// 已审核，spec §4.5；镜像采购 approvePurchaseReturn 的 lockApprovedIn）。
 func (s *Service) approveSaleReturn(ctx context.Context, row *model.SaleReturn) error {
 	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.WarehouseID})
 	if err != nil {
@@ -356,6 +358,13 @@ func (s *Service) approveSaleReturn(ctx context.Context, row *model.SaleReturn) 
 	}
 	warehouseName := warehouseNames[row.WarehouseID]
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		out, err := tx.FindSaleOutByIDForUpdate(ctx, row.OutID)
+		if err != nil {
+			return err
+		}
+		if out == nil || out.Status != model.DocStatusApproved {
+			return xerr.Conflict("销售出库单不存在或未审核")
+		}
 		claimed, err := tx.UpdateSaleReturnStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
 		if err != nil {
 			return err
