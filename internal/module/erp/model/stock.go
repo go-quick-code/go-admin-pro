@@ -36,6 +36,16 @@ const (
 	StockRecordBizStockOut = "stock_out"
 	// StockRecordBizStockOutCancel 其它出库单反审核（反向流水）。
 	StockRecordBizStockOutCancel = "stock_out_CANCEL"
+	// StockRecordBizStockMove 库存调拨（issue #93，spec §4.6）：审核时同一事务内
+	// 出仓负数、入仓正数两笔流水同额成对（同一 biz_type，方向由 count 正负标记）。
+	StockRecordBizStockMove = "stock_move"
+	// StockRecordBizStockMoveCancel 库存调拨反审核（各生成反向流水）。
+	StockRecordBizStockMoveCancel = "stock_move_CANCEL"
+	// StockRecordBizStockCheck 盘点差异调整（issue #93，spec §4.6）：差正盘盈入、
+	// 差负盘亏出，同一 biz_type 以 count 正负标记方向。
+	StockRecordBizStockCheck = "stock_check"
+	// StockRecordBizStockCheckCancel 盘点反审核（反向流水）。
+	StockRecordBizStockCheckCancel = "stock_check_CANCEL"
 )
 
 // StockRecord 是出入库流水（append-only：业务代码只插入，不更新不删除）。
