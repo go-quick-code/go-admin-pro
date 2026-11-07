@@ -547,10 +547,11 @@ func seedMenus(db *gorm.DB) error {
 		btn(6031, 603, "日志重发", "message:log:resend", 1),
 		btn(6032, 603, "日志删除", "message:log:delete", 2),
 
-		// ERP（issue #88，docs/erp-mvp-spec.md §6/§7）：700 段（协调台账分配，
-		// grep 去重确认 700/710–712/7101–7124 未被占用）。主数据三页起步
-		//（分类/单位/产品），后续票追加 701 首页统计、720 仓库/721–722 库存、
-		// 723–726 其它出入库/调拨/盘点、730 供应商/731–733 采购、740 客户/
+		// ERP（issue #88/#89，docs/erp-mvp-spec.md §6/§7）：700 段（协调台账分配）。
+		// #88：700 dir、710–712（分类/单位/产品）+ 按钮 7101–7124；
+		// #89：720 仓库 / 730 供应商 / 740 客户 + 按钮 7201–7204/7301–7304/
+		// 7401–7404（菜单ID×10+n，grep 去重确认未占用）；后续票追加 701 首页
+		// 统计、721–722 库存、723–726 其它出入库/调拨/盘点、731–733 采购、
 		// 741–743 销售、750 结算账户/751–752 收付款；按钮 = 菜单ID×10+n
 		//（query/create/update/delete/export）。
 		// 财务与库存敏感：内置普通角色（role id=2）默认不授予任何 ERP 菜单
@@ -571,6 +572,23 @@ func seedMenus(db *gorm.DB) error {
 		btn(7122, 712, "产品修改", "erp:product:update", 2),
 		btn(7123, 712, "产品删除", "erp:product:delete", 3),
 		btn(7124, 712, "产品导出", "erp:product:export", 4),
+		// 仓库/供应商/客户主数据（issue #89，spec §3.1/§7）：仓库管理员/采购员/
+		// 销售员维护；权限码 erp:warehouse:* / erp:supplier:* / erp:customer:*。
+		menu(720, 700, "仓库管理", "warehouse", "erp/warehouse/index", "erp:warehouse:query", "House", 4),
+		btn(7201, 720, "仓库新增", "erp:warehouse:create", 1),
+		btn(7202, 720, "仓库修改", "erp:warehouse:update", 2),
+		btn(7203, 720, "仓库删除", "erp:warehouse:delete", 3),
+		btn(7204, 720, "仓库导出", "erp:warehouse:export", 4),
+		menu(730, 700, "供应商管理", "supplier", "erp/supplier/index", "erp:supplier:query", "Shop", 5),
+		btn(7301, 730, "供应商新增", "erp:supplier:create", 1),
+		btn(7302, 730, "供应商修改", "erp:supplier:update", 2),
+		btn(7303, 730, "供应商删除", "erp:supplier:delete", 3),
+		btn(7304, 730, "供应商导出", "erp:supplier:export", 4),
+		menu(740, 700, "客户管理", "customer", "erp/customer/index", "erp:customer:query", "User", 6),
+		btn(7401, 740, "客户新增", "erp:customer:create", 1),
+		btn(7402, 740, "客户修改", "erp:customer:update", 2),
+		btn(7403, 740, "客户删除", "erp:customer:delete", 3),
+		btn(7404, 740, "客户导出", "erp:customer:export", 4),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。

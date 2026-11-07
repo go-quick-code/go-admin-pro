@@ -68,3 +68,66 @@ export function exportProductUnits(params?: Record<string, any>) {
 export function exportProducts(params?: Record<string, any>) {
   return downloadExcel('/erp/product/export-excel', params)
 }
+
+// ---------- ERP 仓库（issue #89，spec §3.1：address/principal 纯展示，status 0 启用/1 停用） ----------
+export function pageWarehouses(params: any) {
+  return request.get('/erp/warehouse/page', { params }) as Promise<any>
+}
+export function getWarehouse(id: number) {
+  return request.get(`/erp/warehouse/${id}`) as Promise<any>
+}
+export function createWarehouse(data: any) {
+  return request.post('/erp/warehouse', data) as Promise<any>
+}
+export function updateWarehouse(data: any) {
+  return request.put('/erp/warehouse', data) as Promise<any>
+}
+export function deleteWarehouse(id: number) {
+  return request.delete(`/erp/warehouse/${id}`) as Promise<any>
+}
+
+// ---------- ERP 客户（issue #89，spec §3.1：与 CRM 客户完全独立，ADR 0015） ----------
+// 税率以十进制字符串提交（如 "13.00"，两位小数，0–999.99），未提交保持 NULL。
+export function pageCustomers(params: any) {
+  return request.get('/erp/customer/page', { params }) as Promise<any>
+}
+export function getCustomer(id: number) {
+  return request.get(`/erp/customer/${id}`) as Promise<any>
+}
+export function createCustomer(data: any) {
+  return request.post('/erp/customer', data) as Promise<any>
+}
+export function updateCustomer(data: any) {
+  return request.put('/erp/customer', data) as Promise<any>
+}
+export function deleteCustomer(id: number) {
+  return request.delete(`/erp/customer/${id}`) as Promise<any>
+}
+
+// ---------- ERP 供应商（issue #89，spec §3.1：字段同 ERP 客户） ----------
+export function pageSuppliers(params: any) {
+  return request.get('/erp/supplier/page', { params }) as Promise<any>
+}
+export function getSupplier(id: number) {
+  return request.get(`/erp/supplier/${id}`) as Promise<any>
+}
+export function createSupplier(data: any) {
+  return request.post('/erp/supplier', data) as Promise<any>
+}
+export function updateSupplier(data: any) {
+  return request.put('/erp/supplier', data) as Promise<any>
+}
+export function deleteSupplier(id: number) {
+  return request.delete(`/erp/supplier/${id}`) as Promise<any>
+}
+
+// ---------- Excel 导出（issue #89，spec §4.11：仓库/客户/供应商） ----------
+export function exportWarehouses(params?: Record<string, any>) {
+  return downloadExcel('/erp/warehouse/export-excel', params)
+}
+export function exportCustomers(params?: Record<string, any>) {
+  return downloadExcel('/erp/customer/export-excel', params)
+}
+export function exportSuppliers(params?: Record<string, any>) {
+  return downloadExcel('/erp/supplier/export-excel', params)
+}

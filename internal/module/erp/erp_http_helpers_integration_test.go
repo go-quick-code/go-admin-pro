@@ -19,6 +19,10 @@ const (
 	erpCategoryMenuID = int64(710)
 	erpUnitMenuID     = int64(711)
 	erpProductMenuID  = int64(712)
+	// 仓库/供应商/客户（issue #89，菜单ID×10+n 按钮见 party_scope 测试）。
+	erpWarehouseMenuID = int64(720)
+	erpSupplierMenuID  = int64(730)
+	erpCustomerMenuID  = int64(740)
 )
 
 // mustOK 断言业务成功（HTTP 200 且 code 0）。
