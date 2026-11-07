@@ -2,8 +2,6 @@ package money
 
 import (
 	"fmt"
-	"math"
-	"math/bits"
 
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
 )
@@ -16,24 +14,17 @@ import (
 // 超出返回 ErrOutOfRange。数量的正负语义由调用方决定（负数量出现在
 // ERP 退货/反向流水场景），符号按代数规则处理。
 func (m Money) MulQty(q qty.Qty) (Money, error) {
-	hi, lo := bits.Mul64(uabs(m.cents), uabs(q.Milli()))
+	hi, lo, negative := mulAbs128(m.cents, q.Milli())
 	// 128 位无符号积 ÷ 1000：1000 < 2³²，按 32 位字做长除法（教科书算法），
 	// 余数 < 1000 供四舍五入。
 	qhi, qlo, rem := divRem1000(hi, lo)
 	if rem >= 500 {
-		// 128 位加一：qlo 进位到 qhi。
-		qlo++
-		if qlo == 0 {
-			qhi++
-		}
+		qhi, qlo = add128One(qhi, qlo)
 	}
 	// 结果超出 int64（必然同时超出 decimal(12,2)）或超出金额域时拒绝。
-	if qhi != 0 || qlo > math.MaxInt64 {
+	product, ok := uint128ToInt64(qhi, qlo, negative)
+	if !ok {
 		return Money{}, fmt.Errorf("%w: 单价 × 数量结果超出范围", ErrOutOfRange)
-	}
-	product := int64(qlo)
-	if (m.cents < 0) != (q.Milli() < 0) {
-		product = -product
 	}
 	return checked(product)
 }
