@@ -384,7 +384,7 @@ func (s *Service) unapprovePurchaseIn(ctx context.Context, row *model.PurchaseIn
 	if err != nil {
 		return err
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
 		if _, err := s.lockApprovedOrder(ctx, tx, row.OrderID); err != nil {
 			return err
 		}
@@ -401,6 +401,16 @@ func (s *Service) unapprovePurchaseIn(ctx context.Context, row *model.PurchaseIn
 		}
 		if claimed == 0 {
 			return xerr.Conflict("单据状态已变化，请刷新后重试")
+		}
+		// 财务反审核禁令（issue #94，spec §4.1/§4.7）：存在已审核付款单核销时
+		// 不可反审核；付款单反审核释放额度后可退。放在认领之后：与付款审核的
+		// 锁序一致（先目标单据行、后收付款行），防死锁。
+		paymentItems, err := tx.CountApprovedFinancePaymentItemsByBiz(ctx, model.FinanceBizPurchaseIn, row.ID)
+		if err != nil {
+			return err
+		}
+		if paymentItems > 0 {
+			return xerr.Conflict("入库单存在已审核付款单，不可反审核")
 		}
 		doc, err := tx.FindPurchaseInWithItems(ctx, row.ID)
 		if err != nil {
