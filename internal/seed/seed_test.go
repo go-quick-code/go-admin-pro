@@ -65,6 +65,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
 	assertRoleMenus(t, db, 2, []int64{512, 5121, 5297, 5236, 5123}, true, "普通角色")
 	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
+	// ERP 700 段同级菜单 sort 唯一（终审 P1：历史 725/731/741 等 11/12/13 重复
+	// 会让侧栏按 sort ASC,id ASC 交错；按 spec §1 分组序 1–22 连续编号）。
+	assertERPMenuSortUnique(t, db)
 	// 字典类型：sys_user_sex / sys_normal_disable / crm_product_unit /
 	// oa_expense_category（issue #54）+ ERP 三类（issue #90：审核状态、
 	// 其它入库类型、其它出库类型）。
@@ -230,6 +233,31 @@ func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, w
 		got := total > 0
 		if got != want {
 			t.Fatalf("%s菜单 %d 授予状态不符：期望 %v，实际 %v", label, menuID, want, got)
+		}
+	}
+}
+
+// assertERPMenuSortUnique 断言 ERP 顶层目录 700 下所有直接子菜单的 sort 唯一，
+// 且为按 spec §1 分组序的连续编号（1..N）；重复 sort 会让侧栏交错。
+func assertERPMenuSortUnique(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var menus []sysmodel.Menu
+	if err := tenant.Skip(db).Where("parent_id = ?", 700).Order("sort ASC, id ASC").Find(&menus).Error; err != nil {
+		t.Fatalf("查询 ERP 菜单: %v", err)
+	}
+	if len(menus) != 22 {
+		t.Fatalf("ERP 700 段应有 22 个同级菜单，实际 %d", len(menus))
+	}
+	seen := make(map[int]int64, len(menus))
+	for _, menu := range menus {
+		if prev, ok := seen[menu.Sort]; ok {
+			t.Fatalf("ERP 菜单 sort 重复：%d 同时属于菜单 %d 与 %d", menu.Sort, prev, menu.ID)
+		}
+		seen[menu.Sort] = menu.ID
+	}
+	for want := 1; want <= len(menus); want++ {
+		if _, ok := seen[want]; !ok {
+			t.Fatalf("ERP 菜单 sort 不连续：缺少 %d（实际 %v）", want, seen)
 		}
 	}
 }
