@@ -171,4 +171,12 @@ var TenantTables = []string{
 	"erp_sale_out_items",
 	"erp_sale_return",
 	"erp_sale_return_items",
+	// 财务域（issue #94，迁移 00034，spec §3.6/§4.7）：结算账户 + 收款/付款
+	// 两主两明，全量租户隔离（跨租户业务 ID 一律 404）；账户余额列按租户内
+	// 已审核收付款实时汇总，默认账户唯一互斥按租户生效。
+	"erp_finance_account",
+	"erp_finance_receipt",
+	"erp_finance_receipt_items",
+	"erp_finance_payment",
+	"erp_finance_payment_items",
 }
