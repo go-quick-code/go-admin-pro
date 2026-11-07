@@ -107,4 +107,27 @@ var TenantTables = []string{
 	"oa_announcement",
 	"oa_announcement_target",
 	"oa_announcement_read",
+
+	// 消息发送日志（issue #72，迁移 00024，spec §3.4/§4.3）：租户级
+	// append-only，租户只能看自己的日志，跨租户 ID 一律 404。
+	// 渠道/模板是平台级表，刻意不登记（系统级读取显式 tenant.Skip）。
+	"message_log",
+
+	// 社交账号绑定（issue #76，迁移 00025，spec §3.6/§4.4）：绑定关系按租户
+	// 隔离——不同租户可绑定同一 openid 的不同本地用户，跨租户绑定 ID 一律
+	// 404。system_social_client 是平台级表，刻意不登记。
+	"system_social_user",
+
+	// API 访问日志（issue #80，迁移 00026，spec §3.7/§4.6，ADR 0014）：租户级
+	// append-only，租户只能查/删自己的日志，跨租户业务 ID 一律 404。中间件
+	// 采集在请求上下文内（Auth 之后，插件可取到租户），异步落库在后台
+	// goroutine 无租户上下文，写入走 tenant.Skip + 行内显式 tenant_id；
+	// 保留期清理（cleanAccessLogs）同属系统级动作，显式 tenant.Skip。
+	"infra_api_log",
+
+	// 敏感词（issue #81，迁移 00027，spec §3.8/§4.7）：租户级词库，唯一键
+	// (tenant_id, word, deleted_at)，软删后同一词可重新添加。词库读写经租户
+	// 插件隔离，跨租户业务 ID 一律 404；匹配缓存按租户快照构建
+	//（system/service sensitive_word.go），CRUD 后失效。
+	"system_sensitive_word",
 }

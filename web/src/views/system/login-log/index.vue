@@ -38,6 +38,7 @@ const columns = [
   { prop: 'id', label: 'ID', width: 70 },
   { prop: 'username', label: '用户名', minWidth: 110 },
   { prop: 'loginIp', label: '登录 IP', minWidth: 130 },
+  { prop: 'loginLocation', label: '归属地', minWidth: 160 },
   { prop: 'result', label: '结果', width: 80, slot: true },
   { prop: 'message', label: '说明', minWidth: 140 },
   { prop: 'userAgent', label: 'User-Agent', minWidth: 240, slot: true },

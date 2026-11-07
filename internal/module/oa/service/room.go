@@ -485,6 +485,7 @@ func (s *Service) remindTenantRoomBookings(ctx context.Context, now time.Time) (
 		booking := &bookings[i]
 		room := roomByID[booking.RoomID]
 		claimed := false
+		var pending []notifyservice.Input
 		err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
 			affected, err := tx.MarkRoomBookingReminded(ctx, booking.ID, now)
 			if err != nil {
@@ -497,7 +498,8 @@ func (s *Service) remindTenantRoomBookings(ctx context.Context, now time.Time) (
 			if s.notify == nil {
 				return xerr.Internal(fmt.Errorf("会议提醒缺少通知网关装配"))
 			}
-			if err := s.notify.CreateInTx(ctx, tx.DB(), buildRoomReminderNotifies(booking, room, s.businessLocation())); err != nil {
+			pending = buildRoomReminderNotifies(booking, room, s.businessLocation())
+			if err := s.notify.CreateInTx(ctx, tx.DB(), pending); err != nil {
 				return err
 			}
 			claimed = true
@@ -508,6 +510,9 @@ func (s *Service) remindTenantRoomBookings(ctx context.Context, now time.Time) (
 		}
 		if claimed {
 			sent++
+			// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+			// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+			s.notify.PublishInputs(ctx, pending)
 		}
 	}
 	return sent, nil

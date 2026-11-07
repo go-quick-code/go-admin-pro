@@ -1,0 +1,895 @@
+//go:build integration
+
+// 实时推送 HTTP 集成测试（issue #78 SSE + issue #79 WebSocket，spec §4.5 / ADR 0013）。
+//
+// 约定的 seam：
+//  1. 票据换发 POST /notify/push/ticket（真实 router + Auth）：票据形状、
+//     一次性/过期/跨租户 401、transports 优先级。
+//  2. SSE 流 GET /notify/push/sse?ticket=（真实 router，凭票据公开）：
+//     响应头、首字节、事件到达（确定性等待）、心跳、断开清理。
+//  3. WS 流 GET /notify/push/ws?ticket=（issue #79）：握手、事件送达、
+//     认证矩阵、跨租户隔离、心跳（GAP_PUSH_HEARTBEAT 压缩）、断开清理。
+//  4. 发布链路 env.App.Notify.Create（与生产装配同一 service 实例）：
+//     通知创建 1 秒内在线用户收到；写入失败（回滚）不产生事件。
+//
+// 捕捉不到 hub 的多连接扇出与慢消费者丢弃计数——那在 internal/pkg/push 单测里；
+// WS 特有路径（读丢弃/4KB 上限/升级预检）的细粒度断言在
+// internal/module/notify/api/push_ws_test.go（不依赖 MySQL）。
+//
+// 测试库走 GAP_TEST_DATABASE_DSN（协调约定用 go_admin_pro_test_p79 后缀）：
+//
+//	GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test_p79?charset=utf8mb4&parseTime=True&loc=Local' \
+//	  go test -tags=integration ./internal/module/notify/...
+package notify_test
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"github.com/go-quick-code/go-admin-pro/internal/module/notify/model"
+	"github.com/go-quick-code/go-admin-pro/internal/module/notify/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/push"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"github.com/go-quick-code/go-admin-pro/internal/testutil"
+)
+
+// pushTicket 是换票端点响应。
+type pushTicket struct {
+	Ticket     string   `json:"ticket"`
+	ExpiresIn  int      `json:"expiresIn"`
+	Transports []string `json:"transports"`
+}
+
+// issuePushTicket 用登录态换一张一次性推送票据。
+func issuePushTicket(tb testing.TB, env *testutil.IntegrationEnv, token string) pushTicket {
+	tb.Helper()
+	status, api := env.Request(tb, http.MethodPost, "/notify/push/ticket", token, nil)
+	mustCode0(tb, status, api, "POST /notify/push/ticket")
+	var t pushTicket
+	if err := json.Unmarshal(api.Data, &t); err != nil {
+		tb.Fatalf("解析换票响应: %v（data=%s）", err, string(api.Data))
+	}
+	return t
+}
+
+// openSSE 打开 SSE 流（凭票据；bearer 非空时做第二身份比对）。
+// 返回响应由调用方关闭。非 200 时响应体是 JSON 信封，bodyText 可读出。
+func openSSE(tb testing.TB, env *testutil.IntegrationEnv, ticket, bearer string) (*http.Response, string) {
+	tb.Helper()
+	u := env.APIPrefixURL("/notify/push/sse") + "?ticket=" + url.QueryEscape(ticket)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		tb.Fatalf("构造 SSE 请求: %v", err)
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := env.Server.Client().Do(req)
+	if err != nil {
+		tb.Fatalf("GET /notify/push/sse: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		buf := make([]byte, 512)
+		n, _ := resp.Body.Read(buf)
+		return resp, string(buf[:n])
+	}
+	return resp, ""
+}
+
+// sseStream 在后台逐行读取 SSE 响应体，行经 channel 交给测试做确定性等待。
+type sseStream struct {
+	lines chan string
+	done  chan struct{}
+}
+
+func streamSSE(tb testing.TB, resp *http.Response) *sseStream {
+	tb.Helper()
+	s := &sseStream{lines: make(chan string, 64), done: make(chan struct{})}
+	go func() {
+		// done 只由读 goroutine 关闭（流自然结束或 body 关闭触发），
+		// 不在 Cleanup 里重复 close（避免 panic: close of closed channel）。
+		defer close(s.done)
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			select {
+			case s.lines <- scanner.Text():
+			case <-s.done:
+				return
+			}
+		}
+	}()
+	tb.Cleanup(func() { resp.Body.Close() })
+	return s
+}
+
+// nextLine 等待下一行（within 内未到即失败）。
+func (s *sseStream) nextLine(tb testing.TB, what string, within time.Duration) string {
+	tb.Helper()
+	select {
+	case line := <-s.lines:
+		return line
+	case <-time.After(within):
+		tb.Fatalf("SSE 等待 %s 超时（%v）", what, within)
+	case <-s.done:
+		tb.Fatalf("SSE 等待 %s 时流已关闭", what)
+	}
+	return ""
+}
+
+// nextEvent 等待下一条 data 事件行（within 内未到即失败），跳过注释与空行。
+func (s *sseStream) nextEvent(tb testing.TB, what string, within time.Duration) string {
+	tb.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			tb.Fatalf("SSE 等待 %s 超时（%v）", what, within)
+		}
+		select {
+		case line := <-s.lines:
+			if strings.HasPrefix(line, "data: ") {
+				return strings.TrimPrefix(line, "data: ")
+			}
+		case <-time.After(remain):
+			tb.Fatalf("SSE 等待 %s 超时（%v）", what, within)
+		case <-s.done:
+			tb.Fatalf("SSE 等待 %s 时流已关闭", what)
+		}
+	}
+}
+
+// nextPrefixed 等待下一条以 prefix 开头的行（within 内未到即失败），
+// 跳过空行等其他行——SSE 每条输出后都有空行分隔。
+func (s *sseStream) nextPrefixed(tb testing.TB, what, prefix string, within time.Duration) string {
+	tb.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			tb.Fatalf("SSE 等待 %s 超时（%v）", what, within)
+		}
+		select {
+		case line := <-s.lines:
+			if strings.HasPrefix(line, prefix) {
+				return line
+			}
+		case <-time.After(remain):
+			tb.Fatalf("SSE 等待 %s 超时（%v）", what, within)
+		case <-s.done:
+			tb.Fatalf("SSE 等待 %s 时流已关闭", what)
+		}
+	}
+}
+
+// wantUnauthorized 断言 SSE 换流失败返回 HTTP 401（信封不泄露内部原因）。
+func wantUnauthorized(tb testing.TB, status int, body, what string) {
+	tb.Helper()
+	if status != http.StatusUnauthorized {
+		tb.Fatalf("%s: HTTP %d, want 401（body=%s）", what, status, body)
+	}
+}
+
+// ---------- WS 辅助（issue #79）----------
+
+// wsDialURL 拼 ws:// 握手地址（票据经 query 传递，ADR 0013）。
+func wsDialURL(env *testutil.IntegrationEnv, ticket string) string {
+	return "ws" + strings.TrimPrefix(env.APIPrefixURL("/notify/push/ws"), "http") +
+		"?ticket=" + url.QueryEscape(ticket)
+}
+
+// dialWS 凭票据经真实 router 建立 WS 连接，失败即 Fatal。opts 可为 nil
+// （观测服务端心跳时传带 OnPingReceived 的选项）。
+func dialWS(tb testing.TB, env *testutil.IntegrationEnv, ticket string, opts *websocket.DialOptions) *websocket.Conn {
+	tb.Helper()
+	if opts == nil {
+		opts = &websocket.DialOptions{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsDialURL(env, ticket), opts)
+	if err != nil {
+		tb.Fatalf("WS 握手: %v", err)
+	}
+	return conn
+}
+
+// dialWSStatus 尝试握手并只返回 HTTP 状态码（预期失败场景用）。
+func dialWSStatus(tb testing.TB, env *testutil.IntegrationEnv, ticket string) int {
+	tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, wsDialURL(env, ticket), nil)
+	if err == nil {
+		conn.CloseNow()
+		tb.Fatalf("应握手失败，实际成功")
+	}
+	if resp == nil {
+		tb.Fatalf("握手失败且无 HTTP 响应: %v", err)
+	}
+	return resp.StatusCode
+}
+
+// readWSEvent 等待下一条文本事件（within 内未到即失败）。
+func readWSEvent(tb testing.TB, conn *websocket.Conn, within time.Duration) string {
+	tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), within)
+	defer cancel()
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		tb.Fatalf("WS 读事件: %v", err)
+	}
+	return string(data)
+}
+
+// wsReader 在后台持续读取 WS 消息（等价浏览器的事件循环）：消息经 channel
+// 交给测试做确定性等待，同时保证客户端库始终在处理控制帧（自动 pong）。
+// 注意不能用带短超时的 ctx 直接 conn.Read 做静默断言——库约定任何方法出错
+// （含 ctx 超时）即关闭连接，会把好端端的连接杀掉。
+type wsReader struct {
+	msgs chan []byte
+	done chan struct{}
+}
+
+func readWS(tb testing.TB, conn *websocket.Conn) *wsReader {
+	tb.Helper()
+	s := &wsReader{msgs: make(chan []byte, 16), done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer close(s.done)
+		defer cancel()
+		for {
+			_, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			select {
+			case s.msgs <- data:
+			case <-s.done:
+				return
+			}
+		}
+	}()
+	tb.Cleanup(cancel)
+	return s
+}
+
+// next 等待下一条消息（within 内未到即失败）。
+func (s *wsReader) next(tb testing.TB, what string, within time.Duration) []byte {
+	tb.Helper()
+	select {
+	case data := <-s.msgs:
+		return data
+	case <-time.After(within):
+		tb.Fatalf("WS 等待 %s 超时（%v）", what, within)
+	case <-s.done:
+		tb.Fatalf("WS 等待 %s 时连接已关闭", what)
+	}
+	return nil
+}
+
+// silent 断言窗口内没有任何消息到达（跨租户隔离用），连接保持存活。
+func (s *wsReader) silent(tb testing.TB, what string, within time.Duration) {
+	tb.Helper()
+	select {
+	case data := <-s.msgs:
+		tb.Fatalf("%s: 收到 %s", what, data)
+	case <-time.After(within):
+	}
+}
+
+// TestIntegrationPushTicket_HTTP 覆盖票据形状：43 字符 base64url、TTL 秒数、
+// transports 按前端优先级列出 ws/sse（issue #79）。
+func TestIntegrationPushTicket_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	tk := issuePushTicket(t, env, token)
+	if len(tk.Ticket) != 43 {
+		t.Fatalf("ticket 长度 = %d, want 43（32 字节 base64url 无填充）", len(tk.Ticket))
+	}
+	if tk.ExpiresIn != 30 {
+		t.Fatalf("expiresIn = %d, want 30（spec §4.5.2 TTL 30 秒）", tk.ExpiresIn)
+	}
+	if len(tk.Transports) != 2 || tk.Transports[0] != "ws" || tk.Transports[1] != "sse" {
+		t.Fatalf("transports = %v, want [ws sse]", tk.Transports)
+	}
+}
+
+// TestIntegrationPushSSE_DeliversWithinSecond_HTTP 覆盖 SSE 主链路：
+// 响应头正确、首条注释行即达、通知创建 1 秒内在线用户收到、事件结构符合
+// spec §4.5.4。
+func TestIntegrationPushSSE_DeliversWithinSecond_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	if env.App.PushHub == nil {
+		t.Fatal("默认配置应启用推送（PushHub 为 nil）")
+	}
+	tk := issuePushTicket(t, env, token)
+	resp, body := openSSE(t, env, tk.Ticket, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("SSE 连接: HTTP %d body=%s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", cc)
+	}
+	stream := streamSSE(t, resp)
+	if line := stream.nextLine(t, "首条注释行", 2*time.Second); !strings.HasPrefix(line, ": ") {
+		t.Fatalf("首行 = %q, want 注释行（流建立即有字节）", line)
+	}
+
+	// 在线用户 1 秒内收到：与生产装配同一 service 实例创建通知。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	start := time.Now()
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: model.TypeBpmTodo, Title: "SSE 实时推送", Content: "合同审批待办",
+			BizType: "bpm_task", BizID: 42, Route: "/bpm/task", RouteParams: `{"taskId":42}`},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw := stream.nextEvent(t, "通知事件", time.Second)
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("事件到达耗时 %v, want <= 1s", elapsed)
+	}
+	var ev struct {
+		Type string `json:"type"`
+		Data struct {
+			Title       string `json:"title"`
+			Content     string `json:"content"`
+			Type        string `json:"type"`
+			BizType     string `json:"bizType"`
+			BizID       int64  `json:"bizId"`
+			Route       string `json:"route"`
+			RouteParams string `json:"routeParams"`
+		} `json:"data"`
+		Ts int64 `json:"ts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("解析事件 %q: %v", raw, err)
+	}
+	if ev.Type != "notification" {
+		t.Fatalf("type = %q, want notification", ev.Type)
+	}
+	if ev.Data.Title != "SSE 实时推送" || ev.Data.Type != model.TypeBpmTodo ||
+		ev.Data.BizType != "bpm_task" || ev.Data.BizID != 42 ||
+		ev.Data.Route != "/bpm/task" || ev.Data.RouteParams != `{"taskId":42}` {
+		t.Fatalf("data 不符: %+v", ev.Data)
+	}
+	if ev.Ts <= 0 {
+		t.Fatalf("ts = %d, want unix 秒", ev.Ts)
+	}
+}
+
+// TestIntegrationPushSSE_Heartbeat_HTTP 覆盖心跳注释行：默认 25s，测试用
+// GAP_PUSH_HEARTBEAT 压缩后确定性等待（心跳期间不结束连接）。
+func TestIntegrationPushSSE_Heartbeat_HTTP(t *testing.T) {
+	t.Setenv("GAP_PUSH_HEARTBEAT", "150ms")
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	tk := issuePushTicket(t, env, token)
+	resp, body := openSSE(t, env, tk.Ticket, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("SSE 连接: HTTP %d body=%s", resp.StatusCode, body)
+	}
+	stream := streamSSE(t, resp)
+	stream.nextLine(t, "首条注释行", 2*time.Second)
+	if line := stream.nextPrefixed(t, "心跳注释", ": ping", 2*time.Second); line == "" {
+		t.Fatal("心跳行不应为空")
+	}
+	// 心跳之后流仍可用：再等一次心跳确认连接未断。
+	if line := stream.nextPrefixed(t, "第二次心跳", ": ping", 2*time.Second); line == "" {
+		t.Fatal("第二次心跳不应为空")
+	}
+}
+
+// TestIntegrationPushTicketReplay401_HTTP 覆盖一次性：首连消费后重放 401。
+func TestIntegrationPushTicketReplay401_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	tk := issuePushTicket(t, env, token)
+
+	resp, body := openSSE(t, env, tk.Ticket, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("首连: HTTP %d body=%s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp2, body2 := openSSE(t, env, tk.Ticket, "")
+	defer resp2.Body.Close()
+	wantUnauthorized(t, resp2.StatusCode, body2, "重放票据")
+}
+
+// TestIntegrationPushTicketExpired401_HTTP 覆盖过期：TTL 压缩到 50ms，
+// 等待后换流 401。
+func TestIntegrationPushTicketExpired401_HTTP(t *testing.T) {
+	t.Setenv("GAP_PUSH_TICKET_TTL", "50ms")
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	tk := issuePushTicket(t, env, token)
+	time.Sleep(150 * time.Millisecond)
+
+	resp, body := openSSE(t, env, tk.Ticket, "")
+	defer resp.Body.Close()
+	wantUnauthorized(t, resp.StatusCode, body, "过期票据")
+}
+
+// TestIntegrationPushSSE_BearerMismatch401_HTTP 覆盖跨租户 401：带 Bearer 的
+// 客户端，票据与 Bearer 身份不一致（跨租户/跨用户）一律拒绝；一致则放行。
+func TestIntegrationPushSSE_BearerMismatch401_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	adminToken := env.Login(t, "admin", "123456")
+
+	// 建第二个租户并登录其管理员（默认 admin/123456）。
+	status, api := env.Request(t, http.MethodPost, "/system/tenant", adminToken, map[string]any{
+		"name": "推送隔离租户", "contactName": "联系人", "status": 0,
+	})
+	mustCode0(t, status, api, "创建租户")
+	tenant2Token := loginTenant(t, env, 2)
+
+	// 平台租户票据 + 租户 2 的 Bearer：跨租户使用 → 401。
+	tk := issuePushTicket(t, env, adminToken)
+	resp, body := openSSE(t, env, tk.Ticket, tenant2Token)
+	defer resp.Body.Close()
+	wantUnauthorized(t, resp.StatusCode, body, "票据与 Bearer 身份不一致")
+
+	// Bearer 与票据同人：放行。
+	tk2 := issuePushTicket(t, env, adminToken)
+	resp2, body2 := openSSE(t, env, tk2.Ticket, adminToken)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("Bearer 与票据同人: HTTP %d body=%s", resp2.StatusCode, body2)
+	}
+	resp2.Body.Close()
+}
+
+// loginTenant 以指定租户身份登录（新租户默认管理员 admin/123456）。
+func loginTenant(tb testing.TB, env *testutil.IntegrationEnv, tenantID int64) string {
+	tb.Helper()
+	status, api := env.Request(tb, http.MethodPost, "/system/auth/login", "", map[string]any{
+		"username": "admin",
+		"password": "123456",
+		"tenantId": tenantID,
+	})
+	if status != http.StatusOK || api.Code != 0 {
+		tb.Fatalf("租户 %d 管理员登录: HTTP %d code %d msg %q", tenantID, status, api.Code, api.Msg)
+	}
+	var data struct {
+		AccessToken string `json:"accessToken"`
+	}
+	if err := json.Unmarshal(api.Data, &data); err != nil {
+		tb.Fatalf("解析登录响应: %v", err)
+	}
+	return data.AccessToken
+}
+
+// TestIntegrationPushCrossTenantIsolation_HTTP 覆盖订阅隔离：跨租户票据
+// 不能订阅他人事件——租户 2 的连接收不到租户 1 的推送，反之亦然。
+func TestIntegrationPushCrossTenantIsolation_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	adminToken := env.Login(t, "admin", "123456")
+
+	status, api := env.Request(t, http.MethodPost, "/system/tenant", adminToken, map[string]any{
+		"name": "推送隔离租户B", "contactName": "联系人", "status": 0,
+	})
+	mustCode0(t, status, api, "创建租户")
+	tenant2Token := loginTenant(t, env, 2)
+
+	// 两条流各自建立。
+	resp1, body1 := openSSE(t, env, issuePushTicket(t, env, adminToken).Ticket, "")
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("租户 1 SSE: HTTP %d body=%s", resp1.StatusCode, body1)
+	}
+	stream1 := streamSSE(t, resp1)
+	resp2, body2 := openSSE(t, env, issuePushTicket(t, env, tenant2Token).Ticket, "")
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("租户 2 SSE: HTTP %d body=%s", resp2.StatusCode, body2)
+	}
+	stream2 := streamSSE(t, resp2)
+	stream1.nextLine(t, "租户1首条注释", 2*time.Second)
+	stream2.nextLine(t, "租户2首条注释", 2*time.Second)
+
+	// 租户 2 管理员的用户 ID（bootstrapTenant 自动创建）。
+	var tenant2UserID int64
+	if err := env.DB.Raw("SELECT id FROM system_user WHERE tenant_id = 2 AND username = 'admin'").Scan(&tenant2UserID).Error; err != nil || tenant2UserID == 0 {
+		t.Fatalf("查询租户 2 管理员: err=%v id=%d", err, tenant2UserID)
+	}
+
+	// 只推租户 1 的 admin：租户 2 的流必须静默。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: model.TypeAnnouncement, Title: "租户 1 专属"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw := stream1.nextEvent(t, "租户 1 事件", time.Second)
+	var ev struct {
+		Data struct {
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("解析事件: %v", err)
+	}
+	if ev.Data.Title != "租户 1 专属" {
+		t.Fatalf("租户 1 收到 %q, want 租户 1 专属", ev.Data.Title)
+	}
+	select {
+	case line := <-stream2.lines:
+		if strings.HasPrefix(line, "data: ") {
+			t.Fatalf("租户 2 不应收到租户 1 的事件: %s", line)
+		}
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// 推租户 2 管理员：只有租户 2 的流收到。
+	if err := env.App.Notify.Create(tenant.WithTenantID(t.Context(), 2), []service.Input{
+		{UserID: tenant2UserID, Type: model.TypeAnnouncement, Title: "租户 2 专属"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw2 := stream2.nextEvent(t, "租户 2 事件", time.Second)
+	var ev2 struct {
+		Data struct {
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw2), &ev2); err != nil {
+		t.Fatalf("解析事件: %v", err)
+	}
+	if ev2.Data.Title != "租户 2 专属" {
+		t.Fatalf("租户 2 收到 %q, want 租户 2 专属", ev2.Data.Title)
+	}
+	select {
+	case line := <-stream1.lines:
+		if strings.HasPrefix(line, "data: ") {
+			t.Fatalf("租户 1 不应收到租户 2 的事件: %s", line)
+		}
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestIntegrationPushNoEventOnFailedCreate_HTTP 覆盖事务语义：写入失败
+// （校验失败整批不写）不产生任何推送事件——回滚不推送。
+func TestIntegrationPushNoEventOnFailedCreate_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	tk := issuePushTicket(t, env, token)
+
+	resp, body := openSSE(t, env, tk.Ticket, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("SSE 连接: HTTP %d body=%s", resp.StatusCode, body)
+	}
+	stream := streamSSE(t, resp)
+	stream.nextLine(t, "首条注释行", 2*time.Second)
+
+	// 非法类型 → 整批不写；无事务提交即无发布。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: "no_such_type", Title: "不应送达"},
+	}); err == nil {
+		t.Fatal("非法类型应报错")
+	}
+	select {
+	case line := <-stream.lines:
+		if strings.HasPrefix(line, "data: ") {
+			t.Fatalf("写入失败不应推送事件: %s", line)
+		}
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestIntegrationPushDisconnectCleansUp_HTTP 覆盖断开清理：客户端断开后
+// hub 订阅归零，连接数不泄漏。
+func TestIntegrationPushDisconnectCleansUp_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	tk := issuePushTicket(t, env, token)
+
+	resp, body := openSSE(t, env, tk.Ticket, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("SSE 连接: HTTP %d body=%s", resp.StatusCode, body)
+	}
+	stream := streamSSE(t, resp)
+	stream.nextLine(t, "首条注释行", 2*time.Second)
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
+		t.Fatalf("在线订阅数 = %d, want 1", got)
+	}
+
+	resp.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if env.App.PushHub.Subscribers(tenant.DefaultID, 1) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.App.PushHub.Subscribers(tenant.DefaultID, 1))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestIntegrationPushWS_DeliversWithinSecond_HTTP 覆盖 WS 主链路（issue #79
+// 验收第 1 条，真实 router + Auth + 生产装配）：凭票据握手成功，通知创建
+// 1 秒内经 WS 送达，事件结构与 spec §4.5.4 一致。
+func TestIntegrationPushWS_DeliversWithinSecond_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	tk := issuePushTicket(t, env, token)
+
+	conn := dialWS(t, env, tk.Ticket, nil)
+	defer conn.CloseNow()
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
+		t.Fatalf("握手后在线订阅数 = %d, want 1", got)
+	}
+
+	// 在线用户 1 秒内收到：与生产装配同一 service 实例创建通知。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: model.TypeBpmTodo, Title: "WS 实时推送", Content: "合同审批待办",
+			BizType: "bpm_task", BizID: 7, Route: "/bpm/task"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw := readWSEvent(t, conn, time.Second)
+	var ev struct {
+		Type string `json:"type"`
+		Data struct {
+			Title string `json:"title"`
+			Type  string `json:"type"`
+			BizID int64  `json:"bizId"`
+			Route string `json:"route"`
+		} `json:"data"`
+		Ts int64 `json:"ts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("解析事件 %q: %v", raw, err)
+	}
+	if ev.Type != "notification" || ev.Data.Title != "WS 实时推送" ||
+		ev.Data.Type != model.TypeBpmTodo || ev.Data.BizID != 7 || ev.Ts <= 0 {
+		t.Fatalf("事件不符: %+v", ev)
+	}
+}
+
+// TestIntegrationPushWS_AuthMatrix401_HTTP 覆盖 WS 票据认证矩阵（真实配置
+// 装配）：无票据/过期票据 401；非升级请求 400 且不消费票据（SSE 仍可用）。
+func TestIntegrationPushWS_AuthMatrix401_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	// 无票据：真实 WS 握手（升级预检通过）→ 认证失败 401。
+	status := dialWSStatus(t, env, "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("无票据: HTTP %d, want 401", status)
+	}
+
+	// 过期票据（GAP_PUSH_TICKET_TTL 走真实 config 装配）。
+	t.Setenv("GAP_PUSH_TICKET_TTL", "50ms")
+	env2 := testutil.NewIntegrationEnv(t)
+	tk := issuePushTicket(t, env2, token)
+	time.Sleep(150 * time.Millisecond)
+	respCode := dialWSStatus(t, env2, tk.Ticket)
+	if respCode != http.StatusUnauthorized {
+		t.Fatalf("过期票据: HTTP %d, want 401", respCode)
+	}
+
+	// 非升级请求：400 且票据未被消费（随后 SSE 正常建立）。
+	env3 := testutil.NewIntegrationEnv(t)
+	tk3 := issuePushTicket(t, env3, token)
+	status3, _ := env3.Request(t, http.MethodGet, "/notify/push/ws?ticket="+url.QueryEscape(tk3.Ticket), "", nil)
+	if status3 != http.StatusBadRequest {
+		t.Fatalf("非升级请求: HTTP %d, want 400", status3)
+	}
+	resp, body := openSSE(t, env3, tk3.Ticket, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("失败路径不应消费票据: HTTP %d body=%s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+}
+
+// TestIntegrationPushWSCrossTenantIsolation_HTTP 覆盖 WS 跨租户隔离（验收
+// 第 4 条）：两个租户各建一条 WS，租户 1 的事件只进租户 1 的连接，反之亦然。
+func TestIntegrationPushWSCrossTenantIsolation_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	adminToken := env.Login(t, "admin", "123456")
+
+	status, api := env.Request(t, http.MethodPost, "/system/tenant", adminToken, map[string]any{
+		"name": "推送隔离租户C", "contactName": "联系人", "status": 0,
+	})
+	mustCode0(t, status, api, "创建租户")
+	tenant2Token := loginTenant(t, env, 2)
+
+	// 两条 WS 各自建立，均起后台读（连接保持处理控制帧）。
+	conn1 := dialWS(t, env, issuePushTicket(t, env, adminToken).Ticket, nil)
+	defer conn1.CloseNow()
+	conn2 := dialWS(t, env, issuePushTicket(t, env, tenant2Token).Ticket, nil)
+	defer conn2.CloseNow()
+	stream1 := readWS(t, conn1)
+	stream2 := readWS(t, conn2)
+
+	// 租户 2 管理员的用户 ID（bootstrapTenant 自动创建）。
+	var tenant2UserID int64
+	if err := env.DB.Raw("SELECT id FROM system_user WHERE tenant_id = 2 AND username = 'admin'").Scan(&tenant2UserID).Error; err != nil || tenant2UserID == 0 {
+		t.Fatalf("查询租户 2 管理员: err=%v id=%d", err, tenant2UserID)
+	}
+
+	// 只推租户 1 的 admin：租户 2 的 WS 必须静默。
+	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
+	if err := env.App.Notify.Create(ctx, []service.Input{
+		{UserID: 1, Type: model.TypeAnnouncement, Title: "租户 1 专属 WS"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw := string(stream1.next(t, "租户 1 事件", time.Second))
+	if !strings.Contains(raw, "租户 1 专属 WS") {
+		t.Fatalf("租户 1 收到 %q, want 租户 1 专属 WS", raw)
+	}
+	stream2.silent(t, "租户 2 不应收到租户 1 的事件", 300*time.Millisecond)
+
+	// 推租户 2 管理员：只有租户 2 的 WS 收到。
+	if err := env.App.Notify.Create(tenant.WithTenantID(t.Context(), 2), []service.Input{
+		{UserID: tenant2UserID, Type: model.TypeAnnouncement, Title: "租户 2 专属 WS"},
+	}); err != nil {
+		t.Fatalf("创建通知: %v", err)
+	}
+	raw2 := string(stream2.next(t, "租户 2 事件", time.Second))
+	if !strings.Contains(raw2, "租户 2 专属 WS") {
+		t.Fatalf("租户 2 收到 %q, want 租户 2 专属 WS", raw2)
+	}
+	stream1.silent(t, "租户 1 不应收到租户 2 的事件", 300*time.Millisecond)
+}
+
+// TestIntegrationPushWSHeartbeat_HTTP 覆盖心跳经真实配置装配生效：
+// GAP_PUSH_HEARTBEAT 压缩后，客户端在窗口内观测到服务端主动 ping
+// （OnPingReceived），且之后连接仍可用（客户端 Ping 得到服务端 pong）。
+// 客户端必须有常驻读（readWS），否则库不处理入站 ping、无法自动回 pong。
+func TestIntegrationPushWSHeartbeat_HTTP(t *testing.T) {
+	t.Setenv("GAP_PUSH_HEARTBEAT", "150ms")
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	tk := issuePushTicket(t, env, token)
+	ponged := make(chan struct{}, 4)
+	conn := dialWS(t, env, tk.Ticket, &websocket.DialOptions{
+		OnPingReceived: func(_ context.Context, _ []byte) bool { ponged <- struct{}{}; return true },
+	})
+	defer conn.CloseNow()
+	stream := readWS(t, conn)
+
+	select {
+	case <-ponged:
+	case <-time.After(2 * time.Second):
+		t.Fatal("2 秒内未观测到服务端心跳 ping")
+	}
+	// 心跳之后连接仍可用：客户端主动 Ping 得到服务端 pong（读循环存活）。
+	pctx, pcancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pcancel()
+	if err := conn.Ping(pctx); err != nil {
+		t.Fatalf("心跳后客户端 Ping: %v（连接不应断开）", err)
+	}
+	select {
+	case <-stream.msgs:
+		t.Fatal("心跳不应产生数据消息")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestIntegrationPushWSDisconnectCleansUp_HTTP 覆盖断开清理（真实装配）：
+// 客户端断开后 hub 订阅归零，连接数不泄漏（验收第 2 条）。
+func TestIntegrationPushWSDisconnectCleansUp_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	conn := dialWS(t, env, issuePushTicket(t, env, token).Ticket, nil)
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
+		t.Fatalf("在线订阅数 = %d, want 1", got)
+	}
+	conn.CloseNow()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if env.App.PushHub.Subscribers(tenant.DefaultID, 1) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.App.PushHub.Subscribers(tenant.DefaultID, 1))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestIntegrationPushDisabled_HTTP 覆盖推送关闭：路由不注册（换票 404），
+// SSE 端点不存在；前端据此降级轮询。
+func TestIntegrationPushDisabled_HTTP(t *testing.T) {
+	t.Setenv("GAP_PUSH_ENABLED", "false")
+	env := testutil.NewIntegrationEnv(t)
+	if env.App.PushHub != nil {
+		t.Fatal("push.enabled=false 时 PushHub 应为 nil")
+	}
+	token := env.Login(t, "admin", "123456")
+
+	status, api := env.Request(t, http.MethodPost, "/notify/push/ticket", token, nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("推送关闭时换票: HTTP %d code %d, want 404", status, api.Code)
+	}
+	status2, _ := env.Request(t, http.MethodGet, "/notify/push/sse?ticket=x", "", nil)
+	if status2 != http.StatusNotFound {
+		t.Fatalf("推送关闭时 SSE: HTTP %d, want 404", status2)
+	}
+}
+
+// TestIntegrationPushConnQuota_HTTP 连接数配额（#85 安全审计 NV2）：同一
+// (tenant, user) 第 push.MaxConnsPerStream+1 条 WS 连接被服务端直接关闭
+// （1008 policy violation），上限内的连接计数不受影响。
+func TestIntegrationPushConnQuota_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	for i := 0; i < push.MaxConnsPerStream; i++ {
+		tk := issuePushTicket(t, env, token)
+		conn := dialWS(t, env, tk.Ticket, nil)
+		readWS(t, conn) // 后台读循环：自动 pong 保活
+		t.Cleanup(func() { _ = conn.CloseNow() })
+	}
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != push.MaxConnsPerStream {
+		t.Fatalf("上限内连接数 = %d, want %d", got, push.MaxConnsPerStream)
+	}
+
+	// 第 9 条：握手完成（票据有效），随后被服务端以 1008 关闭。
+	tk := issuePushTicket(t, env, token)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsDialURL(env, tk.Ticket), nil)
+	if err != nil {
+		t.Fatalf("第 %d 条 WS 握手（服务端在握手后才拒绝）: %v", push.MaxConnsPerStream+1, err)
+	}
+	defer conn.CloseNow()
+	_, _, err = conn.Read(ctx)
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != websocket.StatusPolicyViolation {
+		t.Fatalf("超限连接应被 1008 关闭：err=%v", err)
+	}
+	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != push.MaxConnsPerStream {
+		t.Fatalf("被拒连接不应占位：Subscribers = %d, want %d", got, push.MaxConnsPerStream)
+	}
+}
+
+// TestIntegrationPushTicketRateLimit_HTTP 换票限速（#85 安全审计 NV2）：
+// 同一用户每分钟 30 次，第 31 次返回 429；其他用户不受牵连。
+func TestIntegrationPushTicketRateLimit_HTTP(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+
+	const limit = 30 // 与 api.ticketIssueLimit 对齐
+	for i := 1; i <= limit; i++ {
+		status, api := env.Request(t, http.MethodPost, "/notify/push/ticket", token, nil)
+		if status != http.StatusOK {
+			t.Fatalf("第 %d 次换票应成功：HTTP %d code %d msg %q", i, status, api.Code, api.Msg)
+		}
+	}
+	status, api := env.Request(t, http.MethodPost, "/notify/push/ticket", token, nil)
+	if status != http.StatusTooManyRequests || api.Code != http.StatusTooManyRequests {
+		t.Fatalf("第 %d 次换票应 429：HTTP %d code %d msg %q", limit+1, status, api.Code, api.Msg)
+	}
+
+	// 其他用户不受该用户配额牵连（限速按 (tenant,user) 隔离）。
+	status, api = env.Request(t, http.MethodPost, "/system/tenant", token, map[string]any{
+		"name": "换票限速租户", "contactName": "联系人", "status": 0,
+	})
+	mustCode0(t, status, api, "创建租户")
+	tenant2Token := loginTenant(t, env, 2)
+	status, api = env.Request(t, http.MethodPost, "/notify/push/ticket", tenant2Token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("其他用户换票不应被牵连：HTTP %d code %d msg %q", status, api.Code, api.Msg)
+	}
+}

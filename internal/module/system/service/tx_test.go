@@ -39,6 +39,7 @@ func newTxEnv(t *testing.T) (*service.Service, *gorm.DB) {
 	if err := db.AutoMigrate(
 		&model.Tenant{}, &model.Dept{}, &model.Role{}, &model.RoleMenu{}, &model.RoleDept{},
 		&model.User{}, &model.UserRole{}, &model.UserPost{},
+		&model.Menu{}, &model.TenantPackage{},
 	); err != nil {
 		t.Fatalf("建表: %v", err)
 	}

@@ -19,22 +19,27 @@
 
 ## 功能特性
 
-- **模块化单体**：`framework` 基础能力 + `system` / `infra` / `codegen` 业务模块，依赖单向、边界清晰。
+- **模块化单体**：`framework` 基础能力 + `system` / `infra` / `codegen` / `message` 业务模块，依赖单向、边界清晰。
 - **认证与 RBAC**：JWT 登录、bcrypt 密码、角色绑定菜单、接口级权限码校验、超级管理员自动放行。
 - **多租户**：GORM 插件自动追加 `tenant_id` 条件、插入自动回填；新建租户自动初始化部门 / 超级管理员角色 / `admin` 账号。
+- **租户套餐与配额**：套餐定义菜单授权与用户数/存储/月短信/月邮件配额；平台租户保持通配，租户超管受套餐约束。
 - **数据权限**：角色维度支持「全部 / 自定义部门 / 本部门 / 本部门及以下 / 仅本人」，用户、CRM 客户/商机/合同/回款与仪表盘已接入。
-- **系统管理**：用户、角色、菜单（目录/菜单/按钮三级）、部门树、岗位、字典、租户、登录日志、操作日志。
+- **系统管理**：用户、角色、菜单（目录/菜单/按钮三级）、部门树、岗位、字典、租户、租户套餐、社交登录、敏感词、地区、登录日志、操作日志。
+- **消息通道**：平台级短信/邮件渠道与模板，租户级发送日志；内置 log / SMTP / 阿里云短信 provider，密钥查询脱敏，支持失败重发。
+- **社交登录**：微信开放平台 / 钉钉 / 企微 OAuth2 客户端登录；state + PKCE，未绑定账号不自动建号。
+- **实时推送**：SSE + WebSocket 双传输，一次性票据认证；前端按 WS → SSE → 轮询降级。
 - **OA 套件**：公告（受众/已读）、请假（类型/额度/半天粒度）、报销（明细/审批）、考勤（班次/考勤组/Web 打卡/结果派生/月度汇总）、日程、会议室预约、文档目录与 ACL；审批统一走 bpm。
 - **bpm 与通知**：版本化线性审批链（角色/权限码候选池、部门负责人、转办/驳回/撤回）、通用待办、站内通知（待办/结果/公告/会议提醒）。
-- **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）。
+- **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）、API 访问日志、数据库文档、监控面板。
 - **代码生成器**：两种入口——元信息驱动的「owner-scoped 实体全栈脚手架」（model/dto/repository/service/api + 路由注册点 + 菜单/权限码种子 + 测试骨架 + ProTable 页面，配套装配说明），以及读取 `information_schema` 按表结构生成通用 CRUD 模板 ZIP；两者生成物都是起点，接入工程需按产物内说明手工放置并注册。
 - **前端动态路由**：菜单由后端下发，前端按组件路径动态注册，按钮权限通过 `v-if` 控制。
-- **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、请假类型、默认审批流程、定时任务）。
+- **开箱即用**：`make migrate-up` 按版本建表，启动时校验迁移版本并写入种子数据（菜单、角色、管理员、字典、请假类型、默认审批流程、定时任务、消息渠道/模板、租户套餐、省市地区）。
 
 ## 相关文档
 
 - 术语表：[GLOSSARY.md](GLOSSARY.md)
 - 架构决策：[docs/adr/](docs/adr/)
+- 平台 MVP 详细规格：[docs/platform-mvp-spec.md](docs/platform-mvp-spec.md)
 - OA MVP 规格：[docs/oa-mvp-spec.md](docs/oa-mvp-spec.md)
 - CRM 详细规格：[docs/crm-mvp-spec.md](docs/crm-mvp-spec.md)
 
@@ -77,22 +82,29 @@ go-admin-pro
 │   ├── seed/                   # 初始化数据（依赖已执行的迁移）
 │   ├── testutil/               # 集成测试基座（真实 router + MySQL，integration 标签）
 │   ├── module/
-│   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户、日志
-│   │   ├── infra/              # 文件、参数配置、定时任务
+│   │   ├── system/             # 认证、用户、角色、菜单、部门、岗位、字典、租户/套餐、社交登录、敏感词、地区、日志
+│   │   ├── infra/              # 文件、参数配置、定时任务、API 访问日志、数据库文档、监控面板
+│   │   ├── message/            # 短信/邮件渠道与模板（平台级）、发送日志与发送配额（租户级）
 │   │   ├── crm/                # 客户管理（CRM 第一条纵切，手写样板：model/dto/repository/service/api）
 │   │   ├── bpm/                # 流程定义、实例、任务、审批记录、通用待办
-│   │   ├── notify/             # 站内通知投递、未读数、已读状态
+│   │   ├── notify/             # 站内通知投递、未读数、已读状态、实时推送 HTTP 入口
 │   │   ├── oa/                 # 公告、请假、报销、考勤、日程、会议室、文档
 │   │   └── codegen/            # 代码生成器
 │   └── pkg/                    # 框架能力
 │       ├── database/           # GORM 连接、迁移校验 + 多租户/审计插件
 │       ├── model/              # 实体底座 BaseEntity（时间戳、软删除、creator/updater）
 │       ├── tenant/             # 租户上下文与 Skip
-│       ├── jwt/ authn/         # 令牌与登录主体
+│       ├── jwt/ authn/         # 令牌、登录主体与 Bearer 提取
 │       ├── middleware/         # CORS、日志、Recovery
+│       ├── logger/             # 全局 slog 装配（级别/格式）
 │       ├── excel/              # Excel 导入导出与模板
 │       ├── money/              # 金额值类型（int64 分，decimal(12,2)）
 │       ├── datascope/          # 行级数据权限谓词引擎（角色范围 1–5、多角色并集）
+│       ├── quota/              # 套餐限额与用量的中性类型（system 解释，消费模块依赖窄接口）
+│       ├── push/               # 实时推送 hub 与一次性票据（SSE/WS 传输层在 notify 模块）
+│       ├── iploc/              # IP 归属地定位（ip2region xdb；未配置数据文件时空实现）
+│       ├── dbschema/           # information_schema 读取（codegen 与数据库文档共用）
+│       ├── text/               # 跨模块文本小工具（按字符截断等）
 │       ├── response/ xerr/     # 统一响应与业务错误
 │       └── web/ utils/         # 分页、通用工具
 ├── web/                        # Vue3 前端
@@ -187,8 +199,11 @@ make run-demo              # 启动后端并写入 CRM 演示数据（等价于 
 默认 `false`，演示数据只在显式开启时写入，避免生产库被演示账号与示例业务数据
 污染。演示环境用 `make run-demo`，或手工
 `GAP_SEED_DEMO=true go run ./cmd/server -c configs/config.yaml`。首次启动在基础
-种子之后写入 CRM 演示组织与业务数据；只有 `crm_customer` 为空时才写入，
-重复启动不会重复插入。只想要基础种子（无演示数据）时正常 `make run` 即可。
+种子之后写入 CRM 演示组织与业务数据，并写入平台能力演示数据（SMTP/阿里云短信
+演示渠道、邮件/短信模板、标准版套餐兜底、敏感词示例、停用的社交客户端、演示
+消息日志——渠道与客户端的配置和密钥全部是占位符，发送/登录前需在管理端改为
+真实配置）；CRM 只有 `crm_customer` 为空时才写入，重复启动不会重复插入。
+只想要基础种子（无演示数据）时正常 `make run` 即可。
 
 种子是「空表才写」的一次性逻辑：菜单、角色、字典等各段种子在对应表非空时整体跳过。
 已有库升级到新版本后，新增的菜单/按钮/字典不会自动补写（例如 `simple-list` 按钮
@@ -260,13 +275,15 @@ OA 演示业务数据）时正常 `make run` 即可。
 
 ```bash
 make migrate-up            # 建表（幂等，可重复执行）
-make run-demo              # 启动后端并写入 CRM + OA 演示数据
+make run-demo              # 启动后端并写入 CRM + OA + 平台演示数据
 ```
 
 演示数据按表幂等：每个域以自己的业务表为哨兵（如 `oa_announcement`、
 `oa_leave_request`、`oa_expense_claim`、`oa_attendance_punch`、
 `oa_meeting_room`、`oa_document_folder`），已有行（含软删）时整段跳过，
-重复启动不会重复插入；角色/用户/部门负责人/额度按业务键逐行补齐。
+重复启动不会重复插入；角色/用户/部门负责人/额度按业务键逐行补齐。平台
+演示段按编码判重（渠道/模板/社交客户端）、敏感词按词判重、演示消息日志
+仅在 `message_log` 为空时写入；管理端删除的演示渠道/模板/客户端不复活。
 
 演示账号（租户 1，密码均为 `123456`）：
 
@@ -477,7 +494,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.cors.allowed-origins` | 跨域白名单：精确匹配 Origin，非白名单来源不返回 CORS 头；为空表示不放行任何跨域（可用 `GAP_CORS_ALLOWED_ORIGINS` 逗号分隔覆盖） |
 | `database.dsn` | MySQL DSN |
 | `database.seed` | 启动时写入种子数据 |
-| `database.seed-demo` | 是否写入 CRM + OA 演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
+| `database.seed-demo` | 是否写入 CRM + OA + 平台演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
 | `security.login.max-fail` / `lock-duration` | 登录失败锁定策略 |
@@ -544,6 +561,16 @@ make docker-down  # 停止容器
 - 文件存储仅实现本地磁盘，OSS / S3 可通过扩展 `infra` 模块接入。
 - 权限快照（角色码 + 权限码）使用进程内缓存（1 分钟 TTL），多实例部署时需替换为 Redis 或统一失效；字典数据未做缓存，每次直接读库。
 - 未内置 Swagger，接口约定见上文与各 handler。
+- 租户套餐的菜单授权改变租户超管语义：平台租户保持通配，其他租户按套餐；存量租户由迁移回填全部菜单。
+- 消息渠道/社交客户端密钥在 DB 明文存储，仅 API 查询脱敏；未接入 KMS。
+- 手动重发不带原始模板参数（`message_log` 不存 params）：对声明了变量的阿里云模板重发会被阿里云拒绝并按失败记录（重发内容以模板当前内容为准）。
+- 配额校验无数据库唯一约束兜底：并发创建（用户/发送等）可能同时通过检查、轻微超限；单人后台并发概率低，超限只影响配额不影响安全边界。
+- 实时推送的 hub 与票据在进程内，单实例有效；多实例需外部 pub/sub（ADR 0013）。前端始终保留轮询兜底。
+- 社交登录只做 OAuth2 客户端，不做自家授权服务器；未绑定账号不自动建号。企微的 `agentid` 与 `user/get` 资料端点没有独立配置列：`agentid` 经 `authorize_url` 覆盖地址的 query 携带，`user/get` 取 `userinfo_url` 覆盖地址的 scheme+host 拼固定路径（见 `docs/guides/social-callback-setup.md`）。
+- 短信/邮件不做自动重试、批量发送、附件；短信 provider 目前只实现阿里云。
+- 地区库内置省/市两级，区县需导入；IP 定位需自备 ip2region xdb 文件，未配置时为空实现。
+- 集成测试必须用 `GAP_TEST_DATABASE_DSN` 指向专用测试库：共享默认库 `go_admin_pro_test` 的 goose 账本已损坏（缺 version 23 行），直接在其上跑会因重复应用迁移而失败（开发环境遗留问题，不影响业务库）。
+- 监控面板只做运行时聚合，不提供 Prometheus/pprof/链路追踪；数据库文档仅平台租户可见。
 - bpm v1 只支持线性有序审批链：不做 BPMN 网关/并行/会签/条件表达式/可视化设计器；OA 只做公告、半天粒度请假、Web 打卡、报销审批、日程/会议室、文档 ACL，不做付款/预算/发票、Wiki/在线预览、GPS 考勤设备、外部日历同步。
 
 ## 后续计划
@@ -554,6 +581,7 @@ make docker-down  # 停止容器
 - [ ] 代码生成器支持树形表与主子表
 - [ ] OpenAPI 文档（swaggo）
 - [x] 数据权限扩展到更多业务模块（CRM 客户/商机/合同/回款/公海已接入）
+- [x] 平台能力：消息通道、社交登录、实时推送、租户套餐与配额、访问日志、敏感词、地区/IP、数据库文档、监控
 
 ## 贡献
 

@@ -70,6 +70,7 @@ func (s *Service) GetFollowUp(ctx context.Context, id int64) (*model.FollowUp, e
 
 // CreateFollowUp 创建跟进：挂客户/商机/合同三选一（多传/都不传 400），
 // 所属对象必须存在且对当前用户可见（404 兜底），类型/下次跟进时间先做校验（400）；
+// 内容先过敏感词检查（issue #81，spec §4.7.4：命中 400 不落库）；
 // 创建与客户 last_follow_time 刷新同事务（spec §4.2，repository.CreateFollowUp）。
 func (s *Service) CreateFollowUp(ctx context.Context, req *dto.FollowUpCreateReq) (*model.FollowUp, error) {
 	if err := ValidateFollowUpType(req.Type); err != nil {
@@ -81,6 +82,9 @@ func (s *Service) CreateFollowUp(ctx context.Context, req *dto.FollowUpCreateReq
 	}
 	if countParents(req.CustomerID, req.OpportunityID, req.ContractID) != 1 {
 		return nil, xerr.BadRequest("请选择跟进对象：customerId、opportunityId、contractId 三选一")
+	}
+	if err := s.checkSensitiveWords(ctx, req.Content); err != nil {
+		return nil, err
 	}
 	followUp := &model.FollowUp{
 		CustomerID:    req.CustomerID,
@@ -132,7 +136,8 @@ func countParents(customerID, opportunityID, contractID int64) int {
 }
 
 // UpdateFollowUp 修改跟进：客户范围外 404；创建人本人或持 crm:follow-up:update；
-// 所属客户不可漂移；编辑不刷新 last_follow_time（取舍见 repository.CreateFollowUp）。
+// 所属客户不可漂移；内容先过敏感词检查（issue #81，命中 400 不落库）；
+// 编辑不刷新 last_follow_time（取舍见 repository.CreateFollowUp）。
 func (s *Service) UpdateFollowUp(ctx context.Context, req *dto.FollowUpUpdateReq) error {
 	followUp, err := s.findVisibleFollowUp(ctx, req.ID)
 	if err != nil {
@@ -146,6 +151,9 @@ func (s *Service) UpdateFollowUp(ctx context.Context, req *dto.FollowUpUpdateReq
 	}
 	nextTime, err := ValidateFollowUpNextTime(req.NextFollowTime, s.businessLocation())
 	if err != nil {
+		return err
+	}
+	if err := s.checkSensitiveWords(ctx, req.Content); err != nil {
 		return err
 	}
 	followUp.Content = req.Content

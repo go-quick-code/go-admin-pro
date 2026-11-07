@@ -51,6 +51,13 @@ type Service struct {
 	// fileDeleteSyncers 是通用删除入口的业务归属行同步器（如 oa_document_file
 	// 软删），避免「列表有、内容 404」的悬空。
 	fileDeleteSyncers map[string]FileDeleteSyncer
+
+	// quotaGateway 是存储配额限额来源（issue #71，窄接口见 quota_gateway.go），
+	// 由 internal/app 装配注入；未注入时上传不做配额校验。
+	quotaGateway QuotaGateway
+	// monitorStats 是监控面板跨模块统计来源（issue #84，窄接口见 monitor.go），
+	// 由 internal/app 装配注入；未注入时 overview 的租户/用户/消息统计为 0。
+	monitorStats MonitorStatsGateway
 }
 
 func New(repo *repository.Repository, cfg *config.Config, scheduler *JobScheduler) *Service {
@@ -147,7 +154,8 @@ func validateFileBiz(bizType string, bizID int64) error {
 	return nil
 }
 
-// uploadFile 是上传的公共实现：校验 → 落磁盘 → 写记录（记录失败回滚磁盘文件）。
+// uploadFile 是上传的公共实现：校验（含存储配额）→ 落磁盘 → 写记录
+// （记录失败回滚磁盘文件）。配额校验在所有磁盘写入之前，失败不残留。
 func (s *Service) uploadFile(ctx context.Context, fh *multipart.FileHeader, bizType string, bizID int64) (*model.File, error) {
 	if fh.Size > MaxUploadSize {
 		return nil, xerr.BadRequest("文件大小不能超过 20MB")
@@ -155,6 +163,11 @@ func (s *Service) uploadFile(ctx context.Context, fh *multipart.FileHeader, bizT
 	ext := strings.ToLower(filepath.Ext(fh.Filename))
 	if _, ok := allowedExt[ext]; !ok {
 		return nil, xerr.BadRequest("不支持的文件类型：" + ext)
+	}
+	// 存储配额（issue #71，spec §4.2.3）：落盘之前校验，超限 409，
+	// 不写磁盘、不插 infra_file 行。
+	if err := s.checkStorageQuota(ctx, fh.Size); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()

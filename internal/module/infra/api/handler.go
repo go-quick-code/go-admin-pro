@@ -23,10 +23,19 @@ type Handler struct {
 	svc  *service.Service
 	cfg  *config.Config
 	perm PermissionMiddleware
+	// apiLog 是访问日志异步写入口（issue #80）：AccessLog 中间件经它入队，
+	// app 装配注入 *service.APILogWriter（同一实例供 App 排干/优雅关闭）。
+	apiLog service.APILogEnqueuer
 }
 
-func New(svc *service.Service, cfg *config.Config, perm PermissionMiddleware) *Handler {
-	return &Handler{svc: svc, cfg: cfg, perm: perm}
+func New(svc *service.Service, cfg *config.Config, perm PermissionMiddleware, apiLog service.APILogEnqueuer) *Handler {
+	return &Handler{svc: svc, cfg: cfg, perm: perm, apiLog: apiLog}
+}
+
+// AccessLog 返回 API 访问日志采集中间件（issue #80，spec §4.6，ADR 0014）：
+// 挂在 Auth 之后、OperateLog 之前，只记录受保护接口。
+func (h *Handler) AccessLog() gin.HandlerFunc {
+	return APILogMiddleware(h.apiLog)
 }
 
 func bindJSON(c *gin.Context, v interface{}) bool {
@@ -344,4 +353,45 @@ func (h *Handler) PageJobLogs(c *gin.Context) {
 		return
 	}
 	response.Page(c, list, total)
+}
+
+// ---------- API 访问日志（issue #80，spec §5.5）----------
+
+// PageAPILogs 分页查询当前租户的访问日志（租户插件限定）。
+func (h *Handler) PageAPILogs(c *gin.Context) {
+	var req dto.APILogPageReq
+	if !bindQuery(c, &req) {
+		return
+	}
+	list, total, err := h.svc.ListAPILogs(c.Request.Context(), &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.Page(c, list, total)
+}
+
+// DeleteAPILogs 按 IDs 批量删除访问日志（硬删除）。含跨租户 ID 时整体 404
+// 不删（服务层 fail-closed 校验，spec §4.6）。
+func (h *Handler) DeleteAPILogs(c *gin.Context) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := h.svc.DeleteAPILogs(c.Request.Context(), req.IDs); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
+}
+
+// ClearAPILogs 清空当前租户的全部访问日志（硬删除，租户插件限定）。
+func (h *Handler) ClearAPILogs(c *gin.Context) {
+	if err := h.svc.ClearAPILogs(c.Request.Context()); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, true)
 }

@@ -12,14 +12,17 @@ import (
 // 主体收口，不接受 userId 入参），租户条件由租户插件按上下文追加。
 // 列表挂 notify:message:query（spec §5）；未读数/标记已读仅登录即可——
 // unread-count 供顶栏铃铛全员轮询，标记已读是个人动作。
+// push 是实时推送入口（issue #78，spec §4.5）：push.enabled=false 时为 nil，
+// 相关路由不注册，前端换票失败自动降级 60 秒轮询。
 type Handler struct {
 	svc               *service.Service
 	requirePermission func(string) gin.HandlerFunc
+	push              *PushHandler
 }
 
-// New 创建 notify Handler。
-func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc) *Handler {
-	return &Handler{svc: svc, requirePermission: requirePermission}
+// New 创建 notify Handler。push 可为 nil（推送关闭）。
+func New(svc *service.Service, requirePermission func(string) gin.HandlerFunc, push *PushHandler) *Handler {
+	return &Handler{svc: svc, requirePermission: requirePermission, push: push}
 }
 
 // RegisterProtected 注册需要登录的 notify 接口，rg 上应已挂载 Auth 中间件。
@@ -31,6 +34,23 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	msg.GET("/unread-count", h.UnreadCount)
 	msg.PUT("/read-all", h.MarkAllRead)
 	msg.PUT("/:id/read", h.MarkRead)
+}
+
+// RegisterStream 注册推送换票端点（POST /notify/push/ticket，spec §5.4）：
+// 登录即可，不挂操作日志（读语义）。rg 上应只挂 Auth 中间件。
+// 推送关闭（push == nil）时是 no-op——路由不存在，换票 404，前端降级轮询。
+func (h *Handler) RegisterStream(rg *gin.RouterGroup) {
+	if h.push != nil {
+		h.push.RegisterStream(rg)
+	}
+}
+
+// RegisterPublic 注册凭票据的推送流端点（GET /notify/push/sse|ws，spec §5.4）：
+// 公开路由，票据即凭证。推送关闭时是 no-op。
+func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
+	if h.push != nil {
+		h.push.RegisterPublic(rg)
+	}
 }
 
 // Page 当前用户通知分页（id 倒序；type/read 可选过滤）。

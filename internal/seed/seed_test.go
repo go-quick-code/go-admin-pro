@@ -6,6 +6,7 @@ import (
 	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
@@ -36,7 +37,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.Tenant{}, &sysmodel.Menu{}, &sysmodel.Dept{}, &sysmodel.Role{},
 		&sysmodel.RoleMenu{}, &sysmodel.Post{}, &sysmodel.User{}, &sysmodel.UserRole{},
 		&sysmodel.UserPost{}, &sysmodel.DictType{}, &sysmodel.DictData{},
+		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
+		&msgmodel.Channel{}, &msgmodel.Template{}, &sysmodel.Area{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -65,10 +68,16 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.DictType{}, 4, "字典类型")
 	// 11 条基础字典项 + 报销类别 5 条（issue #54，oa_expense_category）。
 	assertCount(t, db, &sysmodel.DictData{}, 16, "字典数据")
+	// 默认「标准版」套餐（issue #69）：全部启用目录/菜单，配额不限。
+	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
-	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）。
-	assertCount(t, db, &inframodel.Job{}, 4, "定时任务")
+	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
+	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）。
+	assertCount(t, db, &inframodel.Job{}, 5, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
+	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
+	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
+	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板")
 	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
 	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
@@ -80,6 +89,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertJobStatus(t, db, "recyclePoolCustomers", inframodel.JobStatusPaused)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -106,12 +116,18 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	}
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义（幂等）")
+	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐（幂等）")
 	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
+	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")
+	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板（幂等）")
+	// 行政区划（issue #82，spec §4.8.2）：省市两级全量 377 行（34 省 + 343 市）。
+	assertCount(t, db, &sysmodel.Area{}, 377, "地区（省市两级）")
 }
 
 // assertDefaultLeaveDefinition 断言请假默认流程（issue #63 收口，spec §4.8）：

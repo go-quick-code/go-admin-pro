@@ -65,6 +65,14 @@ func Conflict(msg string) *Error {
 	return New(http.StatusConflict, 409, msg)
 }
 
+// TooManyRequests 触发限速（HTTP 429，#85 安全审计 NV1/NV2 加固用）。
+func TooManyRequests(msg string) *Error {
+	if msg == "" {
+		msg = "请求过于频繁，请稍后重试"
+	}
+	return New(http.StatusTooManyRequests, http.StatusTooManyRequests, msg)
+}
+
 // Internal 服务内部错误。
 func Internal(err error) *Error {
 	return Wrap(err, http.StatusInternalServerError, 500, "服务器内部错误")

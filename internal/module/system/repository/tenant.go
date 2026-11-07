@@ -73,3 +73,25 @@ func (r *Repository) ListEnabledTenantIDs(ctx context.Context) ([]int64, error) 
 		Pluck("id", &ids).Error
 	return ids, err
 }
+
+// ListTenantIDsByPackageID 返回引用指定套餐的租户 ID（升序，系统级）。
+// 套餐是平台级资源，换菜单后需要批量重绑这些租户的超管菜单。
+func (r *Repository) ListTenantIDsByPackageID(ctx context.Context, packageID int64) ([]int64, error) {
+	var ids []int64
+	err := tenant.Skip(r.db.WithContext(ctx).Model(&model.Tenant{})).
+		Where("package_id = ?", packageID).
+		Order("id ASC").
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+// ListRolesByTenantAndCode 跨租户读取指定编码的角色（系统级，显式 tenant.Skip + tenant_id）。
+// 套餐绑定/换套餐时用于定位目标租户的 super_admin 角色。
+func (r *Repository) ListRolesByTenantAndCode(ctx context.Context, tenantID int64, code string) ([]model.Role, error) {
+	var roles []model.Role
+	err := tenant.Skip(r.db.WithContext(ctx)).
+		Where("tenant_id = ? AND code = ?", tenantID, code).
+		Order("id ASC").
+		Find(&roles).Error
+	return roles, err
+}

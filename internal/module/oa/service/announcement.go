@@ -208,10 +208,14 @@ func (s *Service) PageAnnouncementReadStats(ctx context.Context, id int64, req *
 // ---------- 创建/编辑/删除 ----------
 
 // CreateAnnouncement 创建公告（草稿）：content 经 bluemonday 清洗后入库，
-// 自定义受众目标去重校验并与主表同事务写入。
+// 自定义受众目标去重校验并与主表同事务写入。落库前做敏感词检查（标题+正文，
+// issue #81，spec §4.7.4）：命中 400 且不写任何数据。
 func (s *Service) CreateAnnouncement(ctx context.Context, req *dto.AnnouncementCreateReq) (*dto.AnnouncementDetailResp, error) {
 	title, content, audienceType, err := validateAnnouncementFields(req.Title, req.Content, req.AudienceType)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkSensitiveWords(ctx, title, content); err != nil {
 		return nil, err
 	}
 	targets, err := buildAnnouncementTargets(0, audienceType, req.Targets)
@@ -241,10 +245,13 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req *dto.AnnouncementC
 }
 
 // UpdateAnnouncement 编辑公告（仅草稿）：受众目标整体替换；发布后不可编辑
-// （spec §5：PUT 仅草稿）。
+// （spec §5：PUT 仅草稿）。落库前做敏感词检查（标题+正文，issue #81）。
 func (s *Service) UpdateAnnouncement(ctx context.Context, req *dto.AnnouncementUpdateReq) (*dto.AnnouncementDetailResp, error) {
 	title, content, audienceType, err := validateAnnouncementFields(req.Title, req.Content, req.AudienceType)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkSensitiveWords(ctx, title, content); err != nil {
 		return nil, err
 	}
 	targets, err := buildAnnouncementTargets(0, audienceType, req.Targets)
@@ -330,7 +337,8 @@ func (s *Service) PublishAnnouncement(ctx context.Context, id int64) error {
 	if s.notify == nil {
 		return xerr.Internal(errors.New("公告发布未装配通知网关"))
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+	var pending []notifyservice.Input
+	err := s.repo.Transaction(ctx, func(tx *repository.Repository) error {
 		row, err := tx.FindAnnouncementForUpdate(ctx, id)
 		if err != nil {
 			return err
@@ -352,8 +360,16 @@ func (s *Service) PublishAnnouncement(ctx context.Context, id int64) error {
 		if err := tx.SaveAnnouncement(ctx, row); err != nil {
 			return err
 		}
-		return s.notify.CreateInTx(ctx, tx.DB(), buildAnnouncementNotifies(row, recipients))
+		pending = buildAnnouncementNotifies(row, recipients)
+		return s.notify.CreateInTx(ctx, tx.DB(), pending)
 	})
+	if err != nil {
+		return err
+	}
+	// 事务已提交：显式发布实时推送（issue #78，spec §4.5.5；best-effort，
+	// 丢失由前端 60 秒轮询兜底，ADR 0013）。
+	s.notify.PublishInputs(ctx, pending)
+	return nil
 }
 
 // WithdrawAnnouncement 撤回公告（仅已发布）：置撤回状态并记录撤回时间；

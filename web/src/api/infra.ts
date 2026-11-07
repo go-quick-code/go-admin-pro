@@ -59,3 +59,38 @@ export function deleteJob(id: number) {
 export function pageJobLogs(params: any) {
   return request.get('/infra/job/log/page', { params }) as Promise<any>
 }
+
+// ---------- 访问日志（issue #80，spec §5.5）----------
+export function pageAPILogs(params: any) {
+  return request.get('/infra/api-log/page', { params }) as Promise<any>
+}
+// 按 ids 批量删除（硬删除；含跨租户 ID 时后端 404 不删）。
+export function deleteAPILogs(ids: number[]) {
+  return request.delete('/infra/api-log', { data: { ids } }) as Promise<any>
+}
+// 清空当前租户的全部访问日志。
+export function clearAPILogs() {
+  return request.delete('/infra/api-log/clear') as Promise<any>
+}
+
+// ---------- 数据库文档（issue #83，仅平台租户） ----------
+export function listDBTables(keyword?: string) {
+  return request.get('/infra/db-doc/tables', { params: { keyword: keyword || undefined } }) as Promise<any>
+}
+export function getDBTable(name: string) {
+  return request.get(`/infra/db-doc/table/${name}`) as Promise<any>
+}
+// 导出 Markdown：responseType=blob，页面按 Content-Disposition 保存。
+export function exportDBDoc() {
+  return request.get('/infra/db-doc/export', { responseType: 'blob' }) as Promise<any>
+}
+
+// ---------- 监控面板（issue #84，仅平台租户） ----------
+// 监控总览：应用/运行期/连接池/调度器/租户规模/近 24h 流量/消息统计。
+export function getMonitorOverview() {
+  return request.get('/infra/monitor/overview') as Promise<any>
+}
+// 按小时分桶聚合访问日志；hours 取值 1–168，后端越界收敛，缺省 24。
+export function getMonitorRequests(hours = 24) {
+  return request.get('/infra/monitor/requests', { params: { hours } }) as Promise<any>
+}

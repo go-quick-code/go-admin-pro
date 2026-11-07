@@ -22,11 +22,13 @@ database:
   max-idle-conns: 10
   max-open-conns: 100
   seed: true
-  # CRM + OA 演示数据（销售角色/账号、产品、客户、商机、合同、回款与仪表盘
-  # 时间分布；公告、请假、报销、考勤、日程、会议室、文档）。
+  # CRM + OA + 平台演示数据（销售角色/账号、产品、客户、商机、合同、回款与仪表盘
+  # 时间分布；公告、请假、报销、考勤、日程、会议室、文档；消息渠道/模板、套餐
+  # 兜底、敏感词示例、停用的社交客户端、演示消息日志——配置与密钥全部占位符）。
   # 默认关闭：演示数据只在显式开启时写入（GAP_SEED_DEMO=true 或 make run-demo），
   # 避免生产/真实环境被演示账号与示例业务数据污染（PR #39 审查 P2）。
-  # 开启后按表判空写入（CRM 以 crm_customer、OA 以各业务表为哨兵）；集成测试基座始终显式关闭。
+  # 开启后按表/编码判空写入（CRM 以 crm_customer、OA 以各业务表为哨兵，平台段
+  # 按编码判重、message_log 判空）；集成测试基座始终显式关闭。
   seed-demo: false
 
 jwt:
@@ -60,3 +62,29 @@ tenant:
 logger:
   level: info
   format: text
+
+push:
+  # 实时推送（issue #78，spec §4.5 / ADR 0013）：SSE 事件流 + 一次性票据。
+  # hub 与票据都在进程内——单实例限制：多实例部署时其他实例的连接收不到
+  # 事件（需要 Redis/NATS pub/sub，本轮不实现）。关闭时推送路由不注册，
+  # 前端自动降级 60 秒轮询。
+  enabled: true
+  # 一次性票据有效期（秒级时长）。票据由 Bearer 换取，绑定 tenant/user，
+  # 一次性消费，防止 JWT 进入 EventSource 的 URL。
+  ticket-ttl: 30s
+  # SSE 心跳间隔（注释行 : ping），保持中间层不 idle 断连。
+  heartbeat: 25s
+
+# API 访问日志（issue #80，spec §4.6 / ADR 0014）：受保护接口异步批量落库。
+access-log:
+  # 保留天数：cleanAccessLogs 系统级任务每日 03:00 清理超过保留期的记录
+  #（缺省 30 天）。
+  retention-days: 30
+
+# IP 归属地定位（issue #82，spec §4.8.4）：登录日志分页展示归属地。
+# ip2region v2 xdb 数据文件由部署侧提供（官方 releases 下载，仓库不内置）。
+ip-location:
+  # xdb 文件路径；留空表示未启用——登录日志归属地为空串，其余功能不受影响。
+  # 文件不存在/加载失败只告警一次并退回空实现，不影响启动。
+  # 可用环境变量 GAP_IP_LOCATION_XDB_PATH 覆盖。
+  xdb-path: ""

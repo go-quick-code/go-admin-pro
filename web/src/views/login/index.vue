@@ -50,6 +50,25 @@
           <el-button type="primary" :loading="loading" class="submit" @click="handleLogin">
             登 录
           </el-button>
+
+          <!-- 社交登录按钮（issue #77，spec §4.4.1：登录页只展示启用的客户端）。
+               按钮列表来自公开端点 GET /system/social/providers（仅启用客户端
+               且已注册 provider 的平台）；点击后经 GET /system/social/authorize-url
+               换取授权地址并整页跳转，三方重定向回前端回调页
+               /social/callback（web/src/views/social/callback.vue）完成换登录态。 -->
+          <div v-if="socialProviders.length" class="social-providers">
+            <el-divider class="social-divider">社交账号登录</el-divider>
+            <div class="social-buttons">
+              <el-button
+                v-for="p in socialProviders"
+                :key="p.provider"
+                class="social-btn"
+                @click="socialLogin(p.provider)"
+              >
+                {{ socialProviderLabel(p.provider, p.name) }}
+              </el-button>
+            </div>
+          </div>
         </el-form>
 
         <div class="tips">
@@ -68,6 +87,8 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { User, Lock, Key } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { getCaptcha } from '@/api/auth'
+import { getSocialAuthorizeUrl, listSocialProviders } from '@/api/system'
+import { rememberSocialFlow, socialProviderLabel } from '@/utils/social'
 
 const router = useRouter()
 const route = useRoute()
@@ -82,6 +103,29 @@ const form = reactive({
   password: '',
   captchaCode: '',
 })
+
+// 登录页可用社交平台（spec §4.4.1：只展示启用的客户端）。
+const socialProviders = ref<Array<{ provider: string; name: string }>>([])
+
+async function loadSocialProviders() {
+  try {
+    socialProviders.value = (await listSocialProviders()) || []
+  } catch {
+    // 列表拉取失败（如后端不可达）时隐藏按钮，不影响账号密码登录。
+    socialProviders.value = []
+  }
+}
+
+// 发起社交登录：换取授权地址 → 留底流程上下文 → 整页跳转三方授权页。
+async function socialLogin(provider: string) {
+  try {
+    const data = await getSocialAuthorizeUrl({ provider, tenantId: form.tenantId })
+    rememberSocialFlow(provider, (route.query.redirect as string) || '')
+    window.location.href = data.url
+  } catch {
+    // 拦截器已提示（未配置/已停用/暂不支持等），保持当前页。
+  }
+}
 
 const rules = computed<FormRules>(() => ({
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -131,7 +175,10 @@ async function handleLogin() {
   }
 }
 
-onMounted(loadCaptcha)
+onMounted(() => {
+  loadCaptcha()
+  loadSocialProviders()
+})
 </script>
 
 <style scoped>
@@ -249,6 +296,24 @@ onMounted(loadCaptcha)
 .submit {
   width: 100%;
   margin-top: 4px;
+}
+
+.social-divider {
+  margin: 20px 0 14px;
+}
+
+.social-divider :deep(.el-divider__text) {
+  font-size: 12px;
+  color: #909399;
+}
+
+.social-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.social-btn {
+  flex: 1;
 }
 
 .captcha-row {

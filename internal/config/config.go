@@ -11,16 +11,46 @@ import (
 
 // Config 是应用的完整配置，对应 configs/config.yaml 的层级结构。
 type Config struct {
-	App      AppConfig      `mapstructure:"app"`
-	Database DatabaseConfig `mapstructure:"database"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Security SecurityConfig `mapstructure:"security"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	Tenant   TenantConfig   `mapstructure:"tenant"`
-	Logger   LoggerConfig   `mapstructure:"logger"`
+	App        AppConfig        `mapstructure:"app"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	JWT        JWTConfig        `mapstructure:"jwt"`
+	Security   SecurityConfig   `mapstructure:"security"`
+	Storage    StorageConfig    `mapstructure:"storage"`
+	Tenant     TenantConfig     `mapstructure:"tenant"`
+	Logger     LoggerConfig     `mapstructure:"logger"`
+	Push       PushConfig       `mapstructure:"push"`
+	AccessLog  AccessLogConfig  `mapstructure:"access-log"`
+	IPLocation IPLocationConfig `mapstructure:"ip-location"`
 
 	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
 	loc *time.Location
+}
+
+// PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。
+// hub 与票据都在进程内（单实例限制见 ADR 0013）。
+type PushConfig struct {
+	// Enabled 总开关：关闭时不注册推送路由，前端换票失败自动降级 60 秒轮询。
+	// 代码默认 false（fail-safe），configs/config.yaml 示例显式开启。
+	Enabled bool `mapstructure:"enabled"`
+	// TicketTTL 一次性票据有效期，默认 30 秒（spec §4.5.2）。
+	TicketTTL time.Duration `mapstructure:"ticket-ttl"`
+	// Heartbeat SSE 心跳间隔（注释行），默认 25 秒（spec §4.5.3）。
+	Heartbeat time.Duration `mapstructure:"heartbeat"`
+}
+
+// AccessLogConfig 是 API 访问日志（issue #80，spec §4.6，ADR 0014）的配置。
+type AccessLogConfig struct {
+	// RetentionDays 是访问日志保留天数（默认 30）：cleanAccessLogs 系统级
+	// 定时任务每日 03:00 清理超过保留期的记录。
+	RetentionDays int `mapstructure:"retention-days"`
+}
+
+// IPLocationConfig 是 IP 归属地定位（issue #82，spec §4.8.4）的配置。
+type IPLocationConfig struct {
+	// XdbPath 是 ip2region xdb v2 数据文件路径（部署侧提供，仓库不内置）。
+	// 为空表示未启用：登录日志归属地为空串；文件不存在/加载失败只告警一次，
+	// 退回空实现，不影响启动。
+	XdbPath string `mapstructure:"xdb-path"`
 }
 
 // DefaultTimezone 是 app.timezone 为空时的默认业务时区。
@@ -61,16 +91,17 @@ type DatabaseConfig struct {
 	MaxIdleConns int    `mapstructure:"max-idle-conns"`
 	MaxOpenConns int    `mapstructure:"max-open-conns"`
 	Seed         bool   `mapstructure:"seed"`
-	// SeedDemo 控制是否写入 CRM + OA 演示数据（客户/商机/合同/回款、公告/
-	// 请假/报销/考勤/日程/会议室/文档等）。
+	// SeedDemo 控制是否写入 CRM + OA + 平台演示数据（客户/商机/合同/回款、
+	// 公告/请假/报销/考勤/日程/会议室/文档，消息渠道/模板、敏感词示例、
+	// 停用的社交客户端、演示消息日志等）。
 	// 指针是为了区分「未配置」与显式 false：未配置视为关闭（演示数据只在
 	// 显式开启时写入，避免生产环境被演示账号/示例数据污染，PR #39 审查 P2）；
 	// 集成测试基座显式关闭，保证用例数据可控。
 	SeedDemo *bool `mapstructure:"seed-demo"`
 }
 
-// SeedDemoEnabled 报告是否写入 CRM + OA 演示数据：配置缺省（nil）视为关闭，
-// 只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
+// SeedDemoEnabled 报告是否写入 CRM + OA + 平台演示数据：配置缺省（nil）视为
+// 关闭，只有显式 seed-demo: true 或 GAP_SEED_DEMO=true 才开启。
 func (c *Config) SeedDemoEnabled() bool {
 	return c.Database.SeedDemo != nil && *c.Database.SeedDemo
 }
@@ -231,6 +262,17 @@ func (c *Config) applyDefaults() {
 	if c.Logger.Format == "" {
 		c.Logger.Format = "text"
 	}
+	// 实时推送（issue #78）：TTL 30s / 心跳 25s（spec §4.5.2/§4.5.3）。
+	if c.Push.TicketTTL <= 0 {
+		c.Push.TicketTTL = 30 * time.Second
+	}
+	if c.Push.Heartbeat <= 0 {
+		c.Push.Heartbeat = 25 * time.Second
+	}
+	// API 访问日志（issue #80）：保留期默认 30 天（spec §4.6.7）。
+	if c.AccessLog.RetentionDays <= 0 {
+		c.AccessLog.RetentionDays = 30
+	}
 }
 
 func (c *Config) applyEnv() {
@@ -268,6 +310,27 @@ func (c *Config) applyEnv() {
 	case "false":
 		enabled := false
 		c.Database.SeedDemo = &enabled
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_PUSH_ENABLED"))) {
+	case "true", "1":
+		c.Push.Enabled = true
+	case "false", "0":
+		c.Push.Enabled = false
+	}
+	if v := os.Getenv("GAP_PUSH_TICKET_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Push.TicketTTL = d
+		}
+	}
+	if v := os.Getenv("GAP_PUSH_HEARTBEAT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Push.Heartbeat = d
+		}
+	}
+	// IP 定位（issue #82）：环境变量覆盖 xdb 路径（容器部署与集成测试用）。
+	// 仅在变量存在时覆盖——空串同样是合法配置（未启用）。
+	if v, ok := os.LookupEnv("GAP_IP_LOCATION_XDB_PATH"); ok {
+		c.IPLocation.XdbPath = v
 	}
 }
 

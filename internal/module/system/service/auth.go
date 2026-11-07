@@ -117,7 +117,7 @@ func (s *Service) UserInfo(ctx context.Context, userID int64) (*dto.UserInfoResp
 	}
 
 	var menus []model.Menu
-	if IsSuperAdmin(roles) {
+	if IsSuperAdmin(roles) && tenant.ID(ctx) == tenant.DefaultID {
 		menus, err = s.repo.ListMenus(ctx)
 	} else {
 		roleModels, err2 := s.repo.GetUserRoles(ctx, userID)
@@ -134,11 +134,20 @@ func (s *Service) UserInfo(ctx context.Context, userID int64) (*dto.UserInfoResp
 		return nil, err
 	}
 
-	// 只返回启用且可见的目录/菜单给前端路由。
+	// 只返回启用、可见且在套餐范围内的目录/菜单给前端路由（ADR 0012）。
+	allowed, err := s.allowedMenuIDs(ctx, tenant.ID(ctx))
+	if err != nil {
+		return nil, err
+	}
 	visible := make([]model.Menu, 0, len(menus))
 	for _, m := range menus {
 		if m.Type == model.MenuTypeButton || m.Status != model.StatusEnable {
 			continue
+		}
+		if allowed != nil {
+			if _, ok := allowed[m.ID]; !ok {
+				continue
+			}
 		}
 		visible = append(visible, m)
 	}

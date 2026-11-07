@@ -15,6 +15,10 @@ type Repository struct {
 
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
+// DB 暴露底层 gorm 连接，供数据库文档等直接读取 information_schema 的
+// 能力使用（issue #83）：information_schema 不是租户表，不走仓储方法。
+func (r *Repository) DB() *gorm.DB { return r.db }
+
 func notFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil
@@ -101,6 +105,18 @@ func (r *Repository) FindFileByBiz(ctx context.Context, id int64, bizType string
 
 func (r *Repository) DeleteFile(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.File{}, id).Error
+}
+
+// SumFileSize 统计指定租户未删除文件的 size 之和（存储配额用量口径，
+// issue #71，spec §4.2.3）。跨租户查询：显式 tenant_id 条件 + tenant.Skip，
+// 与 system 的 CountUsersByTenantID 同构（平台查看任意租户配额）。
+func (r *Repository) SumFileSize(ctx context.Context, tenantID int64) (int64, error) {
+	var total int64
+	err := tenant.Skip(r.db.WithContext(ctx)).Model(&model.File{}).
+		Where("tenant_id = ?", tenantID).
+		Select("COALESCE(SUM(size), 0)").
+		Scan(&total).Error
+	return total, err
 }
 
 // ---------- 参数配置 ----------

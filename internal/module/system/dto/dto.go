@@ -271,6 +271,7 @@ type TenantCreateReq struct {
 	ContactName   string `json:"contactName"`
 	ContactMobile string `json:"contactMobile"`
 	Status        int8   `json:"status"`
+	PackageID     int64  `json:"packageId"`
 	Domain        string `json:"domain"`
 	ExpireTime    string `json:"expireTime"`
 	AccountCount  int    `json:"accountCount"`
@@ -283,6 +284,7 @@ type TenantUpdateReq struct {
 	ContactName   string `json:"contactName"`
 	ContactMobile string `json:"contactMobile"`
 	Status        int8   `json:"status"`
+	PackageID     int64  `json:"packageId"`
 	Domain        string `json:"domain"`
 	ExpireTime    string `json:"expireTime"`
 	AccountCount  int    `json:"accountCount"`
@@ -290,6 +292,38 @@ type TenantUpdateReq struct {
 }
 
 type TenantPageReq struct {
+	PageNo   int    `form:"pageNo"`
+	PageSize int    `form:"pageSize"`
+	Name     string `form:"name"`
+	Status   *int8  `form:"status"`
+}
+
+// ---------- 租户套餐 ----------
+
+type TenantPackageCreateReq struct {
+	Name           string  `json:"name" binding:"required"`
+	Status         int8    `json:"status"`
+	MenuIDs        []int64 `json:"menuIds"`
+	MaxUsers       int64   `json:"maxUsers"`
+	MaxStorageMB   int64   `json:"maxStorageMb"`
+	MaxSMSMonthly  int64   `json:"maxSmsMonthly"`
+	MaxMailMonthly int64   `json:"maxMailMonthly"`
+	Remark         string  `json:"remark"`
+}
+
+type TenantPackageUpdateReq struct {
+	ID             int64   `json:"id" binding:"required"`
+	Name           string  `json:"name" binding:"required"`
+	Status         int8    `json:"status"`
+	MenuIDs        []int64 `json:"menuIds"`
+	MaxUsers       int64   `json:"maxUsers"`
+	MaxStorageMB   int64   `json:"maxStorageMb"`
+	MaxSMSMonthly  int64   `json:"maxSmsMonthly"`
+	MaxMailMonthly int64   `json:"maxMailMonthly"`
+	Remark         string  `json:"remark"`
+}
+
+type TenantPackagePageReq struct {
 	PageNo   int    `form:"pageNo"`
 	PageSize int    `form:"pageSize"`
 	Name     string `form:"name"`

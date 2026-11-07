@@ -28,4 +28,23 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	job.PUT("/:id/run", h.perm("infra:job:update"), h.RunJob)
 	job.DELETE("/:id", h.perm("infra:job:delete"), h.DeleteJob)
 	job.GET("/log/page", h.perm("infra:job:query"), h.PageJobLogs)
+
+	// 访问日志（issue #80，spec §5.5）：租户级 append-only 的查询/删除/清空；
+	// 跨租户业务 ID 一律 404（服务层 fail-closed 校验）。
+	apiLog := rg.Group("/infra/api-log")
+	apiLog.GET("/page", h.perm("infra:api-log:query"), h.PageAPILogs)
+	apiLog.DELETE("", h.perm("infra:api-log:delete"), h.DeleteAPILogs)
+	apiLog.DELETE("/clear", h.perm("infra:api-log:delete"), h.ClearAPILogs)
+
+	// 数据库文档（issue #83，spec §4.9/§5.8）：仅平台租户（service 层收口 403）。
+	dbdoc := rg.Group("/infra/db-doc")
+	dbdoc.GET("/tables", h.perm("infra:db-doc:query"), h.ListDBTables)
+	dbdoc.GET("/table/:name", h.perm("infra:db-doc:query"), h.GetDBTable)
+	dbdoc.GET("/export", h.perm("infra:db-doc:query"), h.ExportDBDoc)
+
+	// 监控面板（issue #84，spec §4.10/§5.8）：仅平台租户（service 层收口 403）。
+	// 只读聚合端点，不做 Prometheus/pprof/链路追踪。
+	monitor := rg.Group("/infra/monitor")
+	monitor.GET("/overview", h.perm("infra:monitor:query"), h.MonitorOverview)
+	monitor.GET("/requests", h.perm("infra:monitor:query"), h.MonitorRequests)
 }

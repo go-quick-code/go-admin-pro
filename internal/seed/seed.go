@@ -8,6 +8,7 @@ import (
 
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/system/service"
@@ -27,6 +28,9 @@ func Run(db *gorm.DB, withDemo bool) error {
 		return err
 	}
 	if err := seedMenus(db); err != nil {
+		return err
+	}
+	if err := seedTenantPackages(db); err != nil {
 		return err
 	}
 	if err := seedBPMDefinitions(db); err != nil {
@@ -56,10 +60,17 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedConfigs(db); err != nil {
 		return err
 	}
+	if err := seedMessages(db); err != nil {
+		return err
+	}
 	if err := seedPoolConfigs(db); err != nil {
 		return err
 	}
 	if err := seedJobs(db); err != nil {
+		return err
+	}
+	// 行政区划种子（issue #82，spec §4.8.2）：省市两级，表为空时幂等写入。
+	if err := Areas(db); err != nil {
 		return err
 	}
 	if withDemo {
@@ -70,6 +81,14 @@ func Run(db *gorm.DB, withDemo bool) error {
 		}
 		if seedOADemoFunc != nil {
 			if err := seedOADemoFunc(db); err != nil {
+				return err
+			}
+		}
+		// 平台能力演示数据（issue #85，spec §7.3/§9）：渠道/模板/套餐/敏感词/
+		// 社交客户端（停用）/演示消息日志，配置与密钥全部占位符。不依赖 CRM/OA
+		// 演示组织，顺序无关，放最后。
+		if seedPlatformDemoFunc != nil {
+			if err := seedPlatformDemoFunc(db); err != nil {
 				return err
 			}
 		}
@@ -87,6 +106,10 @@ var seedCRMDemoFunc func(*gorm.DB) error
 // OA 演示数据依赖 CRM 演示组织（sales1/sales2/manager）与基础种子（默认
 // 班次/考勤组、默认审批流程、报销类别字典），因此固定排在 CRM 演示数据之后。
 var seedOADemoFunc func(*gorm.DB) error
+
+// seedPlatformDemoFunc 是平台能力演示数据的写入入口，由 platform_demo.go 的
+// init 注册。不依赖 CRM/OA 演示数据（自带渠道/模板/套餐兜底），顺序无关。
+var seedPlatformDemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64
@@ -116,14 +139,6 @@ func seedTenant(db *gorm.DB) error {
 }
 
 func seedMenus(db *gorm.DB) error {
-	var count int64
-	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
 	btn := func(id, parent int64, name, perm string, sort int) sysmodel.Menu {
 		return sysmodel.Menu{
 			BaseEntity: sysmodel.BaseEntity{ID: id}, Name: name, Permission: perm,
@@ -160,6 +175,27 @@ func seedMenus(db *gorm.DB) error {
 		menu(107, 100, "租户管理", "tenant", "system/tenant/index", "system:tenant:query", "Shop", 7),
 		menu(108, 100, "登录日志", "login-log", "system/login-log/index", "system:login-log:query", "Document", 8),
 		menu(109, 100, "操作日志", "operate-log", "system/operate-log/index", "system:operate-log:query", "Tickets", 9),
+		// 租户套餐（issue #69）：110 段（109 操作日志已占用，110 起空闲）。
+		// 套餐是平台级资源，页面仅平台租户可操作；按钮码按菜单 ID×10+n。
+		menu(110, 100, "租户套餐", "tenant-package", "system/tenant-package/index", "system:tenant-package:query", "Box", 10),
+		btn(1101, 110, "套餐新增", "system:tenant-package:create", 1),
+		btn(1102, 110, "套餐修改", "system:tenant-package:update", 2),
+		btn(1103, 110, "套餐删除", "system:tenant-package:delete", 3),
+		// 社交登录（issue #76，spec §7.2）：111 段。客户端管理仅平台租户可操作；
+		// 绑定用户查询/解绑是租户内管理动作。按钮码 1111–1115（菜单 ID×10+n，
+		// grep 去重确认空闲）。provider 实现（微信/钉钉/企微）由 #77 承接。
+		menu(111, 100, "社交登录", "social", "system/social/index", "system:social:query", "Connection", 11),
+		btn(1111, 111, "客户端新增", "system:social:create", 1),
+		btn(1112, 111, "客户端修改", "system:social:update", 2),
+		btn(1113, 111, "客户端删除", "system:social:delete", 3),
+		btn(1114, 111, "绑定用户查询", "system:social-user:query", 4),
+		btn(1115, 111, "绑定用户解绑", "system:social-user:delete", 5),
+		// 敏感词（issue #81，spec §7.2）：112 段。租户级词库管理 + 检测文本框；
+		// 按钮码 1121–1123（菜单 ID×10+n，grep 去重确认空闲）。
+		menu(112, 100, "敏感词", "sensitive-word", "system/sensitive-word/index", "system:sensitive-word:query", "Key", 12),
+		btn(1121, 112, "敏感词新增", "system:sensitive-word:create", 1),
+		btn(1122, 112, "敏感词修改", "system:sensitive-word:update", 2),
+		btn(1123, 112, "敏感词删除", "system:sensitive-word:delete", 3),
 
 		btn(1011, 101, "用户新增", "system:user:create", 1),
 		btn(1012, 101, "用户修改", "system:user:update", 2),
@@ -189,11 +225,28 @@ func seedMenus(db *gorm.DB) error {
 		btn(1073, 107, "租户删除", "system:tenant:delete", 3),
 		btn(1081, 108, "日志清空", "system:login-log:delete", 1),
 		btn(1091, 109, "日志清空", "system:operate-log:delete", 1),
+		// 地区管理（issue #82，spec §4.8/§5.7/§7.2）：113 段（grep 去重确认
+		// 113/1131 空闲）。行政区划是平台级参考数据，页面只读 + 平台导入；
+		// 查询码挂菜单（树/子级接口对所有登录用户开放，spec §4.8.1，
+		// 供 AreaCascader 在任意页面使用），导入是平台租户专属动作。
+		menu(113, 100, "地区管理", "area", "system/area/index", "system:area:query", "Location", 13),
+		btn(1131, 113, "地区导入", "system:area:import", 1),
 
 		dir(200, 0, "基础设施", "/infra", "Tools", 20),
 		menu(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),
 		menu(202, 200, "参数配置", "config", "infra/config/index", "infra:config:query", "SetUp", 2),
 		menu(203, 200, "定时任务", "job", "infra/job/index", "infra:job:query", "Timer", 3),
+		// 访问日志（issue #80，spec §7.2）：204 段，按钮码 2041（菜单 ID×10+n，
+		// grep 去重确认 204/2041 未被占用）。
+		menu(204, 200, "访问日志", "api-log", "infra/api-log/index", "infra:api-log:query", "Document", 4),
+		// 数据库文档（issue #83，spec §7.2）：205 段（grep 去重确认 205 空闲）。
+		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
+		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
+		// 监控面板（issue #84，spec §7.2）：206 段（grep 去重确认 206/2060 空闲）。
+		// overview/requests 共用 infra:monitor:query（spec §5.8 无其他权限码，
+		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		menu(206, 200, "监控面板", "monitor", "infra/monitor/index", "infra:monitor:query", "Monitor", 6),
 
 		btn(2011, 201, "文件上传", "infra:file:upload", 1),
 		btn(2012, 201, "文件删除", "infra:file:delete", 2),
@@ -203,6 +256,8 @@ func seedMenus(db *gorm.DB) error {
 		btn(2031, 203, "任务新增", "infra:job:create", 1),
 		btn(2032, 203, "任务修改", "infra:job:update", 2),
 		btn(2033, 203, "任务删除", "infra:job:delete", 3),
+		// 批量删除与清空共用删除码（spec §5.5：删除/清空均为 infra:api-log:delete）。
+		btn(2041, 204, "日志删除", "infra:api-log:delete", 1),
 
 		menu(300, 0, "代码生成", "/codegen", "infra/codegen/index", "infra:codegen:query", "MagicStick", 30),
 		btn(3001, 300, "生成代码", "infra:codegen:generate", 1),
@@ -460,6 +515,37 @@ func seedMenus(db *gorm.DB) error {
 		btn(5121, 512, "任务办理", "bpm:task:handle", 1),
 		btn(5122, 512, "实例查询", "bpm:instance:query", 2),
 		btn(5123, 512, "通知查询", "notify:message:query", 3),
+
+		// 消息中心（issue #72，spec §7.2）：600 目录 + 601 短信管理 + 602 邮件管理
+		// + 603 发送日志。菜单查询码按 spec：601 挂 message:channel:query、
+		// 602 挂 message:mail:query、603 挂 message:log:query；模板没有独立菜单，
+		// 模板查询/增删改按钮码挂 601/602 段（ID = 菜单ID*10+n，grep 去重确认
+		// 600/601/602/603 与 6011–6019/6021–6029/6031–6032 未被占用）。
+		// 渠道/模板的「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
+		dir(600, 0, "消息中心", "/message", "ChatDotRound", 60),
+		menu(601, 600, "短信管理", "sms", "message/sms/index", "message:channel:query", "Iphone", 1),
+		btn(6011, 601, "渠道查询", "message:channel:query", 1),
+		btn(6012, 601, "渠道新增", "message:channel:create", 2),
+		btn(6013, 601, "渠道修改", "message:channel:update", 3),
+		btn(6014, 601, "渠道删除", "message:channel:delete", 4),
+		btn(6015, 601, "模板查询", "message:template:query", 5),
+		btn(6016, 601, "模板新增", "message:template:create", 6),
+		btn(6017, 601, "模板修改", "message:template:update", 7),
+		btn(6018, 601, "模板删除", "message:template:delete", 8),
+		btn(6019, 601, "短信发送", "message:sms:send", 9),
+		menu(602, 600, "邮件管理", "mail", "message/mail/index", "message:mail:query", "Message", 2),
+		btn(6021, 602, "渠道查询", "message:channel:query", 1),
+		btn(6022, 602, "渠道新增", "message:channel:create", 2),
+		btn(6023, 602, "渠道修改", "message:channel:update", 3),
+		btn(6024, 602, "渠道删除", "message:channel:delete", 4),
+		btn(6025, 602, "模板查询", "message:template:query", 5),
+		btn(6026, 602, "模板新增", "message:template:create", 6),
+		btn(6027, 602, "模板修改", "message:template:update", 7),
+		btn(6028, 602, "模板删除", "message:template:delete", 8),
+		btn(6029, 602, "邮件发送", "message:mail:send", 9),
+		menu(603, 600, "发送日志", "log", "message/log/index", "message:log:query", "Tickets", 3),
+		btn(6031, 603, "日志重发", "message:log:resend", 1),
+		btn(6032, 603, "日志删除", "message:log:delete", 2),
 	}
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
@@ -472,10 +558,71 @@ func seedMenus(db *gorm.DB) error {
 		crmDashboard,
 		btn(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
 	)
-	if err := db.Create(&menus).Error; err != nil {
+	// 菜单补齐（issue #69）：按 ID 只插入缺失项，不更新、不复活已软删菜单。
+	// 旧实现「有菜单就整体跳过」会让存量库永远看不到新版本追加的菜单；
+	// Unscoped 把软删 ID 也视为已存在，避免重新插入撞主键或复活管理员删除的菜单。
+	var existing []int64
+	if err := tenant.Skip(db).Unscoped().Model(&sysmodel.Menu{}).Pluck("id", &existing).Error; err != nil {
 		return err
 	}
-	slog.Info("seed menus created", "count", len(menus))
+	seen := make(map[int64]struct{}, len(existing))
+	for _, id := range existing {
+		seen[id] = struct{}{}
+	}
+	missing := make([]sysmodel.Menu, 0, len(menus))
+	for _, menu := range menus {
+		if _, ok := seen[menu.ID]; ok {
+			continue
+		}
+		missing = append(missing, menu)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := db.Create(&missing).Error; err != nil {
+		return err
+	}
+	slog.Info("seed menus created", "count", len(missing))
+	return nil
+}
+
+// seedTenantPackages 写入默认「标准版」套餐（issue #69）：全部启用目录/菜单、
+// 配额不限。仅当套餐表为空时写入；管理员改名/删除后重复启动不复活。
+func seedTenantPackages(db *gorm.DB) error {
+	return ensureStandardTenantPackage(db)
+}
+
+// ensureStandardTenantPackage 保证存在默认「标准版」套餐（issue #69，spec §7.3）：
+// 套餐表为空时写入一条全部启用目录/菜单、配额不限的套餐。基础种子与平台演示
+// 种子（platform_demo.go）共用该兜底，幂等——表非空（含只剩管理端自建套餐）
+// 即跳过，不覆盖已有数据。
+func ensureStandardTenantPackage(db *gorm.DB) error {
+	var count int64
+	if err := tenant.Skip(db).Model(&sysmodel.TenantPackage{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	var menuIDs sysmodel.Int64List
+	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).
+		Where("type IN ?", []int8{sysmodel.MenuTypeDir, sysmodel.MenuTypeMenu}).
+		Where("status = ?", sysmodel.StatusEnable).
+		Order("id ASC").
+		Pluck("id", &menuIDs).Error; err != nil {
+		return err
+	}
+	pkg := &sysmodel.TenantPackage{
+		BaseEntity: sysmodel.BaseEntity{ID: 1},
+		Name:       "标准版",
+		Status:     sysmodel.StatusEnable,
+		MenuIDs:    menuIDs,
+		Remark:     "默认套餐：全部菜单，配额不限",
+	}
+	if err := tenant.Skip(db).Create(pkg).Error; err != nil {
+		return err
+	}
+	slog.Info("seed tenant package created", "name", pkg.Name, "menus", len(menuIDs))
 	return nil
 }
 
@@ -783,6 +930,76 @@ func seedConfigs(db *gorm.DB) error {
 	return tenant.Skip(db).Create(&configs).Error
 }
 
+// seedMessages 写入消息模块默认数据（issue #72，spec §7.3）：一条 log provider
+// 的短信渠道、一条 log provider 的邮件渠道，以及两条欢迎模板。
+// 仅当渠道表与模板表都为空时写入——管理员删除/改名后重复启动不复活；
+// 渠道/模板是平台级表，仍显式 tenant.Skip 表示系统级写入。
+func seedMessages(db *gorm.DB) error {
+	var channelCount, templateCount int64
+	if err := tenant.Skip(db).Model(&msgmodel.Channel{}).Count(&channelCount).Error; err != nil {
+		return err
+	}
+	if err := tenant.Skip(db).Model(&msgmodel.Template{}).Count(&templateCount).Error; err != nil {
+		return err
+	}
+	if channelCount > 0 || templateCount > 0 {
+		return nil
+	}
+
+	channels := []msgmodel.Channel{
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 1},
+			ChannelType: msgmodel.ChannelTypeSMS,
+			Code:        "sms-log",
+			Name:        "短信日志渠道",
+			Provider:    msgmodel.ProviderLog,
+			Config:      "{}",
+			Status:      msgmodel.StatusEnable,
+			Remark:      "内置开发渠道：只写应用日志，不真正发送（ADR 0010）",
+		},
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 2},
+			ChannelType: msgmodel.ChannelTypeMail,
+			Code:        "mail-log",
+			Name:        "邮件日志渠道",
+			Provider:    msgmodel.ProviderLog,
+			Config:      "{}",
+			Status:      msgmodel.StatusEnable,
+			Remark:      "内置开发渠道：只写应用日志，不真正发送（ADR 0010）",
+		},
+	}
+	if err := tenant.Skip(db).Create(&channels).Error; err != nil {
+		return fmt.Errorf("seed message channels: %w", err)
+	}
+
+	templates := []msgmodel.Template{
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 1},
+			ChannelType: msgmodel.ChannelTypeSMS,
+			Code:        "welcome",
+			Name:        "欢迎短信",
+			Content:     "您好 {{name}}，欢迎使用 go-admin-pro。",
+			Params:      `["name"]`,
+			Status:      msgmodel.StatusEnable,
+		},
+		{
+			BaseEntity:  msgmodel.BaseEntity{ID: 2},
+			ChannelType: msgmodel.ChannelTypeMail,
+			Code:        "welcome",
+			Name:        "欢迎邮件",
+			Title:       "欢迎使用 go-admin-pro",
+			Content:     "<p>您好 {{name}}，欢迎使用 go-admin-pro。</p>",
+			Params:      `["name"]`,
+			Status:      msgmodel.StatusEnable,
+		},
+	}
+	if err := tenant.Skip(db).Create(&templates).Error; err != nil {
+		return fmt.Errorf("seed message templates: %w", err)
+	}
+	slog.Info("seed message defaults created", "channels", len(channels), "templates", len(templates))
+	return nil
+}
+
 func seedJobs(db *gorm.DB) error {
 	var count int64
 	if err := tenant.Skip(db).Model(&inframodel.Job{}).Count(&count).Error; err != nil {
@@ -838,6 +1055,19 @@ func seedJobs(db *gorm.DB) error {
 			RetryCount:     0,
 			Status:         inframodel.JobStatusRunning,
 			Remark:         "每 5 分钟扫描 15 分钟内开始的会议室预约，向预约人发送 meeting_reminder 通知（reminded_at 保证只发一次）；handler_param 可填 YYYY-MM-DD HH:mm:ss 固定现在",
+		},
+		// 访问日志清理（issue #80，spec §4.6.7）：每日 03:00 按保留期清理
+		// 跨租户的 infra_api_log（tenant.Skip）。保留期取配置
+		// access-log.retention-days（默认 30），handler_param 可填天数覆盖；
+		// 只删过期日志，按保留期例行清理，默认启用。
+		{
+			TenantID:       1,
+			Name:           "访问日志清理",
+			HandlerName:    "cleanAccessLogs",
+			CronExpression: "0 0 3 * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每天 03:00 清理超过保留期（access-log.retention-days，默认 30 天）的 API 访问日志（跨租户）；handler_param 可填天数覆盖保留期",
 		},
 	}
 	// Create 会把带 default 标签的零值列回写成数据库默认值（1 暂停），
