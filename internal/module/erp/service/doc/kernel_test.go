@@ -65,6 +65,10 @@ func (s *fakeStore) Find(_ context.Context, id int64) (*fakeHeader, error) {
 	return &cp, nil
 }
 
+func (s *fakeStore) FindWithItems(ctx context.Context, id int64) (*fakeHeader, error) {
+	return s.Find(ctx, id)
+}
+
 func (s *fakeStore) Transaction(_ context.Context, fn func(doc.Tx[*fakeHeader, fakeItem]) error) error {
 	return s.run(fn)
 }

@@ -33,6 +33,8 @@ type Header interface {
 // Store 是内核的存储入口：事务外 finder + 两种隔离级别的事务。
 type Store[H Header, I any] interface {
 	Find(ctx context.Context, id int64) (H, error)
+	// FindWithItems 事务外读取主表并预载明细（详情页用，可见性由内核校验）。
+	FindWithItems(ctx context.Context, id int64) (H, error)
 	Transaction(ctx context.Context, fn func(Tx[H, I]) error) error
 	TransactionReadCommitted(ctx context.Context, fn func(Tx[H, I]) error) error
 }

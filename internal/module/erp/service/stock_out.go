@@ -28,42 +28,12 @@ func (s *Service) stockOutKernel() *doc.Kernel[*model.StockOut, model.StockOutIt
 	})
 }
 
-// stockOutStore 装配其它出库单的仓储面（tracer 手写；候选 02 用泛型 store 替换）。
+// stockOutStore 装配其它出库单的泛型存储（候选 02a；表名/关联由模型自带）。
 func (s *Service) stockOutStore() doc.Store[*model.StockOut, model.StockOutItem] {
-	return newRepoDocStore(s.repo, s.businessNow, stockOutOps)
-}
-
-// stockOutOps 把 repository 方法装配成内核 Tx 面（nil 行翻译为 doc.ErrNotFound）。
-func stockOutOps(repo *repository.Repository) repoDocOps[*model.StockOut, model.StockOutItem] {
-	notFound := func(row *model.StockOut, err error) (*model.StockOut, error) {
-		if err != nil {
-			return nil, err
-		}
-		if row == nil {
-			return nil, doc.ErrNotFound
-		}
-		return row, nil
-	}
-	return repoDocOps[*model.StockOut, model.StockOutItem]{
-		Find: func(ctx context.Context, id int64) (*model.StockOut, error) {
-			return notFound(repo.FindStockOutByID(ctx, id))
-		},
-		FindWithItems: func(ctx context.Context, id int64) (*model.StockOut, error) {
-			return notFound(repo.FindStockOutWithItems(ctx, id))
-		},
-		Lock: func(ctx context.Context, id int64) (*model.StockOut, error) {
-			return notFound(repo.FindStockOutByIDForUpdate(ctx, id))
-		},
-		Create:      repo.CreateStockOut,
-		Save:        repo.SaveStockOut,
-		CreateItems: repo.CreateStockOutItems,
-		DeleteItems: repo.DeleteStockOutItems,
-		DeleteIfStatus: func(ctx context.Context, id int64, status int8) (int64, error) {
-			// 内核只删未审核（status 恒为 10）；仓储方法已把谓词绑定到 DELETE。
-			return repo.DeleteStockOutIfUnaudited(ctx, id)
-		},
-		UpdateStatusIf: repo.UpdateStockOutStatusIf,
-	}
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockOut, model.StockOutItem]{
+		New:     func() *model.StockOut { return &model.StockOut{} },
+		ItemsFK: "stock_out_id",
+	})
 }
 
 // ListStockOuts 其它出库单分页（筛选 + owner 数据范围，spec §5）。
@@ -135,11 +105,7 @@ func (s *Service) stockOutFilter(ctx context.Context, req *dto.StockOutPageReq) 
 
 // GetStockOut 其它出库单详情（带头 + 明细，产品名称服务端解析）。
 func (s *Service) GetStockOut(ctx context.Context, id int64) (*dto.StockOutDetail, error) {
-	doc, err := s.findStockOut(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindStockOutWithItems(ctx, doc.ID)
+	full, err := s.stockOutKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}

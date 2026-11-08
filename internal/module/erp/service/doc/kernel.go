@@ -27,14 +27,30 @@ func (k *Kernel[H, I]) mapNotFound(err error) error {
 
 // Find 取单据并做可见性校验（数据范围外一律 404）。
 func (k *Kernel[H, I]) Find(ctx context.Context, id int64) (H, error) {
-	row, err := k.store.Find(ctx, id)
+	return k.findOne(ctx, id, false)
+}
+
+// FindWithItems 取单据（含明细）并做可见性校验（详情页用）。
+func (k *Kernel[H, I]) FindWithItems(ctx context.Context, id int64) (H, error) {
+	return k.findOne(ctx, id, true)
+}
+
+func (k *Kernel[H, I]) findOne(ctx context.Context, id int64, withItems bool) (H, error) {
+	var zero H
+	var (
+		row H
+		err error
+	)
+	if withItems {
+		row, err = k.store.FindWithItems(ctx, id)
+	} else {
+		row, err = k.store.Find(ctx, id)
+	}
 	if err != nil {
-		var zero H
 		return zero, k.mapNotFound(err)
 	}
 	ownerUserID, ownerDeptID := row.Base().GetOwner()
 	if err := k.env.CheckRowVisible(ctx, k.spec.Labels.Doc, ownerUserID, ownerDeptID); err != nil {
-		var zero H
 		return zero, err
 	}
 	return row, nil
