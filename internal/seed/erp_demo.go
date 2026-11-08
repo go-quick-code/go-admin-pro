@@ -510,10 +510,16 @@ func erpDemoSeedStockCheck(ctx context.Context, stock erpDemoStockApplier, tx *g
 	}
 	doc := erpmodel.StockCheck{
 		BaseEntity: erpDemoBase(erpDemoStockCheckID, checkTime, creator),
-		TenantID:   erpDemoTenantID, No: checkNo,
-		WarehouseID: erpDemoWarehouseMainID, CheckTime: checkTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示盘点：终端盘盈 1 台、键鼠盘亏 1 盒",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:          checkNo,
+		WarehouseID: erpDemoWarehouseMainID,
+		CheckTime:   checkTime,
+		Remark:      "演示盘点：终端盘盈 1 台、键鼠盘亏 1 盒",
 	}
 	if err := tenant.Skip(tx).Create(&doc).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示盘点单: %w", err)

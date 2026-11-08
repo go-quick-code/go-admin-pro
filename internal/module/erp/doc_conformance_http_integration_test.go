@@ -321,6 +321,66 @@ func docConformanceCases() []docConformanceCase {
 			},
 		},
 		{
+			name:      "stock-move",
+			path:      "/erp/stock-move",
+			docType:   "stock-move",
+			noPattern: stockMoveNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				fromID, productID := setupStockEnv(t, env, token, tag)
+				to := createWarehouse(t, env, token, tag+"目标仓", nil)
+				toID := int64(to["id"].(float64))
+				seedWarehouseStock(t, env, token, fromID, productID, "10")
+				return fromID, productID, map[string]any{"fromWarehouseId": fromID, "toWarehouseId": toID}
+			},
+			create: func(env *testutil.IntegrationEnv, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"fromWarehouseId": extras["fromWarehouseId"],
+					"toWarehouseId":   extras["toWarehouseId"],
+					"moveTime":        env.Date() + " 10:00:00",
+					"items":           []map[string]any{moveItemJSON(productID, "5")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":              docID,
+					"fromWarehouseId": extras["fromWarehouseId"],
+					"toWarehouseId":   extras["toWarehouseId"],
+					"moveTime":        env.Date() + " 11:00:00",
+					"items":           []map[string]any{moveItemJSON(productID, "2")},
+				}
+			},
+		},
+		{
+			name:      "stock-check",
+			path:      "/erp/stock-check",
+			docType:   "stock-check",
+			noPattern: stockCheckNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID := setupStockEnv(t, env, token, tag)
+				seedWarehouseStock(t, env, token, warehouseID, productID, "10")
+				return warehouseID, productID, nil
+			},
+			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64, _ map[string]any) map[string]any {
+				return map[string]any{
+					"warehouseId": warehouseID,
+					"checkTime":   env.Date() + " 10:00:00",
+					"remark":      "conformance",
+					"items":       []map[string]any{checkItemJSON(productID, "7")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64, _ map[string]any) map[string]any {
+				return map[string]any{
+					"id":          docID,
+					"warehouseId": warehouseID,
+					"checkTime":   env.Date() + " 11:00:00",
+					"remark":      "conformance-updated",
+					"items":       []map[string]any{checkItemJSON(productID, "8")},
+				}
+			},
+		},
+		{
 			name:      "finance-receipt",
 			path:      "/erp/finance-receipt",
 			docType:   "finance-receipt",

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 )
@@ -25,37 +24,6 @@ type StockCheckFilter struct {
 
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
-}
-
-// CreateStockCheck 创建库存盘点单主表。
-func (r *Repository) CreateStockCheck(ctx context.Context, row *model.StockCheck) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateStockCheckItems 批量创建盘点单明细。
-func (r *Repository) CreateStockCheckItems(ctx context.Context, items []model.StockCheckItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindStockCheckByID 按 ID 查盘点单主表（租户插件自动过滤），不存在返回 nil。
-func (r *Repository) FindStockCheckByID(ctx context.Context, id int64) (*model.StockCheck, error) {
-	var row model.StockCheck
-	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindStockCheckWithItems 查询盘点单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindStockCheckWithItems(ctx context.Context, id int64) (*model.StockCheck, error) {
-	var row model.StockCheck
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
 }
 
 // ListStockChecks 按筛选与数据范围谓词分页查询盘点单（固定 id DESC）。
@@ -101,43 +69,6 @@ func (r *Repository) stockCheckQuery(ctx context.Context, f StockCheckFilter) *g
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// FindStockCheckByIDForUpdate 行锁读取盘点单（安全 F1：编辑事务内重读并复核
-// status=10，与审核认领串行化）。只能在事务内调用。
-func (r *Repository) FindStockCheckByIDForUpdate(ctx context.Context, id int64) (*model.StockCheck, error) {
-	var row model.StockCheck
-	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// SaveStockCheck 全量保存盘点单主表（更新路径）。
-func (r *Repository) SaveStockCheck(ctx context.Context, row *model.StockCheck) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteStockCheckIfUnaudited 条件软删除盘点单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteStockCheckIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.StockCheck{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteStockCheckItems 软删除盘点单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeleteStockCheckItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("stock_check_id = ?", docID).
-		Delete(&model.StockCheckItem{}).Error
-}
-
-// UpdateStockCheckStatusIf 乐观认领审核状态：仅当当前状态为 fromStatus 时翻转为
-// toStatus，返回影响行数（0 表示已被并发请求改变，service 层翻译 409）。
-func (r *Repository) UpdateStockCheckStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.StockCheck{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountStockCheckItemsByProduct 产品删除引用计数：盘点单明细引用该产品的行数

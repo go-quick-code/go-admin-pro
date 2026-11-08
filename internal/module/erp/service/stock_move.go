@@ -7,14 +7,35 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// stockMoveKernel 构造库存调拨单内核（无父单；审核/反审核各生成成对流水）。
+func (s *Service) stockMoveKernel() *doc.Kernel[*model.StockMove, model.StockMoveItem] {
+	return doc.New(docEnv{s}, s.stockMoveStore(), doc.Spec[*model.StockMove, model.StockMoveItem]{
+		Labels:     doc.Labels{Doc: "库存调拨单", Item: "调拨明细"},
+		NoPrefix:   StockMoveNoPrefix,
+		SeqBizType: SeqBizTypeStockMove,
+		Approve:    s.approveStockMoveDoc,
+		Unapprove:  s.unapproveStockMoveDoc,
+	})
+}
+
+// stockMoveStore 装配库存调拨单的泛型存储。
+func (s *Service) stockMoveStore() doc.Store[*model.StockMove, model.StockMoveItem] {
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockMove, model.StockMoveItem]{
+		New:     func() *model.StockMove { return &model.StockMove{} },
+		ItemsFK: "stock_move_id",
+	})
+}
 
 // ListStockMoves 库存调拨单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListStockMoves(ctx context.Context, req *dto.StockMovePageReq) ([]dto.StockMoveRow, int64, error) {
@@ -81,11 +102,7 @@ func (s *Service) stockMoveFilter(ctx context.Context, req *dto.StockMovePageReq
 
 // GetStockMove 调拨单详情（带头 + 明细，产品/两仓名称服务端解析）。
 func (s *Service) GetStockMove(ctx context.Context, id int64) (*dto.StockMoveDetail, error) {
-	doc, err := s.findStockMove(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindStockMoveWithItems(ctx, doc.ID)
+	full, err := s.stockMoveKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -145,269 +162,154 @@ func (s *Service) CreateStockMove(ctx context.Context, req *dto.StockMoveCreateR
 	if err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.StockMove
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypeStockMove, StockMoveNoPrefix)
-		if err != nil {
-			return err
-		}
-		doc = &model.StockMove{
-			No:              no,
-			FromWarehouseID: req.FromWarehouseId,
-			ToWarehouseID:   req.ToWarehouseId,
-			MoveTime:        moveTime,
-			Status:          model.DocStatusUnaudited,
-			OwnerUserID:     ownerID,
-			OwnerDeptID:     deptID,
-		}
-		if err := tx.CreateStockMove(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreateStockMoveItems(ctx, buildStockMoveItemRows(doc.ID, items))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return s.stockMoveKernel().Create(ctx, nil,
+		func(ctx context.Context) (*model.StockMove, error) {
+			return &model.StockMove{
+				FromWarehouseID: req.FromWarehouseId,
+				ToWarehouseID:   req.ToWarehouseId,
+				MoveTime:        moveTime,
+			}, nil
+		},
+		func(ctx context.Context, d *model.StockMove) ([]model.StockMoveItem, error) {
+			return buildStockMoveItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // UpdateStockMove 修改库存调拨单（仅未审核，已审核 409）：字段全量覆盖；
-// 单号不采纳（保持原号）；明细整体替换（软删旧明细）。
+// 单号不采纳；明细整体替换。
 func (s *Service) UpdateStockMove(ctx context.Context, req *dto.StockMoveUpdateReq) error {
-	row, err := s.findStockMove(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	if err := ensureDistinctWarehouses(req.FromWarehouseId, req.ToWarehouseId); err != nil {
-		return err
-	}
-	items, err := buildMoveItemDrafts(req.Items)
-	if err != nil {
-		return err
-	}
-	if err := s.checkWarehousesExist(ctx, req.FromWarehouseId, req.ToWarehouseId); err != nil {
-		return err
-	}
-	if err := s.checkProductsExist(ctx, moveItemProductIDs(items)); err != nil {
-		return err
-	}
-	moveTime, err := s.parseDocTime(req.MoveTime, "调拨时间")
-	if err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
-		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
-		locked, err := tx.FindStockMoveByIDForUpdate(ctx, row.ID)
-		if err != nil {
+	var items []moveItemDraft
+	var moveTime time.Time
+	return s.stockMoveKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.StockMove) error {
+			if err := ensureDistinctWarehouses(req.FromWarehouseId, req.ToWarehouseId); err != nil {
+				return err
+			}
+			var err error
+			items, err = buildMoveItemDrafts(req.Items)
+			if err != nil {
+				return err
+			}
+			if err := s.checkWarehousesExist(ctx, req.FromWarehouseId, req.ToWarehouseId); err != nil {
+				return err
+			}
+			if err := s.checkProductsExist(ctx, moveItemProductIDs(items)); err != nil {
+				return err
+			}
+			moveTime, err = s.parseDocTime(req.MoveTime, "调拨时间")
 			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("库存调拨单不存在")
-		}
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		locked.FromWarehouseID = req.FromWarehouseId
-		locked.ToWarehouseID = req.ToWarehouseId
-		locked.MoveTime = moveTime
-		if err := tx.SaveStockMove(ctx, locked); err != nil {
-			return err
-		}
-		// 明细整体替换：软删旧行 + 插入新行（未审核单无流水引用，安全）。
-		if err := tx.DeleteStockMoveItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreateStockMoveItems(ctx, buildStockMoveItemRows(row.ID, items))
-	})
+		},
+		nil,
+		func(ctx context.Context, _ doc.Tx[*model.StockMove, model.StockMoveItem], d *model.StockMove) error {
+			d.FromWarehouseID = req.FromWarehouseId
+			d.ToWarehouseID = req.ToWarehouseId
+			d.MoveTime = moveTime
+			return nil
+		},
+		func(ctx context.Context, d *model.StockMove) ([]model.StockMoveItem, error) {
+			return buildStockMoveItemRows(d.ID, items), nil
+		},
+	)
 }
 
-// DeleteStockMove 删除库存调拨单（仅未审核，已审核 409）：主表 + 明细一并
-// 软删除；不动库存（未审核未落账）。
+// DeleteStockMove 删除库存调拨单（仅未审核，已审核 409）。
 func (s *Service) DeleteStockMove(ctx context.Context, id int64) error {
-	row, err := s.findStockMove(ctx, id)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
-		deleted, err := tx.DeleteStockMoveIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeleteStockMoveItems(ctx, row.ID)
-	})
+	return s.stockMoveKernel().Delete(ctx, id)
 }
 
-// UpdateStockMoveStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
+// UpdateStockMoveStatus 审核（10→20）/反审核（20→10），幂等目标态。
 func (s *Service) UpdateStockMoveStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
-	row, err := s.findStockMove(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
-	if err != nil {
-		return err
-	}
-	if idempotent {
-		return nil
-	}
-	if req.Status == model.DocStatusApproved {
-		return s.approveStockMove(ctx, row)
-	}
-	return s.unapproveStockMove(ctx, row)
+	return s.stockMoveKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
-// approveStockMove 审核落账（spec §4.6）：事务内先乐观认领状态（防并发双重
-// 审核）→ 重读明细 → 按仓库 ID 升序先取两仓行锁防死锁 → 逐行经唯一入账入口
-// 入账：出仓负、入仓正，两笔流水同额成对（同一 biz_type stock_move）。
-// 源仓不足由入账入口 409，整单事务回滚（状态与流水均不落库）。
-func (s *Service) approveStockMove(ctx context.Context, row *model.StockMove) error {
-	if err := ensureDistinctWarehouses(row.FromWarehouseID, row.ToWarehouseID); err != nil {
-		return err
-	}
-	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.FromWarehouseID, row.ToWarehouseID})
+// approveStockMoveDoc 审核落账（内核已认领并装载明细）：按仓库 ID 升序锁两仓
+// 行 → 逐行出仓负、入仓正，两笔流水同额成对（同一 biz_type stock_move）。
+func (s *Service) approveStockMoveDoc(ctx context.Context, tx doc.Tx[*model.StockMove, model.StockMoveItem], d *model.StockMove) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateStockMoveStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-		if err != nil {
+	if err := ensureDistinctWarehouses(d.FromWarehouseID, d.ToWarehouseID); err != nil {
+		return err
+	}
+	warehouseNames, err := repo.FindWarehouseNamesIn(ctx, []int64{d.FromWarehouseID, d.ToWarehouseID})
+	if err != nil {
+		return err
+	}
+	items := sortItemsByID(d.Items, func(it model.StockMoveItem) int64 { return it.ID })
+	keys := make([]stockLockKey, 0, len(items)*2)
+	for _, item := range items {
+		keys = append(keys, stockLockKey{WarehouseID: d.FromWarehouseID, ProductID: item.ProductID})
+		keys = append(keys, stockLockKey{WarehouseID: d.ToWarehouseID, ProductID: item.ProductID})
+	}
+	if err := s.lockStockRows(ctx, repo, keys); err != nil {
+		return err
+	}
+	productNames, err := s.productNamesForItems(ctx, repo, stockMoveItemProducts(items))
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID: item.ProductID, WarehouseID: d.FromWarehouseID, Count: negQty(item.Count),
+			BizType: model.StockRecordBizStockMove, BizID: d.ID, BizItemID: item.ID, BizNo: d.No,
+			ProductName: productNames[item.ProductID], WarehouseName: warehouseNames[d.FromWarehouseID],
+		}); err != nil {
 			return err
 		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindStockMoveWithItems(ctx, row.ID)
-		if err != nil {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID: item.ProductID, WarehouseID: d.ToWarehouseID, Count: item.Count,
+			BizType: model.StockRecordBizStockMove, BizID: d.ID, BizItemID: item.ID, BizNo: d.No,
+			ProductName: productNames[item.ProductID], WarehouseName: warehouseNames[d.ToWarehouseID],
+		}); err != nil {
 			return err
 		}
-		items := sortItemsByID(doc.Items, func(it model.StockMoveItem) int64 { return it.ID })
-		keys := make([]stockLockKey, 0, len(items)*2)
-		for _, item := range items {
-			keys = append(keys, stockLockKey{WarehouseID: doc.FromWarehouseID, ProductID: item.ProductID})
-			keys = append(keys, stockLockKey{WarehouseID: doc.ToWarehouseID, ProductID: item.ProductID})
-		}
-		if err := s.lockStockRows(ctx, tx, keys); err != nil {
-			return err
-		}
-		productNames, err := s.productNamesForItems(ctx, tx, stockMoveItemProducts(items))
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			// 出仓：count 取负入账（源仓不足 → 409）。
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.FromWarehouseID,
-				Count:         negQty(item.Count),
-				BizType:       model.StockRecordBizStockMove,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseNames[doc.FromWarehouseID],
-			}); err != nil {
-				return err
-			}
-			// 入仓：同额正数入账（与出仓流水成对）。
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.ToWarehouseID,
-				Count:         item.Count,
-				BizType:       model.StockRecordBizStockMove,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseNames[doc.ToWarehouseID],
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
-// unapproveStockMove 反审核回滚（spec §4.3/§4.6）：事务内先乐观认领状态 →
-// 逐行经唯一入账入口新增 _CANCEL 反向流水（出仓 +count、入仓 −count，原流水
-// 保留）→ 两仓余额恢复。调入仓若已被后续业务消耗，反向出账 409（整单回滚）。
-func (s *Service) unapproveStockMove(ctx context.Context, row *model.StockMove) error {
-	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.FromWarehouseID, row.ToWarehouseID})
+// unapproveStockMoveDoc 反审核回滚（内核已认领并装载明细）：按仓库 ID 升序锁
+// 两仓行 → 出仓反向正入、入仓反向负出（_CANCEL，原流水保留）。
+func (s *Service) unapproveStockMoveDoc(ctx context.Context, tx doc.Tx[*model.StockMove, model.StockMoveItem], d *model.StockMove) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateStockMoveStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
+	warehouseNames, err := repo.FindWarehouseNamesIn(ctx, []int64{d.FromWarehouseID, d.ToWarehouseID})
+	if err != nil {
+		return err
+	}
+	items := sortItemsByID(d.Items, func(it model.StockMoveItem) int64 { return it.ID })
+	keys := make([]stockLockKey, 0, len(items)*2)
+	for _, item := range items {
+		keys = append(keys, stockLockKey{WarehouseID: d.FromWarehouseID, ProductID: item.ProductID})
+		keys = append(keys, stockLockKey{WarehouseID: d.ToWarehouseID, ProductID: item.ProductID})
+	}
+	if err := s.lockStockRows(ctx, repo, keys); err != nil {
+		return err
+	}
+	productNames, err := s.productNamesForItems(ctx, repo, stockMoveItemProducts(items))
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID: item.ProductID, WarehouseID: d.FromWarehouseID, Count: item.Count,
+			BizType: model.StockRecordBizStockMoveCancel, BizID: d.ID, BizItemID: item.ID, BizNo: d.No,
+			ProductName: productNames[item.ProductID], WarehouseName: warehouseNames[d.FromWarehouseID],
+		}); err != nil {
 			return err
 		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindStockMoveWithItems(ctx, row.ID)
-		if err != nil {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID: item.ProductID, WarehouseID: d.ToWarehouseID, Count: negQty(item.Count),
+			BizType: model.StockRecordBizStockMoveCancel, BizID: d.ID, BizItemID: item.ID, BizNo: d.No,
+			ProductName: productNames[item.ProductID], WarehouseName: warehouseNames[d.ToWarehouseID],
+		}); err != nil {
 			return err
 		}
-		items := sortItemsByID(doc.Items, func(it model.StockMoveItem) int64 { return it.ID })
-		keys := make([]stockLockKey, 0, len(items)*2)
-		for _, item := range items {
-			keys = append(keys, stockLockKey{WarehouseID: doc.FromWarehouseID, ProductID: item.ProductID})
-			keys = append(keys, stockLockKey{WarehouseID: doc.ToWarehouseID, ProductID: item.ProductID})
-		}
-		if err := s.lockStockRows(ctx, tx, keys); err != nil {
-			return err
-		}
-		productNames, err := s.productNamesForItems(ctx, tx, stockMoveItemProducts(items))
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			// 调出仓反向入账（+count）。
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.FromWarehouseID,
-				Count:         item.Count,
-				BizType:       model.StockRecordBizStockMoveCancel,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseNames[doc.FromWarehouseID],
-			}); err != nil {
-				return err
-			}
-			// 调入仓反向出账（−count）。
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.ToWarehouseID,
-				Count:         negQty(item.Count),
-				BizType:       model.StockRecordBizStockMoveCancel,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseNames[doc.ToWarehouseID],
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // ExportStockMoves 导出库存调拨单（筛选含数据范围，spec §4.11）。
@@ -447,19 +349,9 @@ func (s *Service) ExportStockMoves(ctx context.Context, req *dto.StockMovePageRe
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
 }
 
-// findStockMove 取调拨单并做可见性校验（数据范围外一律 404，spec §4.10）。
+// findStockMove 取调拨单并做可见性校验（数据范围外一律 404）。
 func (s *Service) findStockMove(ctx context.Context, id int64) (*model.StockMove, error) {
-	row, err := s.repo.FindStockMoveByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, xerr.NotFound("库存调拨单不存在")
-	}
-	if err := s.checkRowVisible(ctx, "库存调拨单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return s.stockMoveKernel().Find(ctx, id)
 }
 
 // checkWarehousesExist 校验一批仓库在租户内存在（跨租户/不存在一律 400，
