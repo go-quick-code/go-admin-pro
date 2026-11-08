@@ -206,11 +206,23 @@ func (s *Service) UpdateStockOut(ctx context.Context, req *dto.StockOutUpdateReq
 		return err
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row.WarehouseID = req.WarehouseId
-		row.OutTime = outTime
-		row.Type = docType
-		row.Remark = req.Remark
-		if err := tx.SaveStockOut(ctx, row); err != nil {
+		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
+		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
+		locked, err := tx.FindStockOutByIDForUpdate(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("其它出库单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
+		locked.WarehouseID = req.WarehouseId
+		locked.OutTime = outTime
+		locked.Type = docType
+		locked.Remark = req.Remark
+		if err := tx.SaveStockOut(ctx, locked); err != nil {
 			return err
 		}
 		if err := tx.DeleteStockOutItems(ctx, row.ID); err != nil {
@@ -230,8 +242,14 @@ func (s *Service) DeleteStockOut(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.DeleteStockOut(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409，
+		// 与审核认领在同一行锁上串行化。
+		deleted, err := tx.DeleteStockOutIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeleteStockOutItems(ctx, row.ID)
 	})

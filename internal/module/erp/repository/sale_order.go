@@ -118,9 +118,9 @@ func (r *Repository) SaveSaleOrder(ctx context.Context, row *model.SaleOrder) er
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteSaleOrder 按 ID 软删除销售订单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeleteSaleOrder(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.SaleOrder{}, id).Error
+// DeleteSaleOrderIfUnaudited 条件软删除销售订单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteSaleOrderIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.SaleOrder{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteSaleOrderItems 软删除销售订单的全部明细（编辑替换/删除单据时）。

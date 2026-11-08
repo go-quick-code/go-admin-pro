@@ -337,8 +337,13 @@ func (s *Service) DeleteSaleOut(ctx context.Context, id int64) error {
 		if retRefs > 0 {
 			return xerr.Conflict("销售出库单存在退货单引用，禁止删除")
 		}
-		if err := tx.DeleteSaleOut(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
+		deleted, err := tx.DeleteSaleOutIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeleteSaleOutItems(ctx, row.ID)
 	})

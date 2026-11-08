@@ -283,6 +283,18 @@ func (s *Service) UpdateSaleReturn(ctx context.Context, req *dto.SaleReturnUpdat
 		if err != nil {
 			return err
 		}
+		// 状态不变量绑定到写入路径（安全 F1）：锁序与审核一致（出库→退货自身），
+		// 事务内重读退货行并复核 status=10；审核先提交则这里读到 20 → 409。
+		locked, err := tx.LockSaleReturnByID(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("销售退货单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
 		if err := s.checkSaleReturnProducts(ctx, tx, items); err != nil {
 			return err
 		}
@@ -294,12 +306,12 @@ func (s *Service) UpdateSaleReturn(ctx context.Context, req *dto.SaleReturnUpdat
 		if err != nil {
 			return err
 		}
-		row.CustomerID = req.CustomerId
-		row.OutID = req.OutId
-		row.WarehouseID = out.WarehouseID
-		row.ReturnTime = returnTime
-		row.TotalPrice = total
-		if err := tx.SaveSaleReturn(ctx, row); err != nil {
+		locked.CustomerID = req.CustomerId
+		locked.OutID = req.OutId
+		locked.WarehouseID = out.WarehouseID
+		locked.ReturnTime = returnTime
+		locked.TotalPrice = total
+		if err := tx.SaveSaleReturn(ctx, locked); err != nil {
 			return err
 		}
 		if err := tx.DeleteSaleReturnItems(ctx, row.ID); err != nil {
@@ -320,8 +332,13 @@ func (s *Service) DeleteSaleReturn(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.DeleteSaleReturn(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
+		deleted, err := tx.DeleteSaleReturnIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeleteSaleReturnItems(ctx, row.ID)
 	})

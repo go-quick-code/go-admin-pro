@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 )
@@ -102,14 +103,25 @@ func (r *Repository) stockCheckQuery(ctx context.Context, f StockCheckFilter) *g
 	return q
 }
 
+// FindStockCheckByIDForUpdate 行锁读取盘点单（安全 F1：编辑事务内重读并复核
+// status=10，与审核认领串行化）。只能在事务内调用。
+func (r *Repository) FindStockCheckByIDForUpdate(ctx context.Context, id int64) (*model.StockCheck, error) {
+	var row model.StockCheck
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&row, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
 // SaveStockCheck 全量保存盘点单主表（更新路径）。
 func (r *Repository) SaveStockCheck(ctx context.Context, row *model.StockCheck) error {
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteStockCheck 按 ID 软删除盘点单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeleteStockCheck(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.StockCheck{}, id).Error
+// DeleteStockCheckIfUnaudited 条件软删除盘点单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteStockCheckIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.StockCheck{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteStockCheckItems 软删除盘点单的全部明细（编辑替换/删除单据时）。

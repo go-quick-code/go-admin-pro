@@ -110,9 +110,9 @@ func (r *Repository) SaveSaleReturn(ctx context.Context, row *model.SaleReturn) 
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteSaleReturn 按 ID 软删除销售退货单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeleteSaleReturn(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.SaleReturn{}, id).Error
+// DeleteSaleReturnIfUnaudited 条件软删除销售退货单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteSaleReturnIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.SaleReturn{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteSaleReturnItems 软删除销售退货单的全部明细（编辑替换/删除单据时）。

@@ -48,3 +48,14 @@ func notFound(err error) error {
 	}
 	return err
 }
+
+// deleteIfStatus 条件软删：仅当行当前 status 匹配时删除，返回影响行数。
+// 「已审核不可删除」不变量因此绑定到 DELETE 语句本身而不是前置读取（安全 F1）：
+// 条件写与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化，先提交者
+// 生效，另一方影响行数为 0 由 service 层翻译 409。
+func (r *Repository) deleteIfStatus(ctx context.Context, dst any, id int64, status int8) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Where("id = ? AND status = ?", id, status).
+		Delete(dst)
+	return res.RowsAffected, res.Error
+}
