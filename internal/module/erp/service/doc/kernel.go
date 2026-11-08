@@ -132,6 +132,11 @@ func (k *Kernel[H, I]) Update(
 		}
 	}
 	return k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		if k.spec.BeforeUpdateLock != nil {
+			if err := k.spec.BeforeUpdateLock(ctx, tx, row); err != nil {
+				return err
+			}
+		}
 		locked, err := tx.Lock(ctx, id)
 		if err != nil {
 			return k.mapNotFound(err)
@@ -207,6 +212,11 @@ func (k *Kernel[H, I]) SetStatus(ctx context.Context, id int64, target int8) err
 		run = k.store.TransactionReadCommitted
 	}
 	return run(ctx, func(tx Tx[H, I]) error {
+		if k.spec.BeforeClaim != nil {
+			if err := k.spec.BeforeClaim(ctx, tx, row); err != nil {
+				return err
+			}
+		}
 		rows, err := tx.UpdateStatusIf(ctx, id, current, target)
 		if err != nil {
 			return err

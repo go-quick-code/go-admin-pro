@@ -20,6 +20,8 @@ type docConformanceCase struct {
 	path      string // /erp/stock-in
 	docType   string // stock-in
 	noPattern *regexp.Regexp
+	// noKey 是创建响应里的单号 JSON 字段，空默认 "no"（采购订单用 orderNo）。
+	noKey string
 	// setup 可选：返回 (warehouseID, productID, extras)；nil 时用 setupStockEnv。
 	setup  func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any)
 	create func(env *testutil.IntegrationEnv, warehouseID, productID int64, extras map[string]any) map[string]any
@@ -132,6 +134,81 @@ func docConformanceCases() []docConformanceCase {
 			},
 		},
 		{
+			name:      "purchase-order",
+			path:      "/erp/purchase-order",
+			docType:   "purchase-order",
+			noPattern: purchaseOrderNoRe,
+			noKey:     "orderNo",
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, tag)
+				return warehouseID, productID, map[string]any{"supplierId": supplierID}
+			},
+			create: func(env *testutil.IntegrationEnv, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"supplierId": extras["supplierId"],
+					"orderTime":  env.Date() + " 10:00:00",
+					"remark":     "conformance",
+					"items":      []map[string]any{purchaseItemJSON(productID, "5", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":         docID,
+					"supplierId": extras["supplierId"],
+					"orderTime":  env.Date() + " 11:00:00",
+					"remark":     "conformance-updated",
+					"items":      []map[string]any{purchaseItemJSON(productID, "2", "3.00")},
+				}
+			},
+		},
+		{
+			name:      "purchase-return",
+			path:      "/erp/purchase-return",
+			docType:   "purchase-return",
+			noPattern: purchaseReturnNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, tag)
+				order := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+					"supplierId": supplierID,
+					"orderTime":  env.Date() + " 09:00:00",
+					"items":      []map[string]any{purchaseItemJSON(productID, "100", "2.50")},
+				})
+				orderID := int64(order["id"].(float64))
+				mustApprovePurchaseDoc(t, env, token, "purchase-order", orderID)
+				in := createPurchaseDoc(t, env, token, "purchase-in", map[string]any{
+					"supplierId":  supplierID,
+					"orderId":     orderID,
+					"warehouseId": warehouseID,
+					"inTime":      env.Date() + " 10:00:00",
+					"items":       []map[string]any{purchaseItemJSON(productID, "10", "2.50")},
+				})
+				inID := int64(in["id"].(float64))
+				mustApprovePurchaseDoc(t, env, token, "purchase-in", inID)
+				return warehouseID, productID, map[string]any{"supplierId": supplierID, "inId": inID}
+			},
+			create: func(env *testutil.IntegrationEnv, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"supplierId": extras["supplierId"],
+					"inId":       extras["inId"],
+					"returnTime": env.Date() + " 12:00:00",
+					"remark":     "conformance",
+					"items":      []map[string]any{purchaseItemJSON(productID, "5", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":         docID,
+					"supplierId": extras["supplierId"],
+					"inId":       extras["inId"],
+					"returnTime": env.Date() + " 12:30:00",
+					"remark":     "conformance-updated",
+					"items":      []map[string]any{purchaseItemJSON(productID, "2", "3.00")},
+				}
+			},
+		},
+		{
 			name:      "finance-receipt",
 			path:      "/erp/finance-receipt",
 			docType:   "finance-receipt",
@@ -237,8 +314,12 @@ func TestIntegrationDocConformance(t *testing.T) {
 			if created["status"] != float64(10) {
 				t.Fatalf("新建状态 = %v，期望 10", created["status"])
 			}
-			if !tc.noPattern.MatchString(fmt.Sprint(created["no"])) {
-				t.Fatalf("单号 %v 不符 %s", created["no"], tc.noPattern)
+			noKey := tc.noKey
+			if noKey == "" {
+				noKey = "no"
+			}
+			if !tc.noPattern.MatchString(fmt.Sprint(created[noKey])) {
+				t.Fatalf("单号 %v 不符 %s", created[noKey], tc.noPattern)
 			}
 
 			// 2. get：详情可读。

@@ -414,10 +414,16 @@ func erpDemoSeedPurchase(ctx context.Context, stock erpDemoStockApplier, tx *gor
 
 	order := erpmodel.PurchaseOrder{
 		BaseEntity: erpDemoBase(erpDemoPurchaseOrderID, orderTime, creator),
-		TenantID:   erpDemoTenantID, OrderNo: orderNo,
-		SupplierID: erpDemoSupplierHQID, OrderTime: orderTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示采购订单：已审核，已被采购入库占用",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		OrderNo:    orderNo,
+		SupplierID: erpDemoSupplierHQID,
+		OrderTime:  orderTime,
+		Remark:     "演示采购订单：已审核，已被采购入库占用",
 	}
 	if err := tenant.Skip(tx).Create(&order).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示采购订单: %w", err)

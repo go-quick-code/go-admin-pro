@@ -37,37 +37,6 @@ type PurchaseOrderFilter struct {
 	SelfOwnerUserID int64
 }
 
-// CreatePurchaseOrder 创建采购订单主表。
-func (r *Repository) CreatePurchaseOrder(ctx context.Context, row *model.PurchaseOrder) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreatePurchaseOrderItems 批量创建采购订单明细。
-func (r *Repository) CreatePurchaseOrderItems(ctx context.Context, items []model.PurchaseOrderItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindPurchaseOrderByID 按 ID 查订单主表（租户插件自动过滤），不存在返回 nil。
-func (r *Repository) FindPurchaseOrderByID(ctx context.Context, id int64) (*model.PurchaseOrder, error) {
-	var row model.PurchaseOrder
-	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindPurchaseOrderWithItems 查询订单带头 + 明细（详情/进度回写用）。
-func (r *Repository) FindPurchaseOrderWithItems(ctx context.Context, id int64) (*model.PurchaseOrder, error) {
-	var row model.PurchaseOrder
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
 // LockPurchaseOrder 取订单行锁并返回主表（占用校验与挂单写入的串行化点：
 // 同一订单的一切占量写路径先锁本行再读写，并发抢余量在同一行锁上排队，
 // spec §4.4 防双占）。只能在事务内调用。
@@ -123,33 +92,6 @@ func (r *Repository) purchaseOrderQuery(ctx context.Context, f PurchaseOrderFilt
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// SavePurchaseOrder 全量保存订单主表（更新路径）。
-func (r *Repository) SavePurchaseOrder(ctx context.Context, row *model.PurchaseOrder) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeletePurchaseOrderIfUnaudited 条件软删除采购订单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeletePurchaseOrderIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.PurchaseOrder{}, id, model.DocStatusUnaudited)
-}
-
-// DeletePurchaseOrderItems 软删除订单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeletePurchaseOrderItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("purchase_order_id = ?", docID).
-		Delete(&model.PurchaseOrderItem{}).Error
-}
-
-// UpdatePurchaseOrderStatusIf 乐观认领审核状态（与 #90 同款防双审模式）：仅当
-// 当前状态为 fromStatus 时翻转为 toStatus，返回影响行数（0 = 状态已被并发请求
-// 改变，service 层翻译 409）。审核/反审核先认领再落账。
-func (r *Repository) UpdatePurchaseOrderStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.PurchaseOrder{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // FindPurchaseOrderItems 查询订单明细行（占用校验的配额侧与进度回写目标行）。
@@ -316,32 +258,10 @@ type PurchaseReturnFilter struct {
 	SelfOwnerUserID int64
 }
 
-// CreatePurchaseReturn 创建采购退货单主表。
-func (r *Repository) CreatePurchaseReturn(ctx context.Context, row *model.PurchaseReturn) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreatePurchaseReturnItems 批量创建采购退货单明细。
-func (r *Repository) CreatePurchaseReturnItems(ctx context.Context, items []model.PurchaseReturnItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindPurchaseReturnByID 按 ID 查退货单主表，不存在返回 nil。
+// FindPurchaseReturnByID 按 ID 查退货单主表，不存在返回 nil（财务域仍用）。
 func (r *Repository) FindPurchaseReturnByID(ctx context.Context, id int64) (*model.PurchaseReturn, error) {
 	var row model.PurchaseReturn
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindPurchaseReturnWithItems 查询退货单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindPurchaseReturnWithItems(ctx context.Context, id int64) (*model.PurchaseReturn, error) {
-	var row model.PurchaseReturn
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
 		return nil, notFound(err)
 	}
 	return &row, nil
@@ -393,31 +313,6 @@ func (r *Repository) purchaseReturnQuery(ctx context.Context, f PurchaseReturnFi
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// SavePurchaseReturn 全量保存退货单主表（更新路径）。
-func (r *Repository) SavePurchaseReturn(ctx context.Context, row *model.PurchaseReturn) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeletePurchaseReturnIfUnaudited 条件软删除采购退货单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeletePurchaseReturnIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.PurchaseReturn{}, id, model.DocStatusUnaudited)
-}
-
-// DeletePurchaseReturnItems 软删除退货单的全部明细。
-func (r *Repository) DeletePurchaseReturnItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("purchase_return_id = ?", docID).
-		Delete(&model.PurchaseReturnItem{}).Error
-}
-
-// UpdatePurchaseReturnStatusIf 乐观认领退货单审核状态（防双审模式同 #90）。
-func (r *Repository) UpdatePurchaseReturnStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.PurchaseReturn{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountPurchaseReturnItemsByProduct 产品删除引用计数的一部分：退货单明细引用行数。
