@@ -1,19 +1,71 @@
-// stock_in.go 是其它入库单（QR）的业务方法（issue #90，docs/erp-mvp-spec.md
-// §3.5/§4.1/§4.8/§5）：创建/编辑/删除（仅未审核）、审核落账、反审核回滚。
+// stock_in.go 是其它入库单（QR）的适配器（ADR 0018）：写侧生命周期由
+// service/doc 内核拥有，本文件只声明元数据、访问器、校验与落账钩子；
+// 读侧（列表/详情/导出）与 DTO 映射仍在本文件。
 // 库存变动只经唯一入账入口 ApplyStockChange（spec §4.2）；编号在落库同事务
 // 经 erp_sequence 发放（spec §4.8）。其它出库单（stock_out.go）镜像同构。
 package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// stockInKernel 构造其它入库单的内核实例（每次调用廉价；钩子捕获 Service）。
+func (s *Service) stockInKernel() *doc.Kernel[*model.StockIn, model.StockInItem] {
+	return doc.New(docEnv{s}, s.stockInStore(), doc.Spec[*model.StockIn, model.StockInItem]{
+		Labels:     doc.Labels{Doc: "其它入库单", Item: "入库明细"},
+		NoPrefix:   StockInNoPrefix,
+		SeqBizType: SeqBizTypeStockIn,
+		Approve:    s.approveStockInDoc,
+		Unapprove:  s.unapproveStockInDoc,
+	})
+}
+
+// stockInStore 装配其它入库单的仓储面（tracer 手写；候选 02 用泛型 store 替换）。
+func (s *Service) stockInStore() doc.Store[*model.StockIn, model.StockInItem] {
+	return newRepoDocStore(s.repo, s.businessNow, stockInOps)
+}
+
+// stockInOps 把 repository 方法装配成内核 Tx 面（nil 行翻译为 doc.ErrNotFound）。
+func stockInOps(repo *repository.Repository) repoDocOps[*model.StockIn, model.StockInItem] {
+	notFound := func(row *model.StockIn, err error) (*model.StockIn, error) {
+		if err != nil {
+			return nil, err
+		}
+		if row == nil {
+			return nil, doc.ErrNotFound
+		}
+		return row, nil
+	}
+	return repoDocOps[*model.StockIn, model.StockInItem]{
+		Find: func(ctx context.Context, id int64) (*model.StockIn, error) {
+			return notFound(repo.FindStockInByID(ctx, id))
+		},
+		FindWithItems: func(ctx context.Context, id int64) (*model.StockIn, error) {
+			return notFound(repo.FindStockInWithItems(ctx, id))
+		},
+		Lock: func(ctx context.Context, id int64) (*model.StockIn, error) {
+			return notFound(repo.FindStockInByIDForUpdate(ctx, id))
+		},
+		Create:      repo.CreateStockIn,
+		Save:        repo.SaveStockIn,
+		CreateItems: repo.CreateStockInItems,
+		DeleteItems: repo.DeleteStockInItems,
+		DeleteIfStatus: func(ctx context.Context, id int64, status int8) (int64, error) {
+			// 内核只删未审核（status 恒为 10）；仓储方法已把谓词绑定到 DELETE。
+			return repo.DeleteStockInIfUnaudited(ctx, id)
+		},
+		UpdateStatusIf: repo.UpdateStockInStatusIf,
+	}
+}
 
 // ListStockIns 其它入库单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListStockIns(ctx context.Context, req *dto.StockInPageReq) ([]dto.StockDocRow, int64, error) {
@@ -131,9 +183,8 @@ func (s *Service) GetStockIn(ctx context.Context, id int64) (*dto.StockInDetail,
 	}, nil
 }
 
-// CreateStockIn 创建其它入库单（仅未审核）：明细校验 → 仓库/产品存在性 →
-// 事务内发放单号（QR，erp_sequence）→ 落主表 + 明细。不动库存（spec §4.1：
-// 只有审核动作落账）。
+// CreateStockIn 创建其它入库单（仅未审核）：明细/引用/时间校验 → 内核事务内
+// 发号、落主表与明细。不动库存（spec §4.1：只有审核动作落账）。
 func (s *Service) CreateStockIn(ctx context.Context, req *dto.StockInCreateReq) (*model.StockIn, error) {
 	items, err := buildDocItems(req.Items, "入库明细")
 	if err != nil {
@@ -150,221 +201,133 @@ func (s *Service) CreateStockIn(ctx context.Context, req *dto.StockInCreateReq) 
 	if err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.StockIn
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypeStockIn, StockInNoPrefix)
-		if err != nil {
-			return err
-		}
-		doc = &model.StockIn{
-			No:          no,
-			WarehouseID: req.WarehouseId,
-			InTime:      inTime,
-			Type:        docType,
-			Status:      model.DocStatusUnaudited,
-			Remark:      req.Remark,
-			OwnerUserID: ownerID,
-			OwnerDeptID: deptID,
-		}
-		if err := tx.CreateStockIn(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreateStockInItems(ctx, buildStockInItemRows(doc.ID, items))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return s.stockInKernel().Create(ctx,
+		func(ctx context.Context) (*model.StockIn, error) {
+			return &model.StockIn{
+				WarehouseID: req.WarehouseId,
+				InTime:      inTime,
+				Type:        docType,
+				Remark:      req.Remark,
+			}, nil
+		},
+		func(ctx context.Context, d *model.StockIn) ([]model.StockInItem, error) {
+			return buildStockInItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // UpdateStockIn 修改其它入库单（仅未审核，已审核 409，spec §4.1）：
 // 字段全量覆盖；单号不采纳（保持原号）；明细整体替换（软删旧明细）。
 func (s *Service) UpdateStockIn(ctx context.Context, req *dto.StockInUpdateReq) error {
-	row, err := s.findStockIn(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	items, err := buildDocItems(req.Items, "入库明细")
-	if err != nil {
-		return err
-	}
-	if err := s.checkDocRefsForWrite(ctx, req.WarehouseId, items); err != nil {
-		return err
-	}
-	inTime, err := s.parseDocTime(req.InTime, "入库时间")
-	if err != nil {
-		return err
-	}
-	docType, err := validateDocType(req.Type, model.ValidStockInType, "入库单")
-	if err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 状态不变量绑定到写入路径（安全 F1）：事务内对自身行加锁重读并复核
-		// status=10。与审核的 UPDATE ... WHERE status=10 认领共用同一行锁——
-		// 审核先提交则这里读到 20 → 409；编辑先提交则审核随后照常认领。
-		locked, err := tx.FindStockInByIDForUpdate(ctx, row.ID)
-		if err != nil {
+	var items []docItemDraft
+	var inTime time.Time
+	var docType int8
+	return s.stockInKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.StockIn) error {
+			var err error
+			items, err = buildDocItems(req.Items, "入库明细")
+			if err != nil {
+				return err
+			}
+			if err := s.checkDocRefsForWrite(ctx, req.WarehouseId, items); err != nil {
+				return err
+			}
+			inTime, err = s.parseDocTime(req.InTime, "入库时间")
+			if err != nil {
+				return err
+			}
+			docType, err = validateDocType(req.Type, model.ValidStockInType, "入库单")
 			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("其它入库单不存在")
-		}
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		locked.WarehouseID = req.WarehouseId
-		locked.InTime = inTime
-		locked.Type = docType
-		locked.Remark = req.Remark
-		if err := tx.SaveStockIn(ctx, locked); err != nil {
-			return err
-		}
-		// 明细整体替换：软删旧行 + 插入新行（未审核单无流水引用，安全）。
-		if err := tx.DeleteStockInItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreateStockInItems(ctx, buildStockInItemRows(row.ID, items))
-	})
+		},
+		func(ctx context.Context, d *model.StockIn) error {
+			d.WarehouseID = req.WarehouseId
+			d.InTime = inTime
+			d.Type = docType
+			d.Remark = req.Remark
+			return nil
+		},
+		func(ctx context.Context, d *model.StockIn) ([]model.StockInItem, error) {
+			return buildStockInItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // DeleteStockIn 删除其它入库单（仅未审核，已审核 409，spec §4.1）：
 // 主表 + 明细一并软删除；不动库存（未审核未落账）。
 func (s *Service) DeleteStockIn(ctx context.Context, id int64) error {
-	row, err := s.findStockIn(ctx, id)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 状态不变量绑定到删除语句（安全 F1）：条件软删 WHERE id=? AND status=10，
-		// 影响行数为 0 说明已被并发审核（或删除）→ 409。条件写与审核认领在同一
-		// 行锁上串行化：审核先提交则状态谓词不再匹配，绝不影响已审核行。
-		deleted, err := tx.DeleteStockInIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeleteStockInItems(ctx, row.ID)
-	})
+	return s.stockInKernel().Delete(ctx, id)
 }
 
 // UpdateStockInStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
 func (s *Service) UpdateStockInStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
-	row, err := s.findStockIn(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
-	if err != nil {
-		return err
-	}
-	if idempotent {
-		return nil
-	}
-	if req.Status == model.DocStatusApproved {
-		return s.approveStockIn(ctx, row)
-	}
-	return s.unapproveStockIn(ctx, row)
+	return s.stockInKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
-// approveStockIn 审核落账：事务内先乐观认领状态（防并发双重审核）→
-// 重读明细 → 逐行经唯一入账入口入账（biz_type=stock_in，正入）。
-func (s *Service) approveStockIn(ctx context.Context, row *model.StockIn) error {
-	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.WarehouseID})
+// approveStockInDoc 审核落账（内核已认领 status=10→20 并装载明细）：
+// 逐行经唯一入账入口入账（biz_type=stock_in，正入）。
+func (s *Service) approveStockInDoc(ctx context.Context, tx doc.Tx[*model.StockIn, model.StockInItem], d *model.StockIn) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	warehouseName := warehouseNames[row.WarehouseID]
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateStockInStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-		if err != nil {
+	warehouseNames, err := repo.FindWarehouseNamesIn(ctx, []int64{d.WarehouseID})
+	if err != nil {
+		return err
+	}
+	productNames, err := s.productNamesForItems(ctx, repo, stockInItemProducts(d.Items))
+	if err != nil {
+		return err
+	}
+	for _, item := range sortItemsByID(d.Items, func(it model.StockInItem) int64 { return it.ID }) {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID:     item.ProductID,
+			WarehouseID:   d.WarehouseID,
+			Count:         item.Count,
+			BizType:       model.StockRecordBizStockIn,
+			BizID:         d.ID,
+			BizItemID:     item.ID,
+			BizNo:         d.No,
+			ProductName:   productNames[item.ProductID],
+			WarehouseName: warehouseNames[d.WarehouseID],
+		}); err != nil {
 			return err
 		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindStockInWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		productNames, err := s.productNamesForItems(ctx, tx, stockInItemProducts(doc.Items))
-		if err != nil {
-			return err
-		}
-		for _, item := range sortItemsByID(doc.Items, func(it model.StockInItem) int64 { return it.ID }) {
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.WarehouseID,
-				Count:         item.Count,
-				BizType:       model.StockRecordBizStockIn,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseName,
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
-// unapproveStockIn 反审核回滚（spec §4.3）：事务内先乐观认领状态 →
+// unapproveStockInDoc 反审核回滚（内核已认领 status=20→10 并装载明细）：
 // 逐行经唯一入账入口新增 _CANCEL 反向流水（count 取负，原流水保留）→
 // 余额恢复。
-func (s *Service) unapproveStockIn(ctx context.Context, row *model.StockIn) error {
-	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.WarehouseID})
+func (s *Service) unapproveStockInDoc(ctx context.Context, tx doc.Tx[*model.StockIn, model.StockInItem], d *model.StockIn) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	warehouseName := warehouseNames[row.WarehouseID]
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateStockInStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
+	warehouseNames, err := repo.FindWarehouseNamesIn(ctx, []int64{d.WarehouseID})
+	if err != nil {
+		return err
+	}
+	productNames, err := s.productNamesForItems(ctx, repo, stockInItemProducts(d.Items))
+	if err != nil {
+		return err
+	}
+	for _, item := range sortItemsByID(d.Items, func(it model.StockInItem) int64 { return it.ID }) {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID:     item.ProductID,
+			WarehouseID:   d.WarehouseID,
+			Count:         negQty(item.Count),
+			BizType:       model.StockRecordBizStockInCancel,
+			BizID:         d.ID,
+			BizItemID:     item.ID,
+			BizNo:         d.No,
+			ProductName:   productNames[item.ProductID],
+			WarehouseName: warehouseNames[d.WarehouseID],
+		}); err != nil {
 			return err
 		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindStockInWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		productNames, err := s.productNamesForItems(ctx, tx, stockInItemProducts(doc.Items))
-		if err != nil {
-			return err
-		}
-		for _, item := range sortItemsByID(doc.Items, func(it model.StockInItem) int64 { return it.ID }) {
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.WarehouseID,
-				Count:         negQty(item.Count),
-				BizType:       model.StockRecordBizStockInCancel,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseName,
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // ExportStockIns 导出其它入库单（筛选含数据范围，spec §4.11）。
@@ -407,17 +370,7 @@ func (s *Service) ExportStockIns(ctx context.Context, req *dto.StockInPageReq) (
 
 // findStockIn 取入库单并做可见性校验（数据范围外一律 404，spec §4.10）。
 func (s *Service) findStockIn(ctx context.Context, id int64) (*model.StockIn, error) {
-	row, err := s.repo.FindStockInByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, xerr.NotFound("其它入库单不存在")
-	}
-	if err := s.checkRowVisible(ctx, "其它入库单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return s.stockInKernel().Find(ctx, id)
 }
 
 // checkDocRefsForWrite 校验单据写入引用：仓库与全部产品必须存在（租户内，

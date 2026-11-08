@@ -23,3 +23,6 @@ type BaseEntity struct {
 	Creator   string         `gorm:"size:64;not null;default:'0'" json:"-"`
 	Updater   string         `gorm:"size:64;not null;default:'0'" json:"-"`
 }
+
+// GetID 返回主键；供单据内核的 Header 约束读取新建单据的 ID。
+func (b *BaseEntity) GetID() int64 { return b.ID }

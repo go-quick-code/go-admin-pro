@@ -8,10 +8,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
@@ -86,25 +88,19 @@ func validateDocType(docType *int8, valid func(int8) bool, label string) (int8, 
 // checkDocStatusTransition 校验审核状态机（spec §4.1）：幂等目标态放行；
 // 10→20 审核、20→10 反审核合法；其余非法。返回 (幂等?, 错误)。
 func checkDocStatusTransition(current, target int8) (bool, error) {
-	if !model.ValidDocStatus(target) {
-		return false, xerr.BadRequest(fmt.Sprintf("单据审核状态 %d 不合法：期望 10 未审核 / 20 已审核", target))
-	}
-	if current == target {
-		return true, nil
-	}
-	switch {
-	case current == model.DocStatusUnaudited && target == model.DocStatusApproved,
-		current == model.DocStatusApproved && target == model.DocStatusUnaudited:
-		return false, nil
-	}
-	return false, xerr.Conflict(fmt.Sprintf("单据当前状态 %d 不允许变更到 %d", current, target))
+	return doc.CheckStatusTransition(current, target)
 }
 
 // nextStockDocNo 在事务内发放单号：前缀 + yyyyMMdd（业务时区）+ 至少 4 位序号
 // （超 9999 自然扩位，spec §4.8）。序号经 erp_sequence 原子发放并与单据落库
 // 同事务；客户端提交的单号不采纳（DTO 无单号字段）。
 func (s *Service) nextStockDocNo(ctx context.Context, tx *repository.Repository, seqBizType, prefix string) (string, error) {
-	now := s.businessNow()
+	return nextDocNo(ctx, tx, s.businessNow(), seqBizType, prefix)
+}
+
+// nextDocNo 在事务内发放单号（内核 Tx.NextNo 与 Service 共用的实现）：
+// 序号经 erp_sequence 原子发放并与单据落库同事务；now 提供业务时区日期键。
+func nextDocNo(ctx context.Context, tx *repository.Repository, now time.Time, seqBizType, prefix string) (string, error) {
 	dateKey := now.Format("20060102")
 	seq, err := tx.NextSequenceValue(ctx, erpTenantID(ctx), seqBizType, dateKey)
 	if err != nil {
