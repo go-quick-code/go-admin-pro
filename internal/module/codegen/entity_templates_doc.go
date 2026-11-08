@@ -64,7 +64,7 @@ const tmplEntityIntegration = `# [[ .Comment ]]（[[ .ClassName ]]）脚手架�
    ~~~go
    [[ .Module ]]Repo := [[ .Module ]]repo.New(db)
    [[ .Module ]]Svc := [[ .Module ]]service.New([[ .Module ]]Repo, sysSvc)
-   [[ .Module ]]API := [[ .Module ]]api.New([[ .Module ]]Svc, sysAPI.RequirePermission)
+   [[ .Module ]]API := [[ .Module ]]api.New([[ .Module ]]Svc, sysAPI.RequirePermission, cfg.Location())
    ~~~
 
    并把 [[ .Module ]]API 传入 router.New、在 router.New 中注册 RegisterProtected。[[end]][[ if .Menu ]]

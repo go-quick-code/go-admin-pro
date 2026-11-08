@@ -78,6 +78,13 @@ func reflectValue(db *gorm.DB) reflect.Value {
 	return db.Statement.ReflectValue
 }
 
+// AuditUser 返回审计列的当前登录用户 ID（字符串形式）；无登录上下文时返回
+// 系统账号 SystemAccount（"0"）。裸 SQL 写入（如库存账 upsert/UPDATE）无法
+// 经过 GORM 回调时复用本函数，保持与 AuditPlugin 完全一致的取值口径。
+func AuditUser(ctx context.Context) string {
+	return auditUser(ctx)
+}
+
 // auditUser 返回当前登录用户 ID 的字符串形式，取不到时返回系统账号。
 func auditUser(ctx context.Context) string {
 	principal, ok := authn.From(ctx)

@@ -14,8 +14,6 @@ package money
 import (
 	"errors"
 	"fmt"
-	"math"
-	"math/bits"
 	"strconv"
 	"strings"
 )
@@ -173,15 +171,12 @@ func (m Money) Sub(other Money) (Money, error) {
 // 数量的正负语义由调用方决定（行项目的「数量正整数」校验在 service 层），
 // 乘法用无符号 128 位中间结果防 int64 溢出，结果须落在 decimal(12,2) 范围内。
 func (m Money) Mul(qty int64) (Money, error) {
-	hi, lo := bits.Mul64(uabs(m.cents), uabs(qty))
+	hi, lo, negative := mulAbs128(m.cents, qty)
 	// 无符号乘积超出 MaxInt64（含 MinInt64 的量级）必然越界：
 	// decimal(12,2) 上限远小于 int64 极值，这里无需为 MinInt64 保留特例。
-	if hi != 0 || lo > math.MaxInt64 {
+	product, ok := uint128ToInt64(hi, lo, negative)
+	if !ok {
 		return Money{}, fmt.Errorf("%w: 乘法结果超出范围", ErrOutOfRange)
-	}
-	product := int64(lo)
-	if (m.cents < 0) != (qty < 0) {
-		product = -product
 	}
 	return checked(product)
 }

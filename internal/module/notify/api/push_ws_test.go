@@ -98,8 +98,14 @@ func TestWSHandshakeDeliversEvent(t *testing.T) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("握手状态码 = %d, want 101", resp.StatusCode)
 	}
-	if got := env.hub.Subscribers(1, 1); got != 1 {
-		t.Fatalf("握手后在线订阅数 = %d, want 1", got)
+	// 服务端读循环完成订阅注册是异步的：握手成功不代表簿记完成（CI 慢机偶发
+	// Subscribers=0），轮询等待成立后再发布事件。
+	deadline := time.Now().Add(2 * time.Second)
+	for env.hub.Subscribers(1, 1) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("握手后在线订阅数 = %d, want 1", env.hub.Subscribers(1, 1))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	env.hub.Publish(1, 1, push.NewNotification(push.EventData{
@@ -198,11 +204,17 @@ func TestWSDisconnectCleansUp(t *testing.T) {
 	env := newWSEnv(t, time.Second)
 	ticket, _ := env.tickets.Issue(1, 1)
 	conn, _ := dialWS(t, env, ticket, nil)
-	if got := env.hub.Subscribers(1, 1); got != 1 {
-		t.Fatalf("在线订阅数 = %d, want 1", got)
+	// 服务端读循环完成订阅注册是异步的：握手成功不代表簿记完成（CI 慢机偶发
+	// Subscribers=0），与下方归零断言同口径轮询等待成立。
+	deadline := time.Now().Add(2 * time.Second)
+	for env.hub.Subscribers(1, 1) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("在线订阅数 = %d, want 1", env.hub.Subscribers(1, 1))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	conn.CloseNow()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(2 * time.Second)
 	for env.hub.Subscribers(1, 1) != 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.hub.Subscribers(1, 1))

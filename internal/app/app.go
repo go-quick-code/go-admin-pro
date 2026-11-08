@@ -17,6 +17,9 @@ import (
 	crmapi "github.com/go-quick-code/go-admin-pro/internal/module/crm/api"
 	crmrepo "github.com/go-quick-code/go-admin-pro/internal/module/crm/repository"
 	crmservice "github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
+	erpapi "github.com/go-quick-code/go-admin-pro/internal/module/erp/api"
+	erprepo "github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	erpservice "github.com/go-quick-code/go-admin-pro/internal/module/erp/service"
 	infraapi "github.com/go-quick-code/go-admin-pro/internal/module/infra/api"
 	infrarepo "github.com/go-quick-code/go-admin-pro/internal/module/infra/repository"
 	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
@@ -112,6 +115,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		// OA 演示数据的文档文件需要落到实际存储目录（默认 ./uploads）；
 		// seed 包不读配置，这里显式传入本地存储根路径。
 		seed.SetDemoStorageBasePath(cfg.Storage.Local.BasePath)
+		// ERP 演示数据的业务时间走 app.timezone（ADR 0006）：seed 包不读配置，
+		// 同样显式注入业务时区，避免依赖进程本地时区。
+		seed.SetDemoLocation(cfg.Location())
 		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}
@@ -239,6 +245,30 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
+
+	// ERP 模块（issue #88，docs/erp-mvp-spec.md §2）：repo→service→api 顺序装配；
+	// 数据范围解析复用 system Service（datascope 引擎宿主，ADR 0004），依赖只指向
+	// 平台层，不依赖 crm/oa/bpm（ADR 0015）。产品删除引用校验扩展点（product_refs.go）
+	// 在下方装配处与库存/采购/销售实现组合注册（后续域继续以 RefCheckerChain 追加）。
+	erpRepo := erprepo.New(db)
+	erpSvc := erpservice.New(erpRepo, sysSvc)
+	// 库存核心（issue #90，spec §4.9）：仓库被 erp_stock 非零记录/流水引用禁删、
+	// 产品被其它出入库单明细引用禁删——仓库校验由 erp Service 自身实现并在此注册；
+	// 产品校验在下方与 #91 采购实现以 RefCheckerChain 组合（后注册一次生效）。
+	erpSvc.SetWarehouseRefChecker(erpSvc)
+	// 销售三单（issue #92，spec §4.9）：ERP 客户被销售订单/出库/退货引用禁删——
+	// CustomerRefChecker 由 erp Service 自身实现并在此注册；#91 供应商同构追加。
+	erpSvc.SetCustomerRefChecker(erpSvc)
+	// 采购单据引用（issue #91，spec §4.9）：产品被采购订单/入库/退货明细引用禁删
+	//（与 #90 库存实现经 RefCheckerChain 组合——后注册覆盖先注册）；供应商被采购
+	// 单据引用禁删（#89 扩展点首次落地）。#92+ 的单据域引用类型继续以 Chain 追加。
+	// 构造内联进 Set 调用（无中间变量），与 codegen fresh-module 检查的
+	// erpSvc.Set 装配行剪除适配兼容（延续 #88/#90 既有模式）。
+	erpSvc.SetProductRefChecker(erpservice.RefCheckerChain{erpSvc, erpservice.NewPurchaseDocRefChecker(erpSvc)})
+	erpSvc.SetSupplierRefChecker(erpservice.NewPurchaseDocRefChecker(erpSvc))
+	// 业务时区（ADR 0006）：单号日期键与单据业务时间解析的唯一口径。
+	erpSvc.SetLocation(cfg.Location())
+	erpAPI := erpapi.New(erpSvc, sysAPI.RequirePermission, cfg.Location())
 
 	// notify 模块（issue #45）：平台级站内通知投递/读取基础设施（spec §3.2/§4.13）。
 	// 无业务依赖、不反向依赖业务模块；bpm/公告/会议室等生产者经 notifySvc 的
@@ -388,7 +418,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission, apiLogWriter)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI)
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI)
 
 	scheduler.Start(context.Background())
 

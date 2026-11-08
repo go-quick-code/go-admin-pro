@@ -82,6 +82,9 @@ func pruneOverlaidEntityFiles(t *testing.T, tmp string) {
 
 // TestGeneratedFreshModuleCompiles 新模块骨架变体（ModuleScaffold=true、非 owner、
 // 字典字段）整体生成后可编译可 vet——保证「生成一个全新模块」也是可信路径。
+// 目标模块名沿用预留的 erp：issue #88 起 erp 已真实落地，叠加前剪除副本中的
+// 真实 erp 模块（生成骨架即整个模块，等价于该测试最初「erp 尚不存在」的前置），
+// 手写实现的编译质量由 make check 的常规路径覆盖。
 func TestGeneratedFreshModuleCompiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short 模式跳过编译验证")
@@ -118,11 +121,52 @@ func TestGeneratedFreshModuleCompiles(t *testing.T) {
 	}
 
 	tmp := copyModuleSubset(t)
+	pruneRealErpModule(t, tmp)
 	if err := overlay(tmp, files); err != nil {
 		t.Fatalf("叠加生成产物: %v", err)
 	}
 	runGo(t, tmp, "build", "./internal/...")
 	runGo(t, tmp, "vet", "./internal/...")
+}
+
+// pruneRealErpModule 从副本中删除真实 erp 模块（issue #88 落地后的手写实现）：
+// fresh-module 变体的语义是「生成一个全新模块」，生成骨架即整个模块，
+// 真实实现与骨架并存会互相覆盖同名文件（repository.go/service.go/api.go 等）
+// 导致编译检查失去意义。
+//
+// 装配外溢适配（issue #90 延续本测试的既有模式）：app.go 会对真实 erp Service
+// 调用 SetWarehouseRefChecker/SetProductRefChecker/SetLocation（库存域引用
+// 校验与业务时区装配），生成的全新骨架没有这些接缝——剪除模块的同时剔除
+// 这些装配行，保持「全新模块自洽可编译」的检查语义。
+//
+// issue #97：ERP 演示种子（internal/seed/erp_demo.go）import 真实 erp
+// model/service，必须随模块一并剪除（seed.Run 通过函数变量调用，缺失时
+// 自动跳过 ERP 演示数据）。
+func pruneRealErpModule(t *testing.T, tmp string) {
+	t.Helper()
+	dir := filepath.Join(tmp, "internal", "module", "erp")
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("剪除真实 erp 模块: %v", err)
+	}
+	demoSeed := filepath.Join(tmp, "internal", "seed", "erp_demo.go")
+	if err := os.Remove(demoSeed); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("剪除 ERP 演示种子: %v", err)
+	}
+	appPath := filepath.Join(tmp, "internal", "app", "app.go")
+	raw, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("读取 app.go: %v", err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, "erpSvc.Set") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if err := os.WriteFile(appPath, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		t.Fatalf("剔除 erpSvc.Set 装配行: %v", err)
+	}
 }
 
 // copyModuleSubset 把仓库可编译子集复制进 t.TempDir()（跳过 testdata，

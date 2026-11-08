@@ -2,6 +2,8 @@ package money_test
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
@@ -254,4 +256,29 @@ func TestMoneyMul(t *testing.T) {
 			t.Fatalf("失败时应返回零值, 得到 %v", got)
 		}
 	})
+
+	t.Run("负数边界：金额下限可乘 1", func(t *testing.T) {
+		got, err := money.FromCents(-999999999999).Mul(1)
+		if err != nil {
+			t.Fatalf("下限 × 1 应放行: %v", err)
+		}
+		if got.String() != "-9999999999.99" {
+			t.Fatalf("下限 × 1 = %s，期望 -9999999999.99", got.String())
+		}
+	})
+
+	// MinInt64 的绝对值超出 int64 正域，即使乘 ±1 也必须拒绝而不是环绕
+	//（共享 128 位原语的溢出裁决；ADR 0007 范围远小于 int64 极值）。
+	for _, mult := range []int64{1, -1} {
+		mult := mult
+		t.Run(fmt.Sprintf("MinInt64 拒绝(Mul %d)", mult), func(t *testing.T) {
+			got, err := money.FromCents(math.MinInt64).Mul(mult)
+			if !errors.Is(err, money.ErrOutOfRange) {
+				t.Fatalf("MinInt64 × %d 应返回 ErrOutOfRange, 得到 %v", mult, err)
+			}
+			if got != (money.Money{}) {
+				t.Fatalf("失败时应返回零值, 得到 %v", got)
+			}
+		})
+	}
 }
