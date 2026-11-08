@@ -260,12 +260,22 @@ func (s *Service) UpdatePurchaseOrderStatus(ctx context.Context, req *dto.StockD
 	return s.unapprovePurchaseOrder(ctx, row)
 }
 
-// unapprovePurchaseOrder 订单反审核（spec §4.4 反审核禁令）：存在已审核入库或
-// 已审核退货（经入库单挂本订单）时 409；未审核挂单不拦截（删除或反审核后自然
-// 解除占用）。反审核只翻状态：in_count/return_count 只计已审核单，而禁令保证
-// 反审核时点不存在已审核挂单，进度恒为零值无需重算。
+// unapprovePurchaseOrder 订单反审核（spec §4.4 反审核禁令）：先乐观认领自身
+// （UPDATE 对本行加 X 锁，与入库审核先锁挂单订单串行化）再聚合下游禁令
+// （#98 审查 MAJOR 2）——存在已审核入库或已审核退货（经入库单挂本订单）则
+// 409 并回滚认领，任何并发交错都不会留下「订单未审核 + 已审核子单」的组合。
+// 未审核挂单不拦截（删除或反审核后自然解除占用）。反审核只翻状态：
+// in_count/return_count 只计已审核单，而禁令保证反审核时点不存在已审核挂单，
+// 进度恒为零值无需重算。
 func (s *Service) unapprovePurchaseOrder(ctx context.Context, row *model.PurchaseOrder) error {
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		claimed, err := tx.UpdatePurchaseOrderStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
+		if err != nil {
+			return err
+		}
+		if claimed == 0 {
+			return xerr.Conflict("单据状态已变化，请刷新后重试")
+		}
 		inSum, err := tx.SumPurchaseInItemsByProduct(ctx, row.ID, true, 0)
 		if err != nil {
 			return err
@@ -276,13 +286,6 @@ func (s *Service) unapprovePurchaseOrder(ctx context.Context, row *model.Purchas
 		}
 		if len(inSum) > 0 || len(retSum) > 0 {
 			return xerr.Conflict("订单存在已审核入库/退货单，不可反审核")
-		}
-		claimed, err := tx.UpdatePurchaseOrderStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
 		}
 		return nil
 	})
