@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"math"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
@@ -122,7 +123,9 @@ func (s *Service) findWarehouse(ctx context.Context, id int64) (*model.Warehouse
 }
 
 // statusAndSort 归一主数据的 status/sort 入参：status 缺省启用、枚举非法 400；
-// sort 缺省 0。仓库/客户/供应商共用（状态口径见迁移 00029：0 启用 / 1 停用）。
+// sort 缺省 0，且必须落在 MySQL int（int32）列域内（#98 审查 MINOR：超出会让
+// 落库报 1264 → 500）。仓库/客户/供应商/结算账户共用（状态口径见迁移 00029：
+// 0 启用 / 1 停用）。
 func statusAndSort(status *int8, sort *int) (int8, int, error) {
 	st := model.StatusEnable
 	if status != nil {
@@ -133,7 +136,18 @@ func statusAndSort(status *int8, sort *int) (int8, int, error) {
 	}
 	so := 0
 	if sort != nil {
+		if err := validateSortRange(*sort); err != nil {
+			return 0, 0, err
+		}
 		so = *sort
 	}
 	return st, so, nil
+}
+
+// validateSortRange 校验排序值落在 MySQL int（int32）列域内（#98 审查 MINOR）。
+func validateSortRange(sort int) error {
+	if sort < math.MinInt32 || sort > math.MaxInt32 {
+		return xerr.BadRequest("排序值超出范围（-2147483648 ~ 2147483647）")
+	}
+	return nil
 }

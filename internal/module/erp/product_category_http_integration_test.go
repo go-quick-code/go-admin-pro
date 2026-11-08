@@ -162,6 +162,11 @@ func TestIntegrationProductCategoryValidation(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("状态 9：HTTP %d code %d，期望 400", status, api.Code)
 	}
+	// sort 列是 MySQL int（int32）：超出列域入口 400（#98 审查 MINOR）。
+	status, api = env.Request(t, http.MethodPost, "/erp/product-category", token, map[string]any{"name": "超域排序", "sort": 2147483648})
+	if status != http.StatusBadRequest {
+		t.Fatalf("sort 2147483648：HTTP %d code %d，期望 400", status, api.Code)
+	}
 
 	// 非法状态不落库。
 	if n := len(listCategories(t, env, token)); n != 0 {

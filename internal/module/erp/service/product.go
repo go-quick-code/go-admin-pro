@@ -9,9 +9,31 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// productWeightMaxMilli 是 erp_product.weight（decimal(12,3)）的列域上限：
+// 999,999,999.999 kg（precision 12 − scale 3 = 9 位整数）。qty 承载 int64
+// 毫单位全域，入口不校验会让超域值走到 MySQL 时报 1264 变成 500（#98 审查
+// MINOR）。
+const productWeightMaxMilli int64 = 999_999_999_999
+
+// validateProductWeight 校验重量落在 decimal(12,3) 列域：0 ≤ milli ≤
+// 999,999,999,999；NULL（未填写）不校验。负值与超域一律 400。
+func validateProductWeight(weight *qty.Qty) error {
+	if weight == nil {
+		return nil
+	}
+	if weight.Milli() < 0 {
+		return xerr.BadRequest("重量不能为负数")
+	}
+	if weight.Milli() > productWeightMaxMilli {
+		return xerr.BadRequest("重量超出范围（最大 999999999.999）")
+	}
+	return nil
+}
 
 // ListProducts 分页查询产品（筛选 + owner 数据范围）。
 func (s *Service) ListProducts(ctx context.Context, req *dto.ProductPageReq) ([]model.Product, int64, error) {
@@ -66,6 +88,9 @@ func (s *Service) CreateProduct(ctx context.Context, req *dto.ProductCreateReq) 
 	if err := s.validateProductUnit(ctx, req.UnitId); err != nil {
 		return nil, err
 	}
+	if err := validateProductWeight(req.Weight); err != nil {
+		return nil, err
+	}
 	ownerID := CurrentUserID(ctx)
 	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
 	if err != nil {
@@ -110,6 +135,9 @@ func (s *Service) UpdateProduct(ctx context.Context, req *dto.ProductUpdateReq) 
 		return err
 	}
 	if err := s.validateProductUnit(ctx, req.UnitId); err != nil {
+		return err
+	}
+	if err := validateProductWeight(req.Weight); err != nil {
 		return err
 	}
 	row.Name = req.Name
