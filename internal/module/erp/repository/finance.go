@@ -163,6 +163,17 @@ func (r *Repository) FindFinanceReceiptByID(ctx context.Context, id int64) (*mod
 	return &row, nil
 }
 
+// FindFinanceReceiptByIDForUpdate 行锁读取收款单（安全 F1：编辑事务内重读并
+// 复核 status=10，与审核认领串行化）。只能在事务内调用。
+func (r *Repository) FindFinanceReceiptByIDForUpdate(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
+	var row model.FinanceReceipt
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&row, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
 // FindFinanceReceiptWithItems 查询收款单带头 + 明细（详情/审核/反审核用）。
 func (r *Repository) FindFinanceReceiptWithItems(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
 	var row model.FinanceReceipt
@@ -224,9 +235,9 @@ func (r *Repository) SaveFinanceReceipt(ctx context.Context, row *model.FinanceR
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteFinanceReceipt 按 ID 软删除收款单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeleteFinanceReceipt(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.FinanceReceipt{}, id).Error
+// DeleteFinanceReceiptIfUnaudited 条件软删除收款单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteFinanceReceiptIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.FinanceReceipt{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteFinanceReceiptItems 软删除收款单的全部明细（编辑替换/删除单据时）。
@@ -276,6 +287,17 @@ func (r *Repository) CreateFinancePaymentItems(ctx context.Context, items []mode
 func (r *Repository) FindFinancePaymentByID(ctx context.Context, id int64) (*model.FinancePayment, error) {
 	var row model.FinancePayment
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
+// FindFinancePaymentByIDForUpdate 行锁读取付款单（安全 F1：编辑事务内重读并
+// 复核 status=10，与审核认领串行化）。只能在事务内调用。
+func (r *Repository) FindFinancePaymentByIDForUpdate(ctx context.Context, id int64) (*model.FinancePayment, error) {
+	var row model.FinancePayment
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&row, id).Error; err != nil {
 		return nil, notFound(err)
 	}
 	return &row, nil
@@ -342,9 +364,9 @@ func (r *Repository) SaveFinancePayment(ctx context.Context, row *model.FinanceP
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteFinancePayment 按 ID 软删除付款单主表（仅未审核态）。
-func (r *Repository) DeleteFinancePayment(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.FinancePayment{}, id).Error
+// DeleteFinancePaymentIfUnaudited 条件软删除付款单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteFinancePaymentIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.FinancePayment{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteFinancePaymentItems 软删除付款单的全部明细。

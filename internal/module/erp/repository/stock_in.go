@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 )
@@ -105,14 +106,26 @@ func (r *Repository) stockInQuery(ctx context.Context, f StockInFilter) *gorm.DB
 	return q
 }
 
+// FindStockInByIDForUpdate 行锁读取入库单（安全 F1：编辑事务内重读并复核
+// status=10，与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化）。
+// 只能在事务内调用。
+func (r *Repository) FindStockInByIDForUpdate(ctx context.Context, id int64) (*model.StockIn, error) {
+	var row model.StockIn
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&row, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
 // SaveStockIn 全量保存入库单主表（更新路径）。
 func (r *Repository) SaveStockIn(ctx context.Context, row *model.StockIn) error {
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteStockIn 按 ID 软删除入库单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeleteStockIn(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.StockIn{}, id).Error
+// DeleteStockInIfUnaudited 条件软删除入库单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteStockInIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.StockIn{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteStockInItems 软删除入库单的全部明细（编辑替换/删除单据时）。

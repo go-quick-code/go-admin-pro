@@ -217,6 +217,14 @@ func (s *Service) UpdateSaleOrder(ctx context.Context, req *dto.SaleOrderUpdateR
 		if err != nil {
 			return err
 		}
+		if locked == nil {
+			return xerr.NotFound("销售订单不存在")
+		}
+		// 状态不变量绑定到写入路径（安全 F1）：锁内复核 status=10，与审核的
+		// UPDATE ... WHERE status=10 认领在同一行锁上串行化。
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
 		if err := s.recheckSaleOrderOccupancy(ctx, tx, locked, items); err != nil {
 			return err
 		}
@@ -254,8 +262,13 @@ func (s *Service) DeleteSaleOrder(ctx context.Context, id int64) error {
 		if outRefs > 0 {
 			return xerr.Conflict("销售订单存在出库/退货单引用，禁止删除")
 		}
-		if err := tx.DeleteSaleOrder(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
+		deleted, err := tx.DeleteSaleOrderIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeleteSaleOrderItems(ctx, row.ID)
 	})

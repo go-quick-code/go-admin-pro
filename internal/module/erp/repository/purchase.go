@@ -130,9 +130,9 @@ func (r *Repository) SavePurchaseOrder(ctx context.Context, row *model.PurchaseO
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeletePurchaseOrder 按 ID 软删除订单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeletePurchaseOrder(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.PurchaseOrder{}, id).Error
+// DeletePurchaseOrderIfUnaudited 条件软删除采购订单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeletePurchaseOrderIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.PurchaseOrder{}, id, model.DocStatusUnaudited)
 }
 
 // DeletePurchaseOrderItems 软删除订单的全部明细（编辑替换/删除单据时）。
@@ -300,9 +300,9 @@ func (r *Repository) SavePurchaseIn(ctx context.Context, row *model.PurchaseIn) 
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeletePurchaseIn 按 ID 软删除入库单主表（仅未审核态）。
-func (r *Repository) DeletePurchaseIn(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.PurchaseIn{}, id).Error
+// DeletePurchaseInIfUnaudited 条件软删除采购入库单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeletePurchaseInIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.PurchaseIn{}, id, model.DocStatusUnaudited)
 }
 
 // DeletePurchaseInItems 软删除入库单的全部明细。
@@ -438,9 +438,9 @@ func (r *Repository) SavePurchaseReturn(ctx context.Context, row *model.Purchase
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeletePurchaseReturn 按 ID 软删除退货单主表（仅未审核态）。
-func (r *Repository) DeletePurchaseReturn(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.PurchaseReturn{}, id).Error
+// DeletePurchaseReturnIfUnaudited 条件软删除采购退货单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeletePurchaseReturnIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.PurchaseReturn{}, id, model.DocStatusUnaudited)
 }
 
 // DeletePurchaseReturnItems 软删除退货单的全部明细。

@@ -335,8 +335,14 @@ func (s *Service) DeletePurchaseIn(ctx context.Context, id int64) error {
 		if retRefs > 0 {
 			return xerr.Conflict("采购入库单存在退货单引用，禁止删除")
 		}
-		if err := tx.DeletePurchaseIn(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：引用检查之后仍可能被并发
+		// 审核，影响行数为 0 → 409，绝不删掉已审核行。
+		deleted, err := tx.DeletePurchaseInIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeletePurchaseInItems(ctx, row.ID)
 	})

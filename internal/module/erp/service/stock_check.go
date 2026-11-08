@@ -195,10 +195,22 @@ func (s *Service) UpdateStockCheck(ctx context.Context, req *dto.StockCheckUpdat
 		return err
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row.WarehouseID = req.WarehouseId
-		row.CheckTime = checkTime
-		row.Remark = req.Remark
-		if err := tx.SaveStockCheck(ctx, row); err != nil {
+		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
+		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
+		locked, err := tx.FindStockCheckByIDForUpdate(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("库存盘点单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
+		locked.WarehouseID = req.WarehouseId
+		locked.CheckTime = checkTime
+		locked.Remark = req.Remark
+		if err := tx.SaveStockCheck(ctx, locked); err != nil {
 			return err
 		}
 		if err := tx.DeleteStockCheckItems(ctx, row.ID); err != nil {
@@ -219,8 +231,13 @@ func (s *Service) DeleteStockCheck(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.DeleteStockCheck(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
+		deleted, err := tx.DeleteStockCheckIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeleteStockCheckItems(ctx, row.ID)
 	})

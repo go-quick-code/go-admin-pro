@@ -126,9 +126,9 @@ func (r *Repository) SaveSaleOut(ctx context.Context, row *model.SaleOut) error 
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-// DeleteSaleOut 按 ID 软删除销售出库单主表（仅未审核态，service 层把关）。
-func (r *Repository) DeleteSaleOut(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.SaleOut{}, id).Error
+// DeleteSaleOutIfUnaudited 条件软删除销售出库单（status 谓词 + 影响行数，安全 F1）。
+func (r *Repository) DeleteSaleOutIfUnaudited(ctx context.Context, id int64) (int64, error) {
+	return r.deleteIfStatus(ctx, &model.SaleOut{}, id, model.DocStatusUnaudited)
 }
 
 // DeleteSaleOutItems 软删除销售出库单的全部明细（编辑替换/删除单据时）。

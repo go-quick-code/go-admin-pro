@@ -204,10 +204,22 @@ func (s *Service) UpdateStockMove(ctx context.Context, req *dto.StockMoveUpdateR
 		return err
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		row.FromWarehouseID = req.FromWarehouseId
-		row.ToWarehouseID = req.ToWarehouseId
-		row.MoveTime = moveTime
-		if err := tx.SaveStockMove(ctx, row); err != nil {
+		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
+		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
+		locked, err := tx.FindStockMoveByIDForUpdate(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("库存调拨单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
+		locked.FromWarehouseID = req.FromWarehouseId
+		locked.ToWarehouseID = req.ToWarehouseId
+		locked.MoveTime = moveTime
+		if err := tx.SaveStockMove(ctx, locked); err != nil {
 			return err
 		}
 		// 明细整体替换：软删旧行 + 插入新行（未审核单无流水引用，安全）。
@@ -229,8 +241,13 @@ func (s *Service) DeleteStockMove(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.DeleteStockMove(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
+		deleted, err := tx.DeleteStockMoveIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeleteStockMoveItems(ctx, row.ID)
 	})

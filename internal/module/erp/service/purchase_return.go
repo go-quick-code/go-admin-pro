@@ -267,6 +267,18 @@ func (s *Service) UpdatePurchaseReturn(ctx context.Context, req *dto.PurchaseRet
 		if _, err := s.lockApprovedOrder(ctx, tx, inDoc.OrderID); err != nil {
 			return err
 		}
+		// 状态不变量绑定到写入路径（安全 F1）：锁序与审核一致（入库→订单→退货
+		// 自身），事务内重读退货行并复核 status=10；审核先提交则这里读到 20 → 409。
+		locked, err := tx.LockPurchaseReturnByID(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("采购退货单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
 		if err := s.checkPurchasePartyForWrite(ctx, req.SupplierId, inDoc.SupplierID, items); err != nil {
 			return err
 		}
@@ -288,12 +300,12 @@ func (s *Service) UpdatePurchaseReturn(ctx context.Context, req *dto.PurchaseRet
 		if err != nil {
 			return err
 		}
-		row.SupplierID = req.SupplierId
-		row.WarehouseID = inDoc.WarehouseID
-		row.ReturnTime = returnTime
-		row.TotalPrice = totalPrice
-		row.Remark = req.Remark
-		return tx.SavePurchaseReturn(ctx, row)
+		locked.SupplierID = req.SupplierId
+		locked.WarehouseID = inDoc.WarehouseID
+		locked.ReturnTime = returnTime
+		locked.TotalPrice = totalPrice
+		locked.Remark = req.Remark
+		return tx.SavePurchaseReturn(ctx, locked)
 	})
 }
 
@@ -309,8 +321,13 @@ func (s *Service) DeletePurchaseReturn(ctx context.Context, id int64) error {
 		return xerr.Conflict("已审核单据不可删除")
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		if err := tx.DeletePurchaseReturn(ctx, row.ID); err != nil {
+		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
+		deleted, err := tx.DeletePurchaseReturnIfUnaudited(ctx, row.ID)
+		if err != nil {
 			return err
+		}
+		if deleted == 0 {
+			return xerr.Conflict("已审核单据不可删除")
 		}
 		return tx.DeletePurchaseReturnItems(ctx, row.ID)
 	})
