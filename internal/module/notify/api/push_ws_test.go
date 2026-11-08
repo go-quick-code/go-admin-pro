@@ -98,8 +98,14 @@ func TestWSHandshakeDeliversEvent(t *testing.T) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("握手状态码 = %d, want 101", resp.StatusCode)
 	}
-	if got := env.hub.Subscribers(1, 1); got != 1 {
-		t.Fatalf("握手后在线订阅数 = %d, want 1", got)
+	// 服务端读循环完成订阅注册是异步的：握手成功不代表簿记完成（CI 慢机偶发
+	// Subscribers=0），轮询等待成立后再发布事件。
+	deadline := time.Now().Add(2 * time.Second)
+	for env.hub.Subscribers(1, 1) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("握手后在线订阅数 = %d, want 1", env.hub.Subscribers(1, 1))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	env.hub.Publish(1, 1, push.NewNotification(push.EventData{
