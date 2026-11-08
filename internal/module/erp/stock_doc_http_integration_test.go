@@ -769,8 +769,8 @@ func TestIntegrationStockDocRefChecks(t *testing.T) {
 	})
 	docID := int64(doc["id"].(float64))
 
-	// 审核前（未落账）：仓库/产品均可删（软删行不算引用）。
-	// 这里先建一对干净的仓库/产品验证「未引用可删」路径。
+	// 未落账也已被单据主表引用：仓库删除负路径见 TestIntegrationWarehouseDocRefs；
+	// 这里只建一个未被引用的空仓库验证「未引用可删」路径。
 	_ = createWarehouse(t, env, token, "引用空仓库", nil)
 	// 审核落账。
 	if status, api := approveDoc(t, env, token, "stock-in", docID, 20); status != http.StatusOK || api.Code != 0 {
