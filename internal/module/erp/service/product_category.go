@@ -50,6 +50,9 @@ func (s *Service) CreateProductCategory(ctx context.Context, req *dto.ProductCat
 		}
 		status = *req.Status
 	}
+	if err := validateSortRange(req.Sort); err != nil {
+		return nil, err
+	}
 	list, err := s.repo.ListProductCategories(ctx, repository.ProductCategoryFilter{})
 	if err != nil {
 		return nil, err
@@ -89,6 +92,9 @@ func (s *Service) UpdateProductCategory(ctx context.Context, req *dto.ProductCat
 			return xerr.BadRequest("分类状态只支持 0 启用 / 1 停用")
 		}
 		row.Status = *req.Status
+	}
+	if err := validateSortRange(req.Sort); err != nil {
+		return err
 	}
 	list, err := s.repo.ListProductCategories(ctx, repository.ProductCategoryFilter{})
 	if err != nil {

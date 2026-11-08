@@ -7,9 +7,9 @@ import (
 )
 
 // sequence.go 是 ERP 单号序列发放（issue #90，docs/erp-mvp-spec.md §3.7/§4.8）。
-// 机制复制 crm_sequence（不 import crm，spec §2）：表 PK/UNIQUE
-// (tenant_id, biz_type, date_key)，事务内 INSERT ... ON DUPLICATE KEY UPDATE
-// 原子递增后同事务回读。
+// 机制复制 crm_sequence（不 import crm，spec §2）：id 自增主键 +
+// UNIQUE(tenant_id, biz_type, date_key)（发放锁行），事务内 INSERT ...
+// ON DUPLICATE KEY UPDATE 原子递增后同事务回读。
 
 // NextSequenceValue 在 (tenantID, bizType, dateKey) 上原子发放下一个序号。
 //

@@ -241,6 +241,8 @@ func TestIntegrationProductValidation(t *testing.T) {
 		{name: "价格为数字字面量", payload: map[string]any{"name": "数字价格", "categoryId": categoryID, "unitId": unitID, "salePrice": 59.9}},
 		{name: "价格为三位小数", payload: map[string]any{"name": "三位小数价格", "categoryId": categoryID, "unitId": unitID, "salePrice": "59.999"}},
 		{name: "重量超三位小数", payload: map[string]any{"name": "四位小数重量", "categoryId": categoryID, "unitId": unitID, "weight": "0.1234"}},
+		{name: "重量为负", payload: map[string]any{"name": "负重量", "categoryId": categoryID, "unitId": unitID, "weight": "-1.000"}},
+		{name: "重量超列域", payload: map[string]any{"name": "超域重量", "categoryId": categoryID, "unitId": unitID, "weight": "1000000000.000"}},
 	}
 	for _, tc := range cases {
 		status, api := env.Request(t, http.MethodPost, "/erp/product", token, tc.payload)
@@ -253,6 +255,14 @@ func TestIntegrationProductValidation(t *testing.T) {
 	_, total := pageProducts(t, env, token, "")
 	if total != 0 {
 		t.Fatalf("非法输入产品被落库：total=%d，期望 0", total)
+	}
+
+	// 列域边界值可落库（decimal(12,3) 上限 999,999,999.999，不得误杀）。
+	boundary := createProduct(t, env, token, "边界重量产品", map[string]any{
+		"categoryId": categoryID, "unitId": unitID, "weight": "999999999.999",
+	})
+	if boundary["weight"] != "999999999.999" {
+		t.Fatalf("边界重量回读 = %v，期望 999999999.999", boundary["weight"])
 	}
 
 	// 列表筛选非法状态同样拒绝（绝不静默当「无此筛选」）。

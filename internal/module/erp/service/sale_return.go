@@ -376,6 +376,16 @@ func (s *Service) approveSaleReturn(ctx context.Context, row *model.SaleReturn) 
 		if err != nil {
 			return err
 		}
+		// 父单一致性复核（#98 审查 MAJOR 1）：退货行的仓库/客户是创建时父单快照，
+		// 父出库单反审核后可被编辑（改仓库/客户），直接按快照落账会在旧仓凭空
+		// 增减。父单编辑守卫（UpdateSaleOut）挡住正常路径，这里在入账前再复核
+		// 一次，防御绕过服务层的脏数据（直接改库）。
+		if doc.WarehouseID != out.WarehouseID {
+			return xerr.Conflict("销售退货单仓库与出库单不一致，请删除后重建")
+		}
+		if doc.CustomerID != out.CustomerID {
+			return xerr.Conflict("销售退货单客户与出库单不一致，请删除后重建")
+		}
 		productNames, err := s.productNamesForItems(ctx, tx, saleReturnItemProducts(doc.Items))
 		if err != nil {
 			return err

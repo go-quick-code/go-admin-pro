@@ -1,8 +1,8 @@
 // purchase_in.go 是采购入库单（RK）的业务方法（issue #91，docs/erp-mvp-spec.md
 // §3.3/§4.1/§4.4/§4.8/§5）：必挂已审核订单、审核经唯一入账入口增库存并回写订单
 // 进度、反审核经反向流水回滚。占用校验（未审核单也占量）在创建/编辑/审核时
-// 全量执行，防并发双占的行锁纪律：先锁挂单订单行，再动本单（与退货路径同序，
-// 防死锁）。
+// 全量执行，防并发双占的行锁纪律：涉及既有入库单行的写路径统一先锁入库单行、
+// 再锁挂单订单行（in→order，与退货路径同序，防死锁；#98 审查修正）。
 package service
 
 import (
@@ -233,7 +233,8 @@ func (s *Service) CreatePurchaseIn(ctx context.Context, req *dto.PurchaseInCreat
 
 // UpdatePurchaseIn 修改采购入库单（仅未审核，已审核 409，spec §4.1）：
 // 挂单订单不可更换（改挂等于换单，删除重建）；明细整体替换；替换后全量占用
-// 校验（软删旧明细后按产品聚合，失败随事务回滚）。
+// 校验（软删旧明细后按产品聚合，失败随事务回滚）。存在退货引用（含未审核）
+// 时禁止修改仓库/供应商（409，退货行是父单快照，#98 审查）。
 func (s *Service) UpdatePurchaseIn(ctx context.Context, req *dto.PurchaseInUpdateReq) error {
 	row, err := s.findPurchaseIn(ctx, req.ID)
 	if err != nil {
@@ -254,6 +255,32 @@ func (s *Service) UpdatePurchaseIn(ctx context.Context, req *dto.PurchaseInUpdat
 		return err
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		// 先锁自身行（与退货创建/审核的父单行锁同锚点，统一 in→order 锁序）：
+		// 存在任何退货引用（含未审核）时，禁止修改仓库与供应商——退货行保存
+		// 的是创建时父单快照，父单漂移会让退货审核在旧仓/旧供应商口径下落账
+		// （#98 审查 MAJOR 1）。其余字段照常可改。
+		locked, err := tx.LockPurchaseIn(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("采购入库单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
+		retRefs, err := tx.CountPurchaseReturnsByIn(ctx, row.ID, 0)
+		if err != nil {
+			return err
+		}
+		if retRefs > 0 {
+			if req.WarehouseId != locked.WarehouseID {
+				return xerr.Conflict("采购入库单存在退货单引用，禁止修改仓库")
+			}
+			if req.SupplierId != locked.SupplierID {
+				return xerr.Conflict("采购入库单存在退货单引用，禁止修改供应商")
+			}
+		}
 		order, err := s.lockApprovedOrder(ctx, tx, row.OrderID)
 		if err != nil {
 			return err
@@ -279,12 +306,12 @@ func (s *Service) UpdatePurchaseIn(ctx context.Context, req *dto.PurchaseInUpdat
 		if err != nil {
 			return err
 		}
-		row.SupplierID = req.SupplierId
-		row.WarehouseID = req.WarehouseId
-		row.InTime = inTime
-		row.TotalPrice = totalPrice
-		row.Remark = req.Remark
-		return tx.SavePurchaseIn(ctx, row)
+		locked.SupplierID = req.SupplierId
+		locked.WarehouseID = req.WarehouseId
+		locked.InTime = inTime
+		locked.TotalPrice = totalPrice
+		locked.Remark = req.Remark
+		return tx.SavePurchaseIn(ctx, locked)
 	})
 }
 
@@ -334,26 +361,28 @@ func (s *Service) UpdatePurchaseInStatus(ctx context.Context, req *dto.StockDocU
 	return s.unapprovePurchaseIn(ctx, row)
 }
 
-// approvePurchaseIn 审核落账（spec §4.2/§4.4）：事务内锁挂单订单行 → 订单必须
-// 仍为已审核（创建后被反审核则 409）→ 乐观认领本单状态（防并发双重审核）→
-// 占用校验全量复核 → 逐行经唯一入账入口入账（biz_type=purchase_in，正入）→
-// 重算订单进度（in_count 只计已审核）。
+// approvePurchaseIn 审核落账（spec §4.2/§4.4）：事务内先乐观认领本单状态
+// （防并发双重审核）→ 锁挂单订单行 → 订单必须仍为已审核（创建后被反审核则
+// 409，认领随事务回滚）→ 占用校验全量复核 → 逐行经唯一入账入口入账
+// （biz_type=purchase_in，正入）→ 重算订单进度（in_count 只计已审核）。
+// 锁序与退货路径统一为 in→order（#98 审查 MINOR：避免与退货审核反向加锁
+// 形成 1213 死锁）。
 func (s *Service) approvePurchaseIn(ctx context.Context, row *model.PurchaseIn) error {
 	warehouseName, err := s.warehouseName(ctx, row.WarehouseID)
 	if err != nil {
 		return err
 	}
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		order, err := s.lockApprovedOrder(ctx, tx, row.OrderID)
-		if err != nil {
-			return err
-		}
 		claimed, err := tx.UpdatePurchaseInStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
 		if err != nil {
 			return err
 		}
 		if claimed == 0 {
 			return xerr.Conflict("单据状态已变化，请刷新后重试")
+		}
+		order, err := s.lockApprovedOrder(ctx, tx, row.OrderID)
+		if err != nil {
+			return err
 		}
 		doc, err := tx.FindPurchaseInWithItems(ctx, row.ID)
 		if err != nil {
@@ -385,15 +414,25 @@ func (s *Service) approvePurchaseIn(ctx context.Context, row *model.PurchaseIn) 
 	})
 }
 
-// unapprovePurchaseIn 反审核回滚（spec §4.1/§4.3/§4.4）：存在已审核退货单 409
-// （反审核禁令）；乐观认领状态后逐行经唯一入账入口新增 purchase_in_CANCEL 反向
-// 流水（count 取负，原流水保留）回滚库存，并重算订单进度。
+// unapprovePurchaseIn 反审核回滚（spec §4.1/§4.3/§4.4）：先乐观认领本单状态
+// （UPDATE 即对本行加 X 锁，与退货审核的父单行锁串行化）→ 再锁挂单订单行
+// （统一 in→order 锁序）→ 聚合已审核退货，存在则 409 并回滚认领（绝不留下
+// 「入库单未审核 + 已审核退货单」组合，#98 审查 MINOR/MAJOR 2）→ 逐行经唯一
+// 入账入口新增 purchase_in_CANCEL 反向流水（count 取负，原流水保留）回滚库存
+// → 重算订单进度。
 func (s *Service) unapprovePurchaseIn(ctx context.Context, row *model.PurchaseIn) error {
 	warehouseName, err := s.warehouseName(ctx, row.WarehouseID)
 	if err != nil {
 		return err
 	}
 	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
+		claimed, err := tx.UpdatePurchaseInStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
+		if err != nil {
+			return err
+		}
+		if claimed == 0 {
+			return xerr.Conflict("单据状态已变化，请刷新后重试")
+		}
 		if _, err := s.lockApprovedOrder(ctx, tx, row.OrderID); err != nil {
 			return err
 		}
@@ -403,13 +442,6 @@ func (s *Service) unapprovePurchaseIn(ctx context.Context, row *model.PurchaseIn
 		}
 		if len(retSum) > 0 {
 			return xerr.Conflict("入库单存在已审核退货单，不可反审核")
-		}
-		claimed, err := tx.UpdatePurchaseInStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
 		}
 		// 财务反审核禁令（issue #94，spec §4.1/§4.7）：存在已审核付款单核销时
 		// 不可反审核；付款单反审核释放额度后可退。放在认领之后：与付款审核的

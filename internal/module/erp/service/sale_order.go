@@ -290,10 +290,19 @@ func (s *Service) UpdateSaleOrderStatus(ctx context.Context, req *dto.SaleDocUpd
 	return s.unapproveSaleOrder(ctx, row)
 }
 
-// unapproveSaleOrder 订单反审核：存在已审核出库/退货单 → 409（spec §4.1 反审核
-// 禁令）；仅有未审核单据时不阻断（禁令按 spec 只看已审核）。
+// unapproveSaleOrder 订单反审核：先乐观认领自身（UPDATE 对本行加 X 锁，与出库
+// 审核先锁挂单订单串行化）再聚合下游禁令（#98 审查 MAJOR 2）——存在已审核
+// 出库/退货单则 409 并回滚认领，任何并发交错都不会留下「订单未审核 + 已审核
+// 子单」的组合。仅有未审核单据时不阻断（禁令按 spec 只看已审核）。
 func (s *Service) unapproveSaleOrder(ctx context.Context, row *model.SaleOrder) error {
 	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
+		claimed, err := tx.UpdateSaleOrderStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
+		if err != nil {
+			return err
+		}
+		if claimed == 0 {
+			return xerr.Conflict("单据状态已变化，请刷新后重试")
+		}
 		outRefs, err := tx.CountSaleOutsByOrder(ctx, row.ID, model.DocStatusApproved)
 		if err != nil {
 			return err
@@ -307,13 +316,6 @@ func (s *Service) unapproveSaleOrder(ctx context.Context, row *model.SaleOrder) 
 		}
 		if retRefs > 0 {
 			return xerr.Conflict("销售订单存在已审核退货单，不可反审核")
-		}
-		claimed, err := tx.UpdateSaleOrderStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
 		}
 		return nil
 	})

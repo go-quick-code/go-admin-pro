@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
@@ -404,6 +405,254 @@ func TestIntegrationSaleApproveRechecksLink(t *testing.T) {
 	}
 	if got := getStockCount(t, env, token, productID, warehouseID); got != "10.000" {
 		t.Fatalf("复核失败不应回库存：库存 = %s，期望 10.000（出库反审核已回补）", got)
+	}
+}
+
+// TestIntegrationSaleReturnParentConsistency 退货父单快照一致性（#98 审查
+// MAJOR 1 回归）：
+//   - 出库 W1 审核 → 建退货（仓库/客户快照）→ 反审核出库 → 编辑出库改仓库/
+//     客户必须 409（存在退货引用，含未审核）；
+//   - 同仓库/客户仅改时间可编辑 → 重新审核出库 → 退货审核成功，只回 W1；
+//   - 直接改库构造退货仓库/客户与父单错配 → 审核 409，库存与流水不变。
+func TestIntegrationSaleReturnParentConsistency(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID, customerID := setupSaleEnv(t, env, token, "父单快照")
+	warehouse2 := createWarehouse(t, env, token, "父单快照二仓", nil)
+	warehouse2ID := int64(warehouse2["id"].(float64))
+	customer2 := createCustomer(t, env, token, "父单快照二客户", nil)
+	customer2ID := int64(customer2["id"].(float64))
+	padSaleStock(t, env, token, warehouseID, productID, "10")
+
+	order := createSaleOrderDoc(t, env, token, map[string]any{
+		"customerId": customerID,
+		"orderTime":  env.Date() + " 09:00:00",
+		"items":      []map[string]any{saleItemJSON(productID, "10", "3.00")},
+	})
+	orderID := int64(order["id"].(float64))
+	mustApproveSale(t, env, token, "sale-order", orderID, 20)
+	// 第二客户挂自己的订单（客户改单要先过「客户=订单客户」的挂单校验，才能
+	// 命中父单守卫的客户分支）。
+	order2 := createSaleOrderDoc(t, env, token, map[string]any{
+		"customerId": customer2ID,
+		"orderTime":  env.Date() + " 09:30:00",
+		"items":      []map[string]any{saleItemJSON(productID, "5", "3.00")},
+	})
+	order2ID := int64(order2["id"].(float64))
+	mustApproveSale(t, env, token, "sale-order", order2ID, 20)
+
+	out := createSaleOutDoc(t, env, token, map[string]any{
+		"customerId": customerID, "orderId": orderID, "warehouseId": warehouseID,
+		"outTime": env.Date() + " 10:00:00",
+		"items":   []map[string]any{saleItemJSON(productID, "5", "3.00")},
+	})
+	outID := int64(out["id"].(float64))
+	mustApproveSale(t, env, token, "sale-out", outID, 20)
+
+	ret := createSaleReturnDoc(t, env, token, map[string]any{
+		"customerId": customerID, "outId": outID,
+		"returnTime": env.Date() + " 11:00:00",
+		"items":      []map[string]any{saleItemJSON(productID, "2", "3.00")},
+	})
+	retID := int64(ret["id"].(float64))
+
+	// 反审核出库（此时退货未审核，禁令不阻断）→ 父单可编辑，但退货快照锁定
+	// 仓库/客户：改任一字段 409。
+	mustApproveSale(t, env, token, "sale-out", outID, 10)
+	outUpdate := func(warehouseID, customerID, orderID int64) map[string]any {
+		return map[string]any{
+			"id": outID, "customerId": customerID, "orderId": orderID,
+			"warehouseId": warehouseID, "outTime": env.Date() + " 10:30:00",
+			"items": []map[string]any{saleItemJSON(productID, "5", "3.00")},
+		}
+	}
+	status, api := env.Request(t, http.MethodPut, "/erp/sale-out", token, outUpdate(warehouse2ID, customerID, orderID))
+	if status != http.StatusConflict || !strings.Contains(api.Msg, "禁止修改仓库") {
+		t.Fatalf("有退货引用时改仓库：HTTP %d msg %q，期望 409 且提示禁止修改仓库", status, api.Msg)
+	}
+	status, api = env.Request(t, http.MethodPut, "/erp/sale-out", token, outUpdate(warehouseID, customer2ID, order2ID))
+	if status != http.StatusConflict || !strings.Contains(api.Msg, "禁止修改客户") {
+		t.Fatalf("有退货引用时改客户：HTTP %d msg %q，期望 409 且提示禁止修改客户", status, api.Msg)
+	}
+	// 同仓库/客户仅改时间：允许（其余字段不冻结）。
+	status, api = env.Request(t, http.MethodPut, "/erp/sale-out", token, outUpdate(warehouseID, customerID, orderID))
+	if status != http.StatusOK || api.Code != 0 {
+		t.Fatalf("同仓库/客户编辑出库：HTTP %d code %d msg %q，期望成功", status, api.Code, api.Msg)
+	}
+
+	// 重新审核出库后审核退货成功：库存只回 W1（10−5+2=7），W2 不凭空增加。
+	mustApproveSale(t, env, token, "sale-out", outID, 20)
+	mustApproveSale(t, env, token, "sale-return", retID, 20)
+	if got := getStockCount(t, env, token, productID, warehouseID); got != "7.000" {
+		t.Fatalf("退货审核后 W1 库存 = %s，期望 7.000", got)
+	}
+	if got := getStockCount(t, env, token, productID, warehouse2ID); got != "0.000" {
+		t.Fatalf("退货审核不应动 W2：库存 = %s，期望 0.000", got)
+	}
+
+	// 直接改库构造错配：仓库篡改 → 审核 409、库存/流水不变。
+	ret2 := createSaleReturnDoc(t, env, token, map[string]any{
+		"customerId": customerID, "outId": outID,
+		"returnTime": env.Date() + " 12:00:00",
+		"items":      []map[string]any{saleItemJSON(productID, "1", "3.00")},
+	})
+	ret2ID := int64(ret2["id"].(float64))
+	recordsBefore, _ := pageStockRecords(t, env, token, "")
+	if err := env.DB.Exec("UPDATE `erp_sale_return` SET `warehouse_id` = ? WHERE `id` = ?", warehouse2ID, ret2ID).Error; err != nil {
+		t.Fatalf("篡改退货仓库: %v", err)
+	}
+	status, api = approveSaleDoc(t, env, token, "sale-return", ret2ID, 20)
+	if status != http.StatusConflict || !strings.Contains(api.Msg, "仓库与出库单不一致") {
+		t.Fatalf("退货仓库错配审核：HTTP %d msg %q，期望 409 且提示仓库不一致", status, api.Msg)
+	}
+	if got := getStockCount(t, env, token, productID, warehouseID); got != "7.000" {
+		t.Fatalf("错配审核不应回库存：W1 = %s，期望 7.000", got)
+	}
+	if got := getStockCount(t, env, token, productID, warehouse2ID); got != "0.000" {
+		t.Fatalf("错配审核不应向 W2 落账：库存 = %s，期望 0.000", got)
+	}
+	if records, _ := pageStockRecords(t, env, token, ""); len(records) != len(recordsBefore) {
+		t.Fatalf("错配审核不应新增流水：%d → %d", len(recordsBefore), len(records))
+	}
+	if detail := getSaleDetail(t, env, token, "sale-return", ret2ID); detail["status"] != float64(10) {
+		t.Fatalf("错配审核失败后退货应保持未审核，实际 status=%v", detail["status"])
+	}
+
+	// 客户篡改 → 同样 409。
+	if err := env.DB.Exec(
+		"UPDATE `erp_sale_return` SET `warehouse_id` = ?, `customer_id` = ? WHERE `id` = ?",
+		warehouseID, customer2ID, ret2ID,
+	).Error; err != nil {
+		t.Fatalf("篡改退货客户: %v", err)
+	}
+	status, api = approveSaleDoc(t, env, token, "sale-return", ret2ID, 20)
+	if status != http.StatusConflict || !strings.Contains(api.Msg, "客户与出库单不一致") {
+		t.Fatalf("退货客户错配审核：HTTP %d msg %q，期望 409 且提示客户不一致", status, api.Msg)
+	}
+	if got := getStockCount(t, env, token, productID, warehouseID); got != "7.000" {
+		t.Fatalf("客户错配审核不应回库存：W1 = %s，期望 7.000", got)
+	}
+}
+
+// TestIntegrationSaleUnapproveConcurrentInvariant 反审核并发不变量（#98 审查
+// MAJOR 2 回归）：循环 20 次，每轮并发发起「子单审核」与「父单反审核」，断言
+// 最终不存在「父单 status=10 且存在已审核子单」的组合，且两请求恰一成一败
+// （200/409，无死锁/500）：
+//   - 退货审核 vs 出库反审核（父单行锁串行化）；
+//   - 出库审核 vs 订单反审核（子单审核先锁挂单订单）。
+func TestIntegrationSaleUnapproveConcurrentInvariant(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID, customerID := setupSaleEnv(t, env, token, "并发反审核")
+	padSaleStock(t, env, token, warehouseID, productID, "100")
+
+	// assertOneWins 断言并发请求分别返回 200/409 且恰一成功（无死锁/500）。
+	assertOneWins := func(t *testing.T, round int, aStatus int, aAPI testutil.APIResponse, aErr error,
+		bStatus int, bAPI testutil.APIResponse, bErr error) {
+		t.Helper()
+		for _, res := range []struct {
+			label  string
+			status int
+			api    testutil.APIResponse
+			err    error
+		}{
+			{"子单审核", aStatus, aAPI, aErr},
+			{"父单反审核", bStatus, bAPI, bErr},
+		} {
+			if res.err != nil {
+				t.Fatalf("第 %d 轮 %s 请求错误: %v", round, res.label, res.err)
+			}
+			if res.status != http.StatusOK && res.status != http.StatusConflict {
+				t.Fatalf("第 %d 轮 %s：HTTP %d code %d msg %q，期望 200/409（不得死锁或 500）",
+					round, res.label, res.status, res.api.Code, res.api.Msg)
+			}
+		}
+		success := 0
+		if aStatus == http.StatusOK {
+			success++
+		}
+		if bStatus == http.StatusOK {
+			success++
+		}
+		if success != 1 {
+			t.Fatalf("第 %d 轮并发结果应恰一成功：子单 HTTP %d / 父单 HTTP %d", round, aStatus, bStatus)
+		}
+	}
+	// runPair 并发发起两个审核/反审核请求。
+	runPair := func(docTypeA string, idA int64, targetA int8, docTypeB string, idB int64, targetB int8) (int, testutil.APIResponse, error, int, testutil.APIResponse, error) {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var aStatus, bStatus int
+		var aAPI, bAPI testutil.APIResponse
+		var aErr, bErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			aStatus, aAPI, aErr = approveDocOnce(env, token, docTypeA, idA, targetA)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			bStatus, bAPI, bErr = approveDocOnce(env, token, docTypeB, idB, targetB)
+		}()
+		close(start)
+		wg.Wait()
+		return aStatus, aAPI, aErr, bStatus, bAPI, bErr
+	}
+
+	// 轮次 1：退货审核 vs 出库反审核。每轮独立订单/出库/退货，避免历史单据
+	// 占用额度掩盖并发窗口。
+	for i := 0; i < 20; i++ {
+		order := createSaleOrderDoc(t, env, token, map[string]any{
+			"customerId": customerID, "orderTime": env.Date() + " 09:00:00",
+			"items": []map[string]any{saleItemJSON(productID, "1", "1.00")},
+		})
+		orderID := int64(order["id"].(float64))
+		mustApproveSale(t, env, token, "sale-order", orderID, 20)
+		out := createSaleOutDoc(t, env, token, map[string]any{
+			"customerId": customerID, "orderId": orderID, "warehouseId": warehouseID,
+			"outTime": env.Date() + " 10:00:00",
+			"items":   []map[string]any{saleItemJSON(productID, "1", "1.00")},
+		})
+		outID := int64(out["id"].(float64))
+		mustApproveSale(t, env, token, "sale-out", outID, 20)
+		ret := createSaleReturnDoc(t, env, token, map[string]any{
+			"customerId": customerID, "outId": outID,
+			"returnTime": env.Date() + " 11:00:00",
+			"items":      []map[string]any{saleItemJSON(productID, "1", "1.00")},
+		})
+		retID := int64(ret["id"].(float64))
+		aStatus, aAPI, aErr, bStatus, bAPI, bErr := runPair("sale-return", retID, 20, "sale-out", outID, 10)
+		assertOneWins(t, i+1, aStatus, aAPI, aErr, bStatus, bAPI, bErr)
+		outStatus := getSaleDetail(t, env, token, "sale-out", outID)["status"].(float64)
+		retStatus := getSaleDetail(t, env, token, "sale-return", retID)["status"].(float64)
+		if outStatus == float64(10) && retStatus == float64(20) {
+			t.Fatalf("第 %d 轮出现「出库未审核 + 已审核退货」组合", i+1)
+		}
+	}
+
+	// 轮次 2：出库审核 vs 订单反审核。每轮独立订单/出库，反审核成功后无需恢复。
+	for i := 0; i < 20; i++ {
+		order := createSaleOrderDoc(t, env, token, map[string]any{
+			"customerId": customerID, "orderTime": env.Date() + " 13:00:00",
+			"items": []map[string]any{saleItemJSON(productID, "1", "1.00")},
+		})
+		orderID := int64(order["id"].(float64))
+		mustApproveSale(t, env, token, "sale-order", orderID, 20)
+		out := createSaleOutDoc(t, env, token, map[string]any{
+			"customerId": customerID, "orderId": orderID, "warehouseId": warehouseID,
+			"outTime": env.Date() + " 14:00:00",
+			"items":   []map[string]any{saleItemJSON(productID, "1", "1.00")},
+		})
+		outID := int64(out["id"].(float64))
+		aStatus, aAPI, aErr, bStatus, bAPI, bErr := runPair("sale-out", outID, 20, "sale-order", orderID, 10)
+		assertOneWins(t, i+1, aStatus, aAPI, aErr, bStatus, bAPI, bErr)
+		orderStatus := getSaleDetail(t, env, token, "sale-order", orderID)["status"].(float64)
+		outStatus := getSaleDetail(t, env, token, "sale-out", outID)["status"].(float64)
+		if orderStatus == float64(10) && outStatus == float64(20) {
+			t.Fatalf("第 %d 轮出现「订单未审核 + 已审核出库」组合", i+1)
+		}
 	}
 }
 

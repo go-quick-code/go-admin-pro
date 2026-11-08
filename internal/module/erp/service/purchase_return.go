@@ -2,7 +2,8 @@
 // §3.3/§4.1/§4.4/§4.8/§5）：必挂已审核入库单、仓库取自入库单（入参不收）、审核
 // 经唯一入账入口减库存并回写订单进度（经入库单关联）、反审核经反向流水回滚。
 // 占用校验（退货占入库单余量，并计入订单的退货占用）在创建/编辑/审核时全量
-// 执行；行锁纪律与入库路径同序（先订单行后入库单行），防死锁。
+// 执行；行锁纪律统一为入库单行→订单行（in→order，与入库审核/反审核同序，
+// 防死锁；#98 审查修正注释与代码一致）。
 package service
 
 import (
@@ -190,7 +191,8 @@ func (s *Service) CreatePurchaseReturn(ctx context.Context, req *dto.PurchaseRet
 		if err != nil {
 			return err
 		}
-		// 锁序纪律：先订单行后入库单行（与入库单写路径同序，防死锁）。
+		// 锁序纪律：先入库单行、后订单行（in→order，与入库审核/反审核同序，
+		// 防死锁；#98 审查修正原注释与代码相反的问题）。
 		if _, err := s.lockApprovedOrder(ctx, tx, inDoc.OrderID); err != nil {
 			return err
 		}
@@ -362,6 +364,16 @@ func (s *Service) approvePurchaseReturn(ctx context.Context, row *model.Purchase
 		doc, err := tx.FindPurchaseReturnWithItems(ctx, row.ID)
 		if err != nil {
 			return err
+		}
+		// 父单一致性复核（#98 审查 MAJOR 1，与销售退货镜像）：退货行仓库/供应商
+		// 是创建时入库单快照，父单反审核后可被编辑，直接按快照落账会在旧仓凭空
+		// 增减。父单编辑守卫（UpdatePurchaseIn）挡住正常路径，这里入账前再复核
+		// 一次，防御绕过服务层的脏数据（直接改库）。
+		if doc.WarehouseID != inDoc.WarehouseID {
+			return xerr.Conflict("采购退货单仓库与入库单不一致，请删除后重建")
+		}
+		if doc.SupplierID != inDoc.SupplierID {
+			return xerr.Conflict("采购退货单供应商与入库单不一致，请删除后重建")
 		}
 		// 占用复核以入库单当前明细为配额侧（已审核入库单明细不可变，但与创建
 		// 时点之间可能有其它退货单落账）。

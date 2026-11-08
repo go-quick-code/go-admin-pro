@@ -79,3 +79,32 @@ func (r *Repository) SaveWarehouse(ctx context.Context, row *model.Warehouse) er
 func (r *Repository) DeleteWarehouse(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Warehouse{}, id).Error
 }
+
+// CountWarehouseDocRefs 仓库被单据主表引用的行数（spec §4.9：仓库被任何单据
+// （含未审核）引用禁删；软删行不计——删除单据即释放引用）。调拨计调出/调入
+// 两仓（同一行只计一次），盘点计盘点仓（#98 审查 MINOR）。
+func (r *Repository) CountWarehouseDocRefs(ctx context.Context, warehouseID int64) (int64, error) {
+	refs := []struct {
+		table any
+		cond  string
+		args  []any
+	}{
+		{&model.StockIn{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.StockOut{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.PurchaseIn{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.PurchaseReturn{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.SaleOut{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.SaleReturn{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.StockCheck{}, "warehouse_id = ?", []any{warehouseID}},
+		{&model.StockMove{}, "from_warehouse_id = ? OR to_warehouse_id = ?", []any{warehouseID, warehouseID}},
+	}
+	var total int64
+	for _, ref := range refs {
+		n, err := countRows(ctx, r.db, ref.table, ref.cond, ref.args...)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+	return total, nil
+}

@@ -243,7 +243,8 @@ func (s *Service) lockSaleOutLink(ctx context.Context, tx *repository.Repository
 }
 
 // UpdateSaleOut 修改销售出库单（仅未审核，已审核 409，spec §4.1）：字段全量
-// 覆盖（可换挂订单，客户/占用随新订单重验）；单号不采纳；明细整体替换。
+// 覆盖（可换挂订单，客户/占用随新订单重验）；单号不采纳；明细整体替换。存在
+// 退货引用（含未审核）时禁止修改仓库/客户（409，退货行是父单快照，#98 审查）。
 func (s *Service) UpdateSaleOut(ctx context.Context, req *dto.SaleOutUpdateReq) error {
 	row, err := s.findSaleOut(ctx, req.ID)
 	if err != nil {
@@ -268,6 +269,32 @@ func (s *Service) UpdateSaleOut(ctx context.Context, req *dto.SaleOutUpdateReq) 
 		if err != nil {
 			return err
 		}
+		// 锁自身行（与退货创建的父单行锁同锚点，串行化并发退货写入）：存在任何
+		// 退货引用（含未审核）时，禁止修改仓库与客户——退货行保存的是创建时
+		// 父单快照，父单漂移会让退货审核在旧仓/旧客户口径下落账（#98 审查
+		// MAJOR 1）。其余字段照常可改。
+		locked, err := tx.FindSaleOutByIDForUpdate(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return xerr.NotFound("销售出库单不存在")
+		}
+		if locked.Status != model.DocStatusUnaudited {
+			return xerr.Conflict("已审核单据不可修改")
+		}
+		retRefs, err := tx.CountSaleReturnsByOut(ctx, row.ID, 0)
+		if err != nil {
+			return err
+		}
+		if retRefs > 0 {
+			if req.WarehouseId != locked.WarehouseID {
+				return xerr.Conflict("销售出库单存在退货单引用，禁止修改仓库")
+			}
+			if req.CustomerId != locked.CustomerID {
+				return xerr.Conflict("销售出库单存在退货单引用，禁止修改客户")
+			}
+		}
 		// 编辑自检：聚合占用时排除自己（新明细替换旧明细，不双重计占用）。
 		if err := s.checkSaleOutOccupancy(ctx, tx, order, items, row.ID); err != nil {
 			return err
@@ -276,12 +303,12 @@ func (s *Service) UpdateSaleOut(ctx context.Context, req *dto.SaleOutUpdateReq) 
 		if err != nil {
 			return err
 		}
-		row.CustomerID = req.CustomerId
-		row.OrderID = req.OrderId
-		row.WarehouseID = req.WarehouseId
-		row.OutTime = outTime
-		row.TotalPrice = total
-		if err := tx.SaveSaleOut(ctx, row); err != nil {
+		locked.CustomerID = req.CustomerId
+		locked.OrderID = req.OrderId
+		locked.WarehouseID = req.WarehouseId
+		locked.OutTime = outTime
+		locked.TotalPrice = total
+		if err := tx.SaveSaleOut(ctx, locked); err != nil {
 			return err
 		}
 		if err := tx.DeleteSaleOutItems(ctx, row.ID); err != nil {
@@ -389,8 +416,10 @@ func (s *Service) approveSaleOut(ctx context.Context, row *model.SaleOut) error 
 	})
 }
 
-// unapproveSaleOut 反审核回滚（spec §4.1/§4.3）：存在已审核退货单 → 409
-// （反审核禁令）；乐观认领状态 → 逐行经唯一入账入口新增 _CANCEL 反向流水
+// unapproveSaleOut 反审核回滚（spec §4.1/§4.3）：先乐观认领自身（UPDATE 即对
+// 本行加 X 锁，与退货审核的父单行锁串行化）再聚合已审核退货——若认领后仍有
+// 已审核退货则 409 并回滚认领，绝不留下「出库单未审核 + 已审核退货单」的
+// 组合（#98 审查 MAJOR 2）。随后逐行经唯一入账入口新增 _CANCEL 反向流水
 // （库存回补，原流水保留）→ 重算订单进度。
 func (s *Service) unapproveSaleOut(ctx context.Context, row *model.SaleOut) error {
 	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.WarehouseID})
@@ -399,19 +428,19 @@ func (s *Service) unapproveSaleOut(ctx context.Context, row *model.SaleOut) erro
 	}
 	warehouseName := warehouseNames[row.WarehouseID]
 	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
-		retRefs, err := tx.CountSaleReturnsByOut(ctx, row.ID, model.DocStatusApproved)
-		if err != nil {
-			return err
-		}
-		if retRefs > 0 {
-			return xerr.Conflict("销售出库单存在已审核退货单，不可反审核")
-		}
 		claimed, err := tx.UpdateSaleOutStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
 		if err != nil {
 			return err
 		}
 		if claimed == 0 {
 			return xerr.Conflict("单据状态已变化，请刷新后重试")
+		}
+		retRefs, err := tx.CountSaleReturnsByOut(ctx, row.ID, model.DocStatusApproved)
+		if err != nil {
+			return err
+		}
+		if retRefs > 0 {
+			return xerr.Conflict("销售出库单存在已审核退货单，不可反审核")
 		}
 		// 财务反审核禁令（issue #94，spec §4.1/§4.7）：存在已审核收款单核销时
 		// 不可反审核（否则回写金额与核销引用悬空）；收款单反审核释放额度后可退。
