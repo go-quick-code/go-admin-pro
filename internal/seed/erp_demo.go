@@ -646,11 +646,18 @@ func erpDemoSeedFinance(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, d
 	}
 	receipt := erpmodel.FinanceReceipt{
 		BaseEntity: erpDemoBase(erpDemoReceiptID, receiptTime, creator),
-		TenantID:   erpDemoTenantID, No: receiptNo,
-		CustomerID: erpDemoCustomerFutureID, AccountID: erpDemoAccountICBCID,
-		ReceiptUserID: admin.ID, ReceiptTime: receiptTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示收款：全额核销销售出库",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:            receiptNo,
+		CustomerID:    erpDemoCustomerFutureID,
+		AccountID:     erpDemoAccountICBCID,
+		ReceiptUserID: admin.ID,
+		ReceiptTime:   receiptTime,
+		Remark:        "演示收款：全额核销销售出库",
 	}
 	if err := tenant.Skip(tx).Create(&receipt).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示收款单: %w", err)

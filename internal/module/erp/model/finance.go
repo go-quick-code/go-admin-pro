@@ -81,7 +81,7 @@ func (FinanceAccount) TableName() string { return "erp_finance_account" }
 // FinanceReceipt 是收款单主表（明细挂已审核销售出库/销售退货，spec §3.6）。
 type FinanceReceipt struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// No 是收款单号：SK + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一。
 	No         string `gorm:"size:32;not null" json:"no"`
 	CustomerID int64  `gorm:"index;not null" json:"customerId"`
@@ -89,16 +89,18 @@ type FinanceReceipt struct {
 	// ReceiptUserID 经手人（纯记录字段；> 0 时校验用户存在）。
 	ReceiptUserID int64     `gorm:"not null;default:0" json:"receiptUserId"`
 	ReceiptTime   time.Time `gorm:"not null" json:"receiptTime"`
-	Status        int8      `gorm:"not null;default:10" json:"status"`
 	Remark        string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	Items []FinanceReceiptItem `gorm:"foreignKey:ReceiptID" json:"items,omitempty"`
 }
 
 func (FinanceReceipt) TableName() string { return "erp_finance_receipt" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 receipt_time）。
+func (d *FinanceReceipt) GetNo() string          { return d.No }
+func (d *FinanceReceipt) SetNo(v string)         { d.No = v }
+func (d *FinanceReceipt) GetBizTime() time.Time  { return d.ReceiptTime }
+func (d *FinanceReceipt) SetBizTime(v time.Time) { d.ReceiptTime = v }
 
 // FinanceReceiptItem 是收款单明细：biz_type + biz_id 指向已审核销售出库/销售
 // 退货，price 是本次核销金额（审核时校验上限并回写）。

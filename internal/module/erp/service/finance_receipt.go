@@ -6,14 +6,38 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// financeReceiptKernel 构造收款单内核：审核/反审核均用 READ COMMITTED
+// （核销上限的聚合必须是当前读）。
+func (s *Service) financeReceiptKernel() *doc.Kernel[*model.FinanceReceipt, model.FinanceReceiptItem] {
+	return doc.New(docEnv{s}, s.financeReceiptStore(), doc.Spec[*model.FinanceReceipt, model.FinanceReceiptItem]{
+		Labels:             doc.Labels{Doc: "收款单", Item: "核销明细"},
+		NoPrefix:           FinanceReceiptNoPrefix,
+		SeqBizType:         SeqBizTypeFinanceReceipt,
+		ApproveIsolation:   doc.IsolationReadCommitted,
+		UnapproveIsolation: doc.IsolationReadCommitted,
+		Approve:            s.approveFinanceReceiptDoc,
+		Unapprove:          s.unapproveFinanceReceiptDoc,
+	})
+}
+
+// financeReceiptStore 装配收款单的泛型存储。
+func (s *Service) financeReceiptStore() doc.Store[*model.FinanceReceipt, model.FinanceReceiptItem] {
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.FinanceReceipt, model.FinanceReceiptItem]{
+		New:     func() *model.FinanceReceipt { return &model.FinanceReceipt{} },
+		ItemsFK: "receipt_id",
+	})
+}
 
 // ListFinanceReceipts 收款单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListFinanceReceipts(ctx context.Context, req *dto.FinanceReceiptPageReq) ([]dto.FinanceReceiptRow, int64, error) {
@@ -100,11 +124,7 @@ func (s *Service) assembleFinanceReceiptRows(ctx context.Context, list []model.F
 
 // GetFinanceReceipt 收款单详情（头 + 明细 + 被核销单据单号）。
 func (s *Service) GetFinanceReceipt(ctx context.Context, id int64) (*dto.FinanceReceiptDetail, error) {
-	row, err := s.findFinanceReceipt(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindFinanceReceiptWithItems(ctx, row.ID)
+	full, err := s.financeReceiptKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -155,8 +175,8 @@ func (s *Service) GetFinanceReceipt(ctx context.Context, id int64) (*dto.Finance
 }
 
 // CreateFinanceReceipt 创建收款单（未审核）：明细校验 → 客户/账户/经手人存在 →
-// 明细引用只挂已审核销售出库/退货且客户一致 → 事务内发放单号（SK）→ 落主表 +
-// 明细。不动核销（只有审核动作回写，spec §4.7）。
+// 明细引用只挂已审核销售出库/退货且客户一致 → 内核事务内发号落主表与明细。
+// 不动核销（只有审核动作回写，spec §4.7）。
 func (s *Service) CreateFinanceReceipt(ctx context.Context, req *dto.FinanceReceiptCreateReq) (*model.FinanceReceipt, error) {
 	drafts, err := buildFinanceReceiptDrafts(req.Items)
 	if err != nil {
@@ -178,205 +198,111 @@ func (s *Service) CreateFinanceReceipt(ctx context.Context, req *dto.FinanceRece
 	if err := s.checkFinanceItemRefs(ctx, financeSideReceipt, req.CustomerId, drafts); err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.FinanceReceipt
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypeFinanceReceipt, FinanceReceiptNoPrefix)
-		if err != nil {
-			return err
-		}
-		doc = &model.FinanceReceipt{
-			No:            no,
-			CustomerID:    req.CustomerId,
-			AccountID:     req.AccountId,
-			ReceiptUserID: req.ReceiptUserId,
-			ReceiptTime:   receiptTime,
-			Status:        model.DocStatusUnaudited,
-			Remark:        req.Remark,
-			OwnerUserID:   ownerID,
-			OwnerDeptID:   deptID,
-		}
-		if err := tx.CreateFinanceReceipt(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreateFinanceReceiptItems(ctx, financeReceiptItemRows(doc.ID, drafts))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return s.financeReceiptKernel().Create(ctx, nil,
+		func(ctx context.Context) (*model.FinanceReceipt, error) {
+			return &model.FinanceReceipt{
+				CustomerID:    req.CustomerId,
+				AccountID:     req.AccountId,
+				ReceiptUserID: req.ReceiptUserId,
+				ReceiptTime:   receiptTime,
+				Remark:        req.Remark,
+			}, nil
+		},
+		func(ctx context.Context, d *model.FinanceReceipt) ([]model.FinanceReceiptItem, error) {
+			return financeReceiptItemRows(d.ID, drafts), nil
+		},
+	)
 }
 
 // UpdateFinanceReceipt 修改收款单（仅未审核，已审核 409）：字段全量覆盖，明细
 // 整体替换并重新校验引用（可换客户，明细随新客户重验）。
 func (s *Service) UpdateFinanceReceipt(ctx context.Context, req *dto.FinanceReceiptUpdateReq) error {
-	row, err := s.findFinanceReceipt(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	drafts, err := buildFinanceReceiptDrafts(req.Items)
-	if err != nil {
-		return err
-	}
-	receiptTime, err := s.parseDocTime(req.ReceiptTime, "收款时间")
-	if err != nil {
-		return err
-	}
-	if err := s.checkSaleCustomer(ctx, req.CustomerId); err != nil {
-		return err
-	}
-	if err := s.checkFinanceAccount(ctx, req.AccountId); err != nil {
-		return err
-	}
-	if err := s.checkFinanceHandlerUser(ctx, req.ReceiptUserId); err != nil {
-		return err
-	}
-	if err := s.checkFinanceItemRefs(ctx, financeSideReceipt, req.CustomerId, drafts); err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
-		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
-		locked, err := tx.FindFinanceReceiptByIDForUpdate(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("收款单不存在")
-		}
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		locked.CustomerID = req.CustomerId
-		locked.AccountID = req.AccountId
-		locked.ReceiptUserID = req.ReceiptUserId
-		locked.ReceiptTime = receiptTime
-		locked.Remark = req.Remark
-		if err := tx.SaveFinanceReceipt(ctx, locked); err != nil {
-			return err
-		}
-		if err := tx.DeleteFinanceReceiptItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreateFinanceReceiptItems(ctx, financeReceiptItemRows(row.ID, drafts))
-	})
+	var drafts []financeItemDraft
+	var receiptTime time.Time
+	return s.financeReceiptKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.FinanceReceipt) error {
+			var err error
+			drafts, err = buildFinanceReceiptDrafts(req.Items)
+			if err != nil {
+				return err
+			}
+			receiptTime, err = s.parseDocTime(req.ReceiptTime, "收款时间")
+			if err != nil {
+				return err
+			}
+			if err := s.checkSaleCustomer(ctx, req.CustomerId); err != nil {
+				return err
+			}
+			if err := s.checkFinanceAccount(ctx, req.AccountId); err != nil {
+				return err
+			}
+			if err := s.checkFinanceHandlerUser(ctx, req.ReceiptUserId); err != nil {
+				return err
+			}
+			return s.checkFinanceItemRefs(ctx, financeSideReceipt, req.CustomerId, drafts)
+		},
+		func(ctx context.Context, _ doc.Tx[*model.FinanceReceipt, model.FinanceReceiptItem], d *model.FinanceReceipt) error {
+			d.CustomerID = req.CustomerId
+			d.AccountID = req.AccountId
+			d.ReceiptUserID = req.ReceiptUserId
+			d.ReceiptTime = receiptTime
+			d.Remark = req.Remark
+			return nil
+		},
+		func(ctx context.Context, d *model.FinanceReceipt) ([]model.FinanceReceiptItem, error) {
+			return financeReceiptItemRows(d.ID, drafts), nil
+		},
+	)
 }
 
 // DeleteFinanceReceipt 删除收款单（仅未审核，已审核 409）：主表 + 明细软删除
 // （未审核单不产生核销回写，无需释放额度）。
 func (s *Service) DeleteFinanceReceipt(ctx context.Context, id int64) error {
-	row, err := s.findFinanceReceipt(ctx, id)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
-		deleted, err := tx.DeleteFinanceReceiptIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeleteFinanceReceiptItems(ctx, row.ID)
-	})
+	return s.financeReceiptKernel().Delete(ctx, id)
 }
 
 // UpdateFinanceReceiptStatus 审核（10→20）/反审核（20→10），幂等目标态。
 func (s *Service) UpdateFinanceReceiptStatus(ctx context.Context, req *dto.FinanceDocUpdateStatusReq) error {
-	row, err := s.findFinanceReceipt(ctx, req.ID)
+	return s.financeReceiptKernel().SetStatus(ctx, req.ID, req.Status)
+}
+
+// approveFinanceReceiptDoc 审核落账（内核已认领 status=10→20 并装载明细，
+// READ COMMITTED）：按稳定键序锁定并复核目标单据（已审核 + 客户一致）→
+// 核销上限（本单合计 + 其它已审核核销 ≤ 单据 total_price，超限 409）→
+// 重算回写 receipt_price/refund_price。
+func (s *Service) approveFinanceReceiptDoc(ctx context.Context, tx doc.Tx[*model.FinanceReceipt, model.FinanceReceiptItem], d *model.FinanceReceipt) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
+	own, err := groupFinanceDrafts(financeReceiptDrafts(d.Items))
 	if err != nil {
 		return err
 	}
-	if idempotent {
-		return nil
+	if err := s.checkFinanceApproveRefs(ctx, repo, financeSideReceipt, d.CustomerID, own, d.ID); err != nil {
+		return err
 	}
-	if req.Status == model.DocStatusApproved {
-		return s.approveFinanceReceipt(ctx, row)
-	}
-	return s.unapproveFinanceReceipt(ctx, row)
+	return s.lockAndRecomputeFinanceWritebacks(ctx, repo, financeSideReceipt, own)
 }
 
-// approveFinanceReceipt 审核落账（spec §4.7）：事务内先乐观认领状态 → 按稳定
-// 键序锁定并复核目标单据（已审核 + 客户一致）→ 核销上限（本单合计 + 其它
-// 已审核核销 ≤ 单据 total_price，超限 409）→ 重算回写 receipt_price/refund_price。
-func (s *Service) approveFinanceReceipt(ctx context.Context, row *model.FinanceReceipt) error {
-	// READ COMMITTED：持有目标单据行锁后的核销聚合必须是当前读（见 repository
-	// TransactionReadCommitted 注释），上限不变量才不受并发已提交核销影响。
-	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateFinanceReceiptStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindFinanceReceiptWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		drafts := financeReceiptDrafts(doc.Items)
-		own, err := groupFinanceDrafts(drafts)
-		if err != nil {
-			return err
-		}
-		if err := s.checkFinanceApproveRefs(ctx, tx, financeSideReceipt, doc.CustomerID, own, doc.ID); err != nil {
-			return err
-		}
-		return s.lockAndRecomputeFinanceWritebacks(ctx, tx, financeSideReceipt, own)
-	})
-}
-
-// unapproveFinanceReceipt 反审核（spec §4.1/§4.7）：乐观认领状态 → 按稳定键序
-// 锁定目标单据并重算回写（本单不再计入已审核核销，额度自然释放）。
-func (s *Service) unapproveFinanceReceipt(ctx context.Context, row *model.FinanceReceipt) error {
-	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateFinanceReceiptStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindFinanceReceiptWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		own, err := groupFinanceDrafts(financeReceiptDrafts(doc.Items))
-		if err != nil {
-			return err
-		}
-		return s.lockAndRecomputeFinanceWritebacks(ctx, tx, financeSideReceipt, own)
-	})
+// unapproveFinanceReceiptDoc 反审核（内核已认领 status=20→10 并装载明细，
+// READ COMMITTED）：按稳定键序锁定目标单据并重算回写（本单不再计入已审核
+// 核销，额度自然释放）。
+func (s *Service) unapproveFinanceReceiptDoc(ctx context.Context, tx doc.Tx[*model.FinanceReceipt, model.FinanceReceiptItem], d *model.FinanceReceipt) error {
+	repo, err := docRepo(tx)
+	if err != nil {
+		return err
+	}
+	own, err := groupFinanceDrafts(financeReceiptDrafts(d.Items))
+	if err != nil {
+		return err
+	}
+	return s.lockAndRecomputeFinanceWritebacks(ctx, repo, financeSideReceipt, own)
 }
 
 // findFinanceReceipt 取收款单并做可见性校验（数据范围外一律 404）。
 func (s *Service) findFinanceReceipt(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
-	row, err := s.repo.FindFinanceReceiptByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, xerr.NotFound("收款单不存在")
-	}
-	if err := s.checkRowVisible(ctx, "收款单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return s.financeReceiptKernel().Find(ctx, id)
 }
 
 // financeReceiptBizNos 批量解析收款明细指向的被核销单据单号。

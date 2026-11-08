@@ -131,6 +131,57 @@ func docConformanceCases() []docConformanceCase {
 				}
 			},
 		},
+		{
+			name:      "finance-receipt",
+			path:      "/erp/finance-receipt",
+			docType:   "finance-receipt",
+			noPattern: financeReceiptNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, customerID := setupSaleEnv(t, env, token, tag)
+				padSaleStock(t, env, token, warehouseID, productID, "10")
+				order := createSaleOrderDoc(t, env, token, map[string]any{
+					"customerId": customerID,
+					"orderTime":  env.Date() + " 09:00:00",
+					"items":      []map[string]any{saleItemJSON(productID, "10", "3.00")},
+				})
+				orderID := int64(order["id"].(float64))
+				mustApproveSale(t, env, token, "sale-order", orderID, 20)
+				out := createSaleOutDoc(t, env, token, map[string]any{
+					"customerId": customerID, "orderId": orderID, "warehouseId": warehouseID,
+					"outTime": env.Date() + " 10:00:00",
+					"items":   []map[string]any{saleItemJSON(productID, "10", "3.00")},
+				})
+				outID := int64(out["id"].(float64))
+				mustApproveSale(t, env, token, "sale-out", outID, 20)
+				account := createFinanceAccountDoc(t, env, token, tag+"账户", nil)
+				return warehouseID, productID, map[string]any{
+					"customerId":    customerID,
+					"accountId":     int64(account["id"].(float64)),
+					"saleOutId":     outID,
+					"receiptUserId": 1,
+				}
+			},
+			create: func(env *testutil.IntegrationEnv, _, _ int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"customerId":    extras["customerId"],
+					"accountId":     extras["accountId"],
+					"receiptUserId": extras["receiptUserId"],
+					"receiptTime":   env.Date() + " 12:00:00",
+					"items":         []map[string]any{financeItemJSON("sale_out", extras["saleOutId"].(int64), "5.00")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, _ int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":            docID,
+					"customerId":    extras["customerId"],
+					"accountId":     extras["accountId"],
+					"receiptUserId": extras["receiptUserId"],
+					"receiptTime":   env.Date() + " 12:30:00",
+					"items":         []map[string]any{financeItemJSON("sale_out", extras["saleOutId"].(int64), "2.00")},
+				}
+			},
+		},
 	}
 }
 
