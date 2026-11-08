@@ -205,6 +205,7 @@ func (s *Service) UpdateStockIn(ctx context.Context, req *dto.StockInUpdateReq) 
 			docType, err = validateDocType(req.Type, model.ValidStockInType, "入库单")
 			return err
 		},
+		nil,
 		func(ctx context.Context, _ doc.Tx[*model.StockIn, model.StockInItem], d *model.StockIn) error {
 			d.WarehouseID = req.WarehouseId
 			d.InTime = inTime

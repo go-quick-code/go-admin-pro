@@ -209,6 +209,118 @@ func docConformanceCases() []docConformanceCase {
 			},
 		},
 		{
+			name:      "sale-order",
+			path:      "/erp/sale-order",
+			docType:   "sale-order",
+			noPattern: saleOrderNoRe,
+			noKey:     "orderNo",
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, customerID := setupSaleEnv(t, env, token, tag)
+				return warehouseID, productID, map[string]any{"customerId": customerID}
+			},
+			create: func(env *testutil.IntegrationEnv, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"customerId": extras["customerId"],
+					"saleUserId": 0,
+					"orderTime":  env.Date() + " 10:00:00",
+					"remark":     "conformance",
+					"items":      []map[string]any{saleItemJSON(productID, "5", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":         docID,
+					"customerId": extras["customerId"],
+					"saleUserId": 0,
+					"orderTime":  env.Date() + " 11:00:00",
+					"remark":     "conformance-updated",
+					"items":      []map[string]any{saleItemJSON(productID, "2", "3.00")},
+				}
+			},
+		},
+		{
+			name:      "sale-out",
+			path:      "/erp/sale-out",
+			docType:   "sale-out",
+			noPattern: saleOutNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, customerID := setupSaleEnv(t, env, token, tag)
+				padSaleStock(t, env, token, warehouseID, productID, "10")
+				order := createSaleOrderDoc(t, env, token, map[string]any{
+					"customerId": customerID,
+					"orderTime":  env.Date() + " 09:00:00",
+					"items":      []map[string]any{saleItemJSON(productID, "10", "3.00")},
+				})
+				orderID := int64(order["id"].(float64))
+				mustApproveSale(t, env, token, "sale-order", orderID, 20)
+				return warehouseID, productID, map[string]any{"customerId": customerID, "orderId": orderID}
+			},
+			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"customerId":  extras["customerId"],
+					"orderId":     extras["orderId"],
+					"warehouseId": warehouseID,
+					"outTime":     env.Date() + " 10:00:00",
+					"items":       []map[string]any{saleItemJSON(productID, "5", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":          docID,
+					"customerId":  extras["customerId"],
+					"orderId":     extras["orderId"],
+					"warehouseId": warehouseID,
+					"outTime":     env.Date() + " 11:00:00",
+					"items":       []map[string]any{saleItemJSON(productID, "2", "3.00")},
+				}
+			},
+		},
+		{
+			name:      "sale-return",
+			path:      "/erp/sale-return",
+			docType:   "sale-return",
+			noPattern: saleReturnNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, customerID := setupSaleEnv(t, env, token, tag)
+				padSaleStock(t, env, token, warehouseID, productID, "10")
+				order := createSaleOrderDoc(t, env, token, map[string]any{
+					"customerId": customerID,
+					"orderTime":  env.Date() + " 09:00:00",
+					"items":      []map[string]any{saleItemJSON(productID, "10", "3.00")},
+				})
+				orderID := int64(order["id"].(float64))
+				mustApproveSale(t, env, token, "sale-order", orderID, 20)
+				out := createSaleOutDoc(t, env, token, map[string]any{
+					"customerId": customerID, "orderId": orderID, "warehouseId": warehouseID,
+					"outTime": env.Date() + " 10:00:00",
+					"items":   []map[string]any{saleItemJSON(productID, "10", "3.00")},
+				})
+				outID := int64(out["id"].(float64))
+				mustApproveSale(t, env, token, "sale-out", outID, 20)
+				return warehouseID, productID, map[string]any{"customerId": customerID, "outId": outID}
+			},
+			create: func(env *testutil.IntegrationEnv, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"customerId": extras["customerId"],
+					"outId":      extras["outId"],
+					"returnTime": env.Date() + " 12:00:00",
+					"items":      []map[string]any{saleItemJSON(productID, "5", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":         docID,
+					"customerId": extras["customerId"],
+					"outId":      extras["outId"],
+					"returnTime": env.Date() + " 12:30:00",
+					"items":      []map[string]any{saleItemJSON(productID, "2", "3.00")},
+				}
+			},
+		},
+		{
 			name:      "finance-receipt",
 			path:      "/erp/finance-receipt",
 			docType:   "finance-receipt",

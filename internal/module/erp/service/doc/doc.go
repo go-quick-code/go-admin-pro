@@ -96,9 +96,6 @@ type Spec[H Header, I any] struct {
 	// BeforeClaim 在 SetStatus 打开事务后、状态认领前执行（可为 nil）。
 	// 用于必须先锁父单（如退货的 in→order 锁序）再认领自身的单据。
 	BeforeClaim func(ctx context.Context, tx Tx[H, I], doc H) error
-	// BeforeUpdateLock 在 Update 打开事务后、锁自身行前执行（可为 nil）。
-	// 用于必须先锁父单再锁自身的单据（与审核锁序一致）。
-	BeforeUpdateLock func(ctx context.Context, tx Tx[H, I], doc H) error
 }
 
 // Kernel 是一类单据的内核实例。

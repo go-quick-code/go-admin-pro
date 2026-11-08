@@ -203,6 +203,7 @@ func (s *Service) UpdateStockOut(ctx context.Context, req *dto.StockOutUpdateReq
 			docType, err = validateDocType(req.Type, model.ValidStockOutType, "出库单")
 			return err
 		},
+		nil,
 		func(ctx context.Context, _ doc.Tx[*model.StockOut, model.StockOutItem], d *model.StockOut) error {
 			d.WarehouseID = req.WarehouseId
 			d.OutTime = outTime

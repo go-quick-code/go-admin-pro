@@ -185,6 +185,7 @@ func (s *Service) UpdatePurchaseOrder(ctx context.Context, req *dto.PurchaseOrde
 			orderTime, err = s.parseDocTime(req.OrderTime, "下单时间")
 			return err
 		},
+		nil,
 		func(ctx context.Context, _ doc.Tx[*model.PurchaseOrder, model.PurchaseOrderItem], d *model.PurchaseOrder) error {
 			d.SupplierID = req.SupplierId
 			d.OrderTime = orderTime

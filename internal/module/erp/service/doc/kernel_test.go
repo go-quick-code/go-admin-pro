@@ -343,6 +343,7 @@ func TestKernelUpdateRejectsApprovedBeforeValidate(t *testing.T) {
 	validateCalls := 0
 	err := k.Update(context.Background(), 1,
 		func(context.Context, *fakeHeader) error { validateCalls++; return nil },
+		nil,
 		func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error { return nil },
 		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
 	)
@@ -359,7 +360,7 @@ func TestKernelUpdateLockRecheck(t *testing.T) {
 	store.docs[1] = newUnaudited(1)
 	store.lockHook = func(d *fakeHeader) { d.Base().SetStatus(model.DocStatusApproved) }
 	mutateCalls := 0
-	err := k.Update(context.Background(), 1, nil,
+	err := k.Update(context.Background(), 1, nil, nil,
 		func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error { mutateCalls++; return nil },
 		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
 	)
@@ -376,7 +377,7 @@ func TestKernelUpdateReplacesItems(t *testing.T) {
 	row := newUnaudited(1)
 	row.Items = []fakeItem{{ID: 9, ProductID: 99}}
 	store.docs[1] = row
-	err := k.Update(context.Background(), 1, nil,
+	err := k.Update(context.Background(), 1, nil, nil,
 		func(_ context.Context, _ doc.Tx[*fakeHeader, fakeItem], d *fakeHeader) error {
 			d.BizTime = time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 			return nil

@@ -259,6 +259,7 @@ func (s *Service) UpdatePurchaseIn(ctx context.Context, req *dto.PurchaseInUpdat
 			inTime, err = s.parseDocTime(req.InTime, "入库时间")
 			return err
 		},
+		nil,
 		func(ctx context.Context, tx doc.Tx[*model.PurchaseIn, model.PurchaseInItem], d *model.PurchaseIn) error {
 			repo, err := docRepo(tx)
 			if err != nil {

@@ -6,14 +6,39 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// saleReturnKernel 构造销售退货单内核：锁序为出库单行→自身（BeforeClaim 先锁
+// 出库），反审核用 READ COMMITTED（收款核销禁令的聚合需要当前读）。
+func (s *Service) saleReturnKernel() *doc.Kernel[*model.SaleReturn, model.SaleReturnItem] {
+	return doc.New(docEnv{s}, s.saleReturnStore(), doc.Spec[*model.SaleReturn, model.SaleReturnItem]{
+		Labels:             doc.Labels{Doc: "销售退货单", Item: "退货明细"},
+		NoPrefix:           SaleReturnNoPrefix,
+		SeqBizType:         SeqBizTypeSaleReturn,
+		UnapproveIsolation: doc.IsolationReadCommitted,
+		BeforeClaim:        s.lockSaleReturnOutForClaim,
+		Approve:            s.approveSaleReturnDoc,
+		Unapprove:          s.unapproveSaleReturnDoc,
+	})
+}
+
+// saleReturnStore 装配销售退货单的泛型存储。
+func (s *Service) saleReturnStore() doc.Store[*model.SaleReturn, model.SaleReturnItem] {
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.SaleReturn, model.SaleReturnItem]{
+		New:     func() *model.SaleReturn { return &model.SaleReturn{} },
+		ItemsFK: "sale_return_id",
+	})
+}
 
 // ListSaleReturns 销售退货单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListSaleReturns(ctx context.Context, req *dto.SaleReturnPageReq) ([]dto.SaleReturnRow, int64, error) {
@@ -101,11 +126,7 @@ func (s *Service) assembleSaleReturnRows(ctx context.Context, list []model.SaleR
 
 // GetSaleReturn 销售退货单详情（带头 + 明细）。
 func (s *Service) GetSaleReturn(ctx context.Context, id int64) (*dto.SaleReturnDetail, error) {
-	doc, err := s.findSaleReturn(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindSaleReturnWithItems(ctx, doc.ID)
+	full, err := s.saleReturnKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -171,51 +192,43 @@ func (s *Service) CreateSaleReturn(ctx context.Context, req *dto.SaleReturnCreat
 	if err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.SaleReturn
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		out, err := s.lockSaleReturnLink(ctx, tx, req.CustomerId, req.OutId)
-		if err != nil {
+	var (
+		warehouseID int64
+		total       money.Money
+	)
+	return s.saleReturnKernel().Create(ctx,
+		func(ctx context.Context, tx doc.Tx[*model.SaleReturn, model.SaleReturnItem]) error {
+			repo, err := docRepo(tx)
+			if err != nil {
+				return err
+			}
+			out, err := s.lockSaleReturnLink(ctx, repo, req.CustomerId, req.OutId)
+			if err != nil {
+				return err
+			}
+			if err := s.checkSaleReturnProducts(ctx, repo, items); err != nil {
+				return err
+			}
+			if err := s.checkSaleReturnOccupancy(ctx, repo, out, items, 0); err != nil {
+				return err
+			}
+			warehouseID = out.WarehouseID
+			total, err = sumDraftTotal(items)
 			return err
-		}
-		if err := s.checkSaleReturnProducts(ctx, tx, items); err != nil {
-			return err
-		}
-		if err := s.checkSaleReturnOccupancy(ctx, tx, out, items, 0); err != nil {
-			return err
-		}
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypeSaleReturn, SaleReturnNoPrefix)
-		if err != nil {
-			return err
-		}
-		total, err := sumDraftTotal(items)
-		if err != nil {
-			return err
-		}
-		doc = &model.SaleReturn{
-			No:          no,
-			CustomerID:  req.CustomerId,
-			OutID:       req.OutId,
-			WarehouseID: out.WarehouseID, // 仓库取自出库单（spec §3.3 采购镜像口径）
-			ReturnTime:  returnTime,
-			Status:      model.DocStatusUnaudited,
-			TotalPrice:  total,
-			OwnerUserID: ownerID,
-			OwnerDeptID: deptID,
-		}
-		if err := tx.CreateSaleReturn(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreateSaleReturnItems(ctx, buildSaleReturnItemRows(doc.ID, items))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+		},
+		func(ctx context.Context) (*model.SaleReturn, error) {
+			return &model.SaleReturn{
+				CustomerID:  req.CustomerId,
+				OutID:       req.OutId,
+				WarehouseID: warehouseID, // 仓库取自出库单（spec §3.3 采购镜像口径）
+				ReturnTime:  returnTime,
+				TotalPrice:  total,
+			}, nil
+		},
+		func(ctx context.Context, d *model.SaleReturn) ([]model.SaleReturnItem, error) {
+			return buildSaleReturnItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // lockSaleReturnLink 退货挂单校验并加锁（事务内）：出库单存在（400）→ 已审核
@@ -263,221 +276,170 @@ func (s *Service) checkSaleReturnProducts(ctx context.Context, tx *repository.Re
 // UpdateSaleReturn 修改销售退货单（仅未审核，已审核 409，spec §4.1）：字段全量
 // 覆盖（可换挂出库单，客户/仓库/占用随新出库单重验）；单号不采纳；明细整体替换。
 func (s *Service) UpdateSaleReturn(ctx context.Context, req *dto.SaleReturnUpdateReq) error {
-	row, err := s.findSaleReturn(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	items, err := buildDocItems(req.Items, "退货明细")
-	if err != nil {
-		return err
-	}
-	returnTime, err := s.parseDocTime(req.ReturnTime, "退货时间")
-	if err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		out, err := s.lockSaleReturnLink(ctx, tx, req.CustomerId, req.OutId)
-		if err != nil {
+	var items []docItemDraft
+	var returnTime time.Time
+	return s.saleReturnKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.SaleReturn) error {
+			var err error
+			items, err = buildDocItems(req.Items, "退货明细")
+			if err != nil {
+				return err
+			}
+			returnTime, err = s.parseDocTime(req.ReturnTime, "退货时间")
 			return err
-		}
-		// 状态不变量绑定到写入路径（安全 F1）：锁序与审核一致（出库→退货自身），
-		// 事务内重读退货行并复核 status=10；审核先提交则这里读到 20 → 409。
-		locked, err := tx.LockSaleReturnByID(ctx, row.ID)
-		if err != nil {
+		},
+		func(ctx context.Context, tx doc.Tx[*model.SaleReturn, model.SaleReturnItem], d *model.SaleReturn) error {
+			repo, err := docRepo(tx)
+			if err != nil {
+				return err
+			}
+			_, err = s.lockSaleReturnLink(ctx, repo, req.CustomerId, req.OutId)
 			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("销售退货单不存在")
-		}
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		if err := s.checkSaleReturnProducts(ctx, tx, items); err != nil {
-			return err
-		}
-		// 编辑自检：聚合占用时排除自己（新明细替换旧明细，不双重计占用）。
-		if err := s.checkSaleReturnOccupancy(ctx, tx, out, items, row.ID); err != nil {
-			return err
-		}
-		total, err := sumDraftTotal(items)
-		if err != nil {
-			return err
-		}
-		locked.CustomerID = req.CustomerId
-		locked.OutID = req.OutId
-		locked.WarehouseID = out.WarehouseID
-		locked.ReturnTime = returnTime
-		locked.TotalPrice = total
-		if err := tx.SaveSaleReturn(ctx, locked); err != nil {
-			return err
-		}
-		if err := tx.DeleteSaleReturnItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreateSaleReturnItems(ctx, buildSaleReturnItemRows(row.ID, items))
-	})
+		},
+		func(ctx context.Context, tx doc.Tx[*model.SaleReturn, model.SaleReturnItem], d *model.SaleReturn) error {
+			repo, err := docRepo(tx)
+			if err != nil {
+				return err
+			}
+			out, err := s.lockSaleReturnLink(ctx, repo, req.CustomerId, req.OutId)
+			if err != nil {
+				return err
+			}
+			if err := s.checkSaleReturnProducts(ctx, repo, items); err != nil {
+				return err
+			}
+			if err := s.checkSaleReturnOccupancy(ctx, repo, out, items, d.ID); err != nil {
+				return err
+			}
+			total, err := sumDraftTotal(items)
+			if err != nil {
+				return err
+			}
+			d.CustomerID = req.CustomerId
+			d.OutID = req.OutId
+			d.WarehouseID = out.WarehouseID
+			d.ReturnTime = returnTime
+			d.TotalPrice = total
+			return nil
+		},
+		func(ctx context.Context, d *model.SaleReturn) ([]model.SaleReturnItem, error) {
+			return buildSaleReturnItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // DeleteSaleReturn 删除销售退货单（仅未审核，已审核 409，spec §4.1）：主表 +
 // 明细一并软删除；占用随删除自然释放。
 func (s *Service) DeleteSaleReturn(ctx context.Context, id int64) error {
-	row, err := s.findSaleReturn(ctx, id)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
-		deleted, err := tx.DeleteSaleReturnIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeleteSaleReturnItems(ctx, row.ID)
-	})
+	return s.saleReturnKernel().Delete(ctx, id)
 }
 
 // UpdateSaleReturnStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
 func (s *Service) UpdateSaleReturnStatus(ctx context.Context, req *dto.SaleDocUpdateStatusReq) error {
-	row, err := s.findSaleReturn(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
-	if err != nil {
-		return err
-	}
-	if idempotent {
-		return nil
-	}
-	if req.Status == model.DocStatusApproved {
-		return s.approveSaleReturn(ctx, row)
-	}
-	return s.unapproveSaleReturn(ctx, row)
+	return s.saleReturnKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
-// approveSaleReturn 审核落账：事务内先锁挂单出库并复核仍为已审核（创建后退货
-// 挂单被反审核则 409，堵「审核父单→建子单→反审核父单→审核子单」窗口）→ 乐观
-// 认领状态（防并发双重审核）→ 重读明细 → 逐行经唯一入账入口入账
-// （biz_type=sale_return，正流水回库存）→ 重算订单进度（return_count 只计
-// 已审核，spec §4.5；镜像采购 approvePurchaseReturn 的 lockApprovedIn）。
-func (s *Service) approveSaleReturn(ctx context.Context, row *model.SaleReturn) error {
-	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.WarehouseID})
+// lockSaleReturnOutForClaim 在认领前先锁挂单出库行（out→self 锁序，与创建/
+// 编辑/审核一致）；存在性/状态由 Approve 钩子复核，反审核只需锁序。
+func (s *Service) lockSaleReturnOutForClaim(ctx context.Context, tx doc.Tx[*model.SaleReturn, model.SaleReturnItem], d *model.SaleReturn) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	warehouseName := warehouseNames[row.WarehouseID]
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		out, err := tx.FindSaleOutByIDForUpdate(ctx, row.OutID)
-		if err != nil {
-			return err
-		}
-		if out == nil || out.Status != model.DocStatusApproved {
-			return xerr.Conflict("销售出库单不存在或未审核")
-		}
-		claimed, err := tx.UpdateSaleReturnStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindSaleReturnWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		// 父单一致性复核（#98 审查 MAJOR 1）：退货行的仓库/客户是创建时父单快照，
-		// 父出库单反审核后可被编辑（改仓库/客户），直接按快照落账会在旧仓凭空
-		// 增减。父单编辑守卫（UpdateSaleOut）挡住正常路径，这里在入账前再复核
-		// 一次，防御绕过服务层的脏数据（直接改库）。
-		if doc.WarehouseID != out.WarehouseID {
-			return xerr.Conflict("销售退货单仓库与出库单不一致，请删除后重建")
-		}
-		if doc.CustomerID != out.CustomerID {
-			return xerr.Conflict("销售退货单客户与出库单不一致，请删除后重建")
-		}
-		productNames, err := s.productNamesForItems(ctx, tx, saleReturnItemProducts(doc.Items))
-		if err != nil {
-			return err
-		}
-		for _, item := range sortItemsByID(doc.Items, func(it model.SaleReturnItem) int64 { return it.ID }) {
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.WarehouseID,
-				Count:         item.Count,
-				BizType:       model.StockRecordBizSaleReturn,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseName,
-			}); err != nil {
-				return err
-			}
-		}
-		return s.recomputeSaleOrderProgressForOut(ctx, tx, doc.OutID)
-	})
+	_, err = repo.FindSaleOutByIDForUpdate(ctx, d.OutID)
+	return err
 }
 
-// unapproveSaleReturn 反审核回滚：乐观认领状态 → 逐行经唯一入账入口新增
-// _CANCEL 反向流水（再扣库存，原流水保留；余额不足 409——货已被后续出库提走
-// 属正常业务冲突）→ 重算订单进度。
-func (s *Service) unapproveSaleReturn(ctx context.Context, row *model.SaleReturn) error {
-	warehouseNames, err := s.repo.FindWarehouseNamesIn(ctx, []int64{row.WarehouseID})
+// approveSaleReturnDoc 审核落账（内核已按 out→self 锁序认领并装载明细）：
+// 复核挂单出库仍为已审核 → 父单仓库/客户快照一致性 → 逐行经唯一入账入口入账
+// （biz_type=sale_return，正流水回库存）→ 重算订单进度。
+func (s *Service) approveSaleReturnDoc(ctx context.Context, tx doc.Tx[*model.SaleReturn, model.SaleReturnItem], d *model.SaleReturn) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	warehouseName := warehouseNames[row.WarehouseID]
-	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateSaleReturnStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
+	out, err := repo.FindSaleOutByIDForUpdate(ctx, d.OutID)
+	if err != nil {
+		return err
+	}
+	if out == nil || out.Status != model.DocStatusApproved {
+		return xerr.Conflict("销售出库单不存在或未审核")
+	}
+	// 父单一致性复核（#98 审查 MAJOR 1）：退货行的仓库/客户是创建时父单快照，
+	// 父出库单反审核后可被编辑（改仓库/客户），直接按快照落账会在旧仓凭空
+	// 增减。父单编辑守卫（UpdateSaleOut）挡住正常路径，这里在入账前再复核
+	// 一次，防御绕过服务层的脏数据（直接改库）。
+	if d.WarehouseID != out.WarehouseID {
+		return xerr.Conflict("销售退货单仓库与出库单不一致，请删除后重建")
+	}
+	if d.CustomerID != out.CustomerID {
+		return xerr.Conflict("销售退货单客户与出库单不一致，请删除后重建")
+	}
+	warehouseNames, err := repo.FindWarehouseNamesIn(ctx, []int64{d.WarehouseID})
+	if err != nil {
+		return err
+	}
+	productNames, err := s.productNamesForItems(ctx, repo, saleReturnItemProducts(d.Items))
+	if err != nil {
+		return err
+	}
+	for _, item := range sortItemsByID(d.Items, func(it model.SaleReturnItem) int64 { return it.ID }) {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID:     item.ProductID,
+			WarehouseID:   d.WarehouseID,
+			Count:         item.Count,
+			BizType:       model.StockRecordBizSaleReturn,
+			BizID:         d.ID,
+			BizItemID:     item.ID,
+			BizNo:         d.No,
+			ProductName:   productNames[item.ProductID],
+			WarehouseName: warehouseNames[d.WarehouseID],
+		}); err != nil {
 			return err
 		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		// 财务反审核禁令（issue #94，spec §4.1/§4.7）：存在已审核收款单核销时
-		// 不可反审核；收款单反审核释放额度后可退。放在认领之后：与收款审核的
-		// 锁序一致（先目标单据行、后收付款行），防死锁。
-		receiptItems, err := tx.CountApprovedFinanceReceiptItemsByBiz(ctx, model.FinanceBizSaleReturn, row.ID)
-		if err != nil {
+	}
+	return s.recomputeSaleOrderProgressForOut(ctx, repo, d.OutID)
+}
+
+// unapproveSaleReturnDoc 反审核回滚（内核已按 out→self 锁序认领并装载明细，
+// READ COMMITTED）：收款核销禁令 → 逐行新增 _CANCEL 反向流水（再扣库存，原
+// 流水保留；余额不足 409）→ 重算订单进度。
+func (s *Service) unapproveSaleReturnDoc(ctx context.Context, tx doc.Tx[*model.SaleReturn, model.SaleReturnItem], d *model.SaleReturn) error {
+	repo, err := docRepo(tx)
+	if err != nil {
+		return err
+	}
+	receiptItems, err := repo.CountApprovedFinanceReceiptItemsByBiz(ctx, model.FinanceBizSaleReturn, d.ID)
+	if err != nil {
+		return err
+	}
+	if receiptItems > 0 {
+		return xerr.Conflict("销售退货单存在已审核收款单，不可反审核")
+	}
+	warehouseNames, err := repo.FindWarehouseNamesIn(ctx, []int64{d.WarehouseID})
+	if err != nil {
+		return err
+	}
+	productNames, err := s.productNamesForItems(ctx, repo, saleReturnItemProducts(d.Items))
+	if err != nil {
+		return err
+	}
+	for _, item := range sortItemsByID(d.Items, func(it model.SaleReturnItem) int64 { return it.ID }) {
+		if err := s.ApplyStockChange(ctx, repo, StockChange{
+			ProductID:     item.ProductID,
+			WarehouseID:   d.WarehouseID,
+			Count:         negQty(item.Count),
+			BizType:       model.StockRecordBizSaleReturnCancel,
+			BizID:         d.ID,
+			BizItemID:     item.ID,
+			BizNo:         d.No,
+			ProductName:   productNames[item.ProductID],
+			WarehouseName: warehouseNames[d.WarehouseID],
+		}); err != nil {
 			return err
 		}
-		if receiptItems > 0 {
-			return xerr.Conflict("销售退货单存在已审核收款单，不可反审核")
-		}
-		doc, err := tx.FindSaleReturnWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		productNames, err := s.productNamesForItems(ctx, tx, saleReturnItemProducts(doc.Items))
-		if err != nil {
-			return err
-		}
-		for _, item := range sortItemsByID(doc.Items, func(it model.SaleReturnItem) int64 { return it.ID }) {
-			if err := s.ApplyStockChange(ctx, tx, StockChange{
-				ProductID:     item.ProductID,
-				WarehouseID:   doc.WarehouseID,
-				Count:         negQty(item.Count),
-				BizType:       model.StockRecordBizSaleReturnCancel,
-				BizID:         doc.ID,
-				BizItemID:     item.ID,
-				BizNo:         doc.No,
-				ProductName:   productNames[item.ProductID],
-				WarehouseName: warehouseName,
-			}); err != nil {
-				return err
-			}
-		}
-		return s.recomputeSaleOrderProgressForOut(ctx, tx, doc.OutID)
-	})
+	}
+	return s.recomputeSaleOrderProgressForOut(ctx, repo, d.OutID)
 }
 
 // recomputeSaleOrderProgressForOut 经挂单出库单定位订单后重算进度。
@@ -537,17 +499,7 @@ func (s *Service) ExportSaleReturns(ctx context.Context, req *dto.SaleReturnPage
 
 // findSaleReturn 取退货单并做可见性校验（数据范围外一律 404，spec §4.10）。
 func (s *Service) findSaleReturn(ctx context.Context, id int64) (*model.SaleReturn, error) {
-	row, err := s.repo.FindSaleReturnByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, xerr.NotFound("销售退货单不存在")
-	}
-	if err := s.checkRowVisible(ctx, "销售退货单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return s.saleReturnKernel().Find(ctx, id)
 }
 
 func saleReturnItemProducts(items []model.SaleReturnItem) []int64 {

@@ -241,6 +241,7 @@ func (s *Service) UpdateFinanceReceipt(ctx context.Context, req *dto.FinanceRece
 			}
 			return s.checkFinanceItemRefs(ctx, financeSideReceipt, req.CustomerId, drafts)
 		},
+		nil,
 		func(ctx context.Context, _ doc.Tx[*model.FinanceReceipt, model.FinanceReceiptItem], d *model.FinanceReceipt) error {
 			d.CustomerID = req.CustomerId
 			d.AccountID = req.AccountId

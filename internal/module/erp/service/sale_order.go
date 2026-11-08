@@ -6,14 +6,36 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// saleOrderKernel 构造销售订单内核：审核只翻状态（无落账钩子），反审核在
+// 存在已审核出库/退货时 409，删除在存在出库引用时 409。
+func (s *Service) saleOrderKernel() *doc.Kernel[*model.SaleOrder, model.SaleOrderItem] {
+	return doc.New(docEnv{s}, s.saleOrderStore(), doc.Spec[*model.SaleOrder, model.SaleOrderItem]{
+		Labels:       doc.Labels{Doc: "销售订单", Item: "销售订单明细"},
+		NoPrefix:     SaleOrderNoPrefix,
+		SeqBizType:   SeqBizTypeSaleOrder,
+		Unapprove:    s.unapproveSaleOrderDoc,
+		BeforeDelete: s.beforeDeleteSaleOrder,
+	})
+}
+
+// saleOrderStore 装配销售订单的泛型存储。
+func (s *Service) saleOrderStore() doc.Store[*model.SaleOrder, model.SaleOrderItem] {
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.SaleOrder, model.SaleOrderItem]{
+		New:     func() *model.SaleOrder { return &model.SaleOrder{} },
+		ItemsFK: "sale_order_id",
+	})
+}
 
 // ListSaleOrders 销售订单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListSaleOrders(ctx context.Context, req *dto.SaleOrderPageReq) ([]dto.SaleOrderRow, int64, error) {
@@ -88,11 +110,7 @@ func (s *Service) assembleSaleOrderRows(ctx context.Context, list []model.SaleOr
 
 // GetSaleOrder 销售订单详情（带头 + 明细 + 进度，产品/客户名服务端解析）。
 func (s *Service) GetSaleOrder(ctx context.Context, id int64) (*dto.SaleOrderDetail, error) {
-	doc, err := s.findSaleOrder(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindSaleOrderWithItems(ctx, doc.ID)
+	full, err := s.saleOrderKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -154,184 +172,117 @@ func (s *Service) CreateSaleOrder(ctx context.Context, req *dto.SaleOrderCreateR
 	if err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.SaleOrder
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypeSaleOrder, SaleOrderNoPrefix)
-		if err != nil {
-			return err
-		}
-		doc = &model.SaleOrder{
-			OrderNo:     no,
-			CustomerID:  req.CustomerId,
-			SaleUserID:  req.SaleUserId,
-			OrderTime:   orderTime,
-			Status:      model.DocStatusUnaudited,
-			Remark:      req.Remark,
-			OwnerUserID: ownerID,
-			OwnerDeptID: deptID,
-		}
-		if err := tx.CreateSaleOrder(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreateSaleOrderItems(ctx, buildSaleOrderItemRows(doc.ID, items))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return s.saleOrderKernel().Create(ctx, nil,
+		func(ctx context.Context) (*model.SaleOrder, error) {
+			return &model.SaleOrder{
+				CustomerID: req.CustomerId,
+				SaleUserID: req.SaleUserId,
+				OrderTime:  orderTime,
+				Remark:     req.Remark,
+			}, nil
+		},
+		func(ctx context.Context, d *model.SaleOrder) ([]model.SaleOrderItem, error) {
+			return buildSaleOrderItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // UpdateSaleOrder 修改销售订单（仅未审核，已审核 409，spec §4.1）：字段全量
 // 覆盖；单号不采纳（保持原号）；明细整体替换（软删旧明细）。存在出库/退货
 // 单（含未审核占用）时重验占用不变量——删减订单行会让既有单据超量（409）。
 func (s *Service) UpdateSaleOrder(ctx context.Context, req *dto.SaleOrderUpdateReq) error {
-	row, err := s.findSaleOrder(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	items, err := buildDocItems(req.Items, "销售订单明细")
-	if err != nil {
-		return err
-	}
-	if err := s.checkSaleCustomer(ctx, req.CustomerId); err != nil {
-		return err
-	}
-	if err := s.checkSaleUser(ctx, req.SaleUserId); err != nil {
-		return err
-	}
-	orderTime, err := s.parseDocTime(req.OrderTime, "下单时间")
-	if err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 占用不变量自检：先锁自己（与出库/退货创建的锁同锚点，串行化并发占用）。
-		locked, err := tx.FindSaleOrderByIDForUpdate(ctx, row.ID)
-		if err != nil {
+	var items []docItemDraft
+	var orderTime time.Time
+	return s.saleOrderKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.SaleOrder) error {
+			var err error
+			items, err = buildDocItems(req.Items, "销售订单明细")
+			if err != nil {
+				return err
+			}
+			if err := s.checkSaleCustomer(ctx, req.CustomerId); err != nil {
+				return err
+			}
+			if err := s.checkSaleUser(ctx, req.SaleUserId); err != nil {
+				return err
+			}
+			orderTime, err = s.parseDocTime(req.OrderTime, "下单时间")
 			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("销售订单不存在")
-		}
-		// 状态不变量绑定到写入路径（安全 F1）：锁内复核 status=10，与审核的
-		// UPDATE ... WHERE status=10 认领在同一行锁上串行化。
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		if err := s.recheckSaleOrderOccupancy(ctx, tx, locked, items); err != nil {
-			return err
-		}
-		locked.CustomerID = req.CustomerId
-		locked.SaleUserID = req.SaleUserId
-		locked.OrderTime = orderTime
-		locked.Remark = req.Remark
-		if err := tx.SaveSaleOrder(ctx, locked); err != nil {
-			return err
-		}
-		// 明细整体替换：软删旧行 + 插入新行（未审核单无进度引用，安全）。
-		if err := tx.DeleteSaleOrderItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreateSaleOrderItems(ctx, buildSaleOrderItemRows(row.ID, items))
-	})
+		},
+		nil,
+		func(ctx context.Context, tx doc.Tx[*model.SaleOrder, model.SaleOrderItem], d *model.SaleOrder) error {
+			repo, err := docRepo(tx)
+			if err != nil {
+				return err
+			}
+			if err := s.recheckSaleOrderOccupancy(ctx, repo, d, items); err != nil {
+				return err
+			}
+			d.CustomerID = req.CustomerId
+			d.SaleUserID = req.SaleUserId
+			d.OrderTime = orderTime
+			d.Remark = req.Remark
+			return nil
+		},
+		func(ctx context.Context, d *model.SaleOrder) ([]model.SaleOrderItem, error) {
+			return buildSaleOrderItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // DeleteSaleOrder 删除销售订单（仅未审核，已审核 409，spec §4.1/§4.9）：
 // 主表 + 明细一并软删除；存在出库/退货单引用（含未审核）时禁删——挂单引用
 // 悬空会让占用校验失去锚点（引用禁删与主数据同口径）。
 func (s *Service) DeleteSaleOrder(ctx context.Context, id int64) error {
-	row, err := s.findSaleOrder(ctx, id)
+	return s.saleOrderKernel().Delete(ctx, id)
+}
+
+// beforeDeleteSaleOrder 下游禁令：存在出库/退货单引用（含未审核）时禁删。
+func (s *Service) beforeDeleteSaleOrder(ctx context.Context, tx doc.Tx[*model.SaleOrder, model.SaleOrderItem], d *model.SaleOrder) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
+	outRefs, err := repo.CountSaleOutsByOrder(ctx, d.ID, 0)
+	if err != nil {
+		return err
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		outRefs, err := tx.CountSaleOutsByOrder(ctx, row.ID, 0)
-		if err != nil {
-			return err
-		}
-		if outRefs > 0 {
-			return xerr.Conflict("销售订单存在出库/退货单引用，禁止删除")
-		}
-		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
-		deleted, err := tx.DeleteSaleOrderIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeleteSaleOrderItems(ctx, row.ID)
-	})
+	if outRefs > 0 {
+		return xerr.Conflict("销售订单存在出库/退货单引用，禁止删除")
+	}
+	return nil
 }
 
 // UpdateSaleOrderStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
 // 订单本身不动库存；反审核禁令：存在已审核出库/退货 409（spec §4.1）。
 func (s *Service) UpdateSaleOrderStatus(ctx context.Context, req *dto.SaleDocUpdateStatusReq) error {
-	row, err := s.findSaleOrder(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
-	if err != nil {
-		return err
-	}
-	if idempotent {
-		return nil
-	}
-	if req.Status == model.DocStatusApproved {
-		return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-			claimed, err := tx.UpdateSaleOrderStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-			if err != nil {
-				return err
-			}
-			if claimed == 0 {
-				return xerr.Conflict("单据状态已变化，请刷新后重试")
-			}
-			return nil
-		})
-	}
-	return s.unapproveSaleOrder(ctx, row)
+	return s.saleOrderKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
 // unapproveSaleOrder 订单反审核：先乐观认领自身（UPDATE 对本行加 X 锁，与出库
 // 审核先锁挂单订单串行化）再聚合下游禁令（#98 审查 MAJOR 2）——存在已审核
 // 出库/退货单则 409 并回滚认领，任何并发交错都不会留下「订单未审核 + 已审核
 // 子单」的组合。仅有未审核单据时不阻断（禁令按 spec 只看已审核）。
-func (s *Service) unapproveSaleOrder(ctx context.Context, row *model.SaleOrder) error {
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateSaleOrderStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		outRefs, err := tx.CountSaleOutsByOrder(ctx, row.ID, model.DocStatusApproved)
-		if err != nil {
-			return err
-		}
-		if outRefs > 0 {
-			return xerr.Conflict("销售订单存在已审核出库单，不可反审核")
-		}
-		retRefs, err := tx.CountApprovedSaleReturnsByOrder(ctx, erpTenantID(ctx), row.ID)
-		if err != nil {
-			return err
-		}
-		if retRefs > 0 {
-			return xerr.Conflict("销售订单存在已审核退货单，不可反审核")
-		}
-		return nil
-	})
+func (s *Service) unapproveSaleOrderDoc(ctx context.Context, tx doc.Tx[*model.SaleOrder, model.SaleOrderItem], d *model.SaleOrder) error {
+	repo, err := docRepo(tx)
+	if err != nil {
+		return err
+	}
+	outRefs, err := repo.CountSaleOutsByOrder(ctx, d.ID, model.DocStatusApproved)
+	if err != nil {
+		return err
+	}
+	if outRefs > 0 {
+		return xerr.Conflict("销售订单存在已审核出库单，不可反审核")
+	}
+	retRefs, err := repo.CountApprovedSaleReturnsByOrder(ctx, erpTenantID(ctx), d.ID)
+	if err != nil {
+		return err
+	}
+	if retRefs > 0 {
+		return xerr.Conflict("销售订单存在已审核退货单，不可反审核")
+	}
+	return nil
 }
 
 // ExportSaleOrders 导出销售订单（筛选含数据范围，spec §4.11）。
@@ -374,17 +325,7 @@ func (s *Service) ExportSaleOrders(ctx context.Context, req *dto.SaleOrderPageRe
 
 // findSaleOrder 取订单并做可见性校验（数据范围外一律 404，spec §4.10）。
 func (s *Service) findSaleOrder(ctx context.Context, id int64) (*model.SaleOrder, error) {
-	row, err := s.repo.FindSaleOrderByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, xerr.NotFound("销售订单不存在")
-	}
-	if err := s.checkRowVisible(ctx, "销售订单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return s.saleOrderKernel().Find(ctx, id)
 }
 
 func customerIDsOfOrders(list []model.SaleOrder) []int64 {

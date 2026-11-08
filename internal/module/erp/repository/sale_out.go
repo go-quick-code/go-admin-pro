@@ -28,19 +28,6 @@ type SaleOutFilter struct {
 	SelfOwnerUserID int64
 }
 
-// CreateSaleOut 创建销售出库单主表。
-func (r *Repository) CreateSaleOut(ctx context.Context, row *model.SaleOut) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateSaleOutItems 批量创建销售出库单明细。
-func (r *Repository) CreateSaleOutItems(ctx context.Context, items []model.SaleOutItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
 // FindSaleOutByID 按 ID 查销售出库单主表（租户插件自动过滤），不存在返回 nil。
 func (r *Repository) FindSaleOutByID(ctx context.Context, id int64) (*model.SaleOut, error) {
 	var row model.SaleOut
@@ -119,31 +106,6 @@ func (r *Repository) saleOutQuery(ctx context.Context, f SaleOutFilter) *gorm.DB
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// SaveSaleOut 全量保存销售出库单主表（更新路径）。
-func (r *Repository) SaveSaleOut(ctx context.Context, row *model.SaleOut) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteSaleOutIfUnaudited 条件软删除销售出库单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteSaleOutIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.SaleOut{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteSaleOutItems 软删除销售出库单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeleteSaleOutItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("sale_out_id = ?", docID).
-		Delete(&model.SaleOutItem{}).Error
-}
-
-// UpdateSaleOutStatusIf 乐观认领审核状态（防并发双重审核/反审核双重入账）。
-func (r *Repository) UpdateSaleOutStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.SaleOut{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountSaleOutsByCustomer 引用计数：引用该客户的销售出库单数。

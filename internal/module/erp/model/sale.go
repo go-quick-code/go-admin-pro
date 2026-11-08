@@ -24,7 +24,7 @@ import (
 // SaleOrder 是销售订单主表。
 type SaleOrder struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// OrderNo 是销售订单号：XS + yyyyMMdd（业务时区）+ 至少 4 位序号（spec §3.4
 	// 字面列名 order_no），租户内唯一，erp_sequence 事务内原子发放。
 	OrderNo    string `gorm:"size:32;not null" json:"orderNo"`
@@ -32,17 +32,19 @@ type SaleOrder struct {
 	// SaleUserID 是销售员（纯记录字段，spec §3.4；0 = 未记录，不参与任何规则）。
 	SaleUserID int64     `gorm:"not null;default:0" json:"saleUserId"`
 	OrderTime  time.Time `gorm:"not null" json:"orderTime"`
-	Status     int8      `gorm:"not null;default:10" json:"status"`
 	Remark     string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	// Items 是明细（Get/Create/Update 路径装载，列表分页不装载）。
 	Items []SaleOrderItem `gorm:"foreignKey:SaleOrderID" json:"items,omitempty"`
 }
 
 func (SaleOrder) TableName() string { return "erp_sale_order" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 order_time）。
+func (d *SaleOrder) GetNo() string          { return d.OrderNo }
+func (d *SaleOrder) SetNo(v string)         { d.OrderNo = v }
+func (d *SaleOrder) GetBizTime() time.Time  { return d.OrderTime }
+func (d *SaleOrder) SetBizTime(v time.Time) { d.OrderTime = v }
 
 // 销售链路的库存流水 biz_type（spec §4.3/§4.8：与单据表名一致 + _CANCEL 对，
 // 命名延续 #90 的 StockRecordBiz* 风格；#91 采购同构追加）。
@@ -79,26 +81,28 @@ func (SaleOrderItem) TableName() string { return "erp_sale_order_items" }
 // SaleOut 是销售出库单主表（必挂已审核销售订单，审核经唯一入账入口减库存）。
 type SaleOut struct {
 	model.BaseEntity
-	TenantID   int64  `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase    `gorm:"embedded"`
 	No         string `gorm:"size:32;not null" json:"no"`
 	CustomerID int64  `gorm:"index;not null" json:"customerId"`
 	// OrderID 必填，必须挂已审核销售订单（spec §4.5）。
 	OrderID     int64     `gorm:"index;not null" json:"orderId"`
 	WarehouseID int64     `gorm:"index;not null" json:"warehouseId"`
 	OutTime     time.Time `gorm:"not null" json:"outTime"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	// TotalPrice 明细合计冗余（服务端计算，客户端不采纳）。
 	TotalPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 	// ReceiptPrice 已收款回写（本票恒 0，核销回写在 #94）。
 	ReceiptPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"receiptPrice"`
 
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
-
 	Items []SaleOutItem `gorm:"foreignKey:SaleOutID" json:"items,omitempty"`
 }
 
 func (SaleOut) TableName() string { return "erp_sale_out" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 out_time）。
+func (d *SaleOut) GetNo() string          { return d.No }
+func (d *SaleOut) SetNo(v string)         { d.No = v }
+func (d *SaleOut) GetBizTime() time.Time  { return d.OutTime }
+func (d *SaleOut) SetBizTime(v time.Time) { d.OutTime = v }
 
 // SaleOutItem 是销售出库单明细。
 type SaleOutItem struct {
@@ -117,26 +121,28 @@ func (SaleOutItem) TableName() string { return "erp_sale_out_items" }
 // 仓库取自挂单出库单，服务端派生）。
 type SaleReturn struct {
 	model.BaseEntity
-	TenantID   int64  `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase    `gorm:"embedded"`
 	No         string `gorm:"size:32;not null" json:"no"`
 	CustomerID int64  `gorm:"index;not null" json:"customerId"`
 	// OutID 必填，必须挂已审核销售出库（spec §4.5）。
 	OutID       int64     `gorm:"index;not null" json:"outId"`
 	WarehouseID int64     `gorm:"index;not null" json:"warehouseId"`
 	ReturnTime  time.Time `gorm:"not null" json:"returnTime"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	// TotalPrice 明细合计冗余（服务端计算，客户端不采纳）。
 	TotalPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 	// RefundPrice 已退款回写（本票恒 0，核销回写在 #94）。
 	RefundPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"refundPrice"`
 
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
-
 	Items []SaleReturnItem `gorm:"foreignKey:SaleReturnID" json:"items,omitempty"`
 }
 
 func (SaleReturn) TableName() string { return "erp_sale_return" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 return_time）。
+func (d *SaleReturn) GetNo() string          { return d.No }
+func (d *SaleReturn) SetNo(v string)         { d.No = v }
+func (d *SaleReturn) GetBizTime() time.Time  { return d.ReturnTime }
+func (d *SaleReturn) SetBizTime(v time.Time) { d.ReturnTime = v }
 
 // SaleReturnItem 是销售退货单明细。
 type SaleReturnItem struct {

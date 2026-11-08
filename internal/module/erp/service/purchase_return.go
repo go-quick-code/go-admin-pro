@@ -30,7 +30,6 @@ func (s *Service) purchaseReturnKernel() *doc.Kernel[*model.PurchaseReturn, mode
 		SeqBizType:         SeqBizTypePurchaseReturn,
 		UnapproveIsolation: doc.IsolationReadCommitted,
 		BeforeClaim:        s.lockPurchaseReturnParents,
-		BeforeUpdateLock:   s.lockPurchaseReturnParents,
 		Approve:            s.approvePurchaseReturnDoc,
 		Unapprove:          s.unapprovePurchaseReturnDoc,
 	})
@@ -270,6 +269,7 @@ func (s *Service) UpdatePurchaseReturn(ctx context.Context, req *dto.PurchaseRet
 			returnTime, err = s.parseDocTime(req.ReturnTime, "退货时间")
 			return err
 		},
+		s.lockPurchaseReturnParents,
 		func(ctx context.Context, tx doc.Tx[*model.PurchaseReturn, model.PurchaseReturnItem], d *model.PurchaseReturn) error {
 			repo, err := docRepo(tx)
 			if err != nil {

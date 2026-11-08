@@ -116,6 +116,7 @@ func (k *Kernel[H, I]) Update(
 	ctx context.Context,
 	id int64,
 	validate func(ctx context.Context, doc H) error,
+	beforeLock func(ctx context.Context, tx Tx[H, I], doc H) error,
 	mutate func(ctx context.Context, tx Tx[H, I], doc H) error,
 	buildItems func(ctx context.Context, doc H) ([]I, error),
 ) error {
@@ -132,8 +133,8 @@ func (k *Kernel[H, I]) Update(
 		}
 	}
 	return k.store.Transaction(ctx, func(tx Tx[H, I]) error {
-		if k.spec.BeforeUpdateLock != nil {
-			if err := k.spec.BeforeUpdateLock(ctx, tx, row); err != nil {
+		if beforeLock != nil {
+			if err := beforeLock(ctx, tx, row); err != nil {
 				return err
 			}
 		}

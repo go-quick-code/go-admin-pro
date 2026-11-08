@@ -573,10 +573,17 @@ func erpDemoSeedSale(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB
 	}
 	order := erpmodel.SaleOrder{
 		BaseEntity: erpDemoBase(erpDemoSaleOrderID, orderTime, creator),
-		TenantID:   erpDemoTenantID, OrderNo: orderNo,
-		CustomerID: erpDemoCustomerFutureID, SaleUserID: admin.ID, OrderTime: orderTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示销售订单：已审核，已被销售出库占用",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		OrderNo:    orderNo,
+		CustomerID: erpDemoCustomerFutureID,
+		SaleUserID: admin.ID,
+		OrderTime:  orderTime,
+		Remark:     "演示销售订单：已审核，已被销售出库占用",
 	}
 	if err := tenant.Skip(tx).Create(&order).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示销售订单: %w", err)
@@ -601,14 +608,20 @@ func erpDemoSeedSale(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB
 	}
 	saleOut := erpmodel.SaleOut{
 		BaseEntity: erpDemoBase(erpDemoSaleOutID, outTime, creator),
-		TenantID:   erpDemoTenantID, No: outNo,
-		CustomerID: erpDemoCustomerFutureID, OrderID: order.ID,
-		WarehouseID: erpDemoWarehouseMainID, OutTime: outTime,
-		Status:     erpmodel.DocStatusApproved,
-		TotalPrice: orderTotal,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:          outNo,
+		CustomerID:  erpDemoCustomerFutureID,
+		OrderID:     order.ID,
+		WarehouseID: erpDemoWarehouseMainID,
+		OutTime:     outTime,
+		TotalPrice:  orderTotal,
 		// 收款单（SK）审核后回写；本演示收款金额等于出库金额（全额核销）。
 		ReceiptPrice: orderTotal,
-		OwnerUserID:  admin.ID, OwnerDeptID: admin.DeptID,
 	}
 	if err := tenant.Skip(tx).Create(&saleOut).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示销售出库单: %w", err)
