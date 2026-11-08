@@ -25,8 +25,10 @@
 //     审计列按平台约定回退系统账号 '0'；本种子显式注入 admin 主体（creator=admin）。
 //   - 单号按 spec §4.8 的「前缀 + yyyyMMdd + 4 位序号」生成，并同步写
 //     erp_sequence（GREATEST 合并，绝不回退已有序列），后续 UI 新建不会撞号。
-//   - 业务时间全部落在演示当天（北京时间/进程本地时区，与其它演示种子一致），
-//     保证统计接口的「今日/本月」可见；顺序按采购 → 盘点 → 销售 → 收付款。
+//   - 业务时间全部落在演示当天（app.timezone 业务时区，经 SetDemoLocation
+//     注入；未注入时回退 config.DefaultTimezone，不依赖进程本地时区，ADR
+//     0006），保证统计接口的「今日/本月」可见；顺序按采购 → 盘点 → 销售 →
+//     收付款。
 //
 // 注意：本文件依赖 erp model/service，代码生成器的 fresh-module 编译校验会
 // 连同真实 erp 模块一起剪除本文件（见 internal/module/codegen/compile_check_test.go）。
@@ -130,7 +132,7 @@ func seedERPDemo(db *gorm.DB) error {
 		if err != nil {
 			return err
 		}
-		now := time.Now()
+		now := demoNow()
 		// 业务时间全部落在当天且不晚于现在：种子在凌晨执行时钳制到 00:00，
 		// 保证统计接口的「今日」区间一定包含这些单据。
 		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())

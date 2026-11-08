@@ -115,6 +115,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		// OA 演示数据的文档文件需要落到实际存储目录（默认 ./uploads）；
 		// seed 包不读配置，这里显式传入本地存储根路径。
 		seed.SetDemoStorageBasePath(cfg.Storage.Local.BasePath)
+		// ERP 演示数据的业务时间走 app.timezone（ADR 0006）：seed 包不读配置，
+		// 同样显式注入业务时区，避免依赖进程本地时区。
+		seed.SetDemoLocation(cfg.Location())
 		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}

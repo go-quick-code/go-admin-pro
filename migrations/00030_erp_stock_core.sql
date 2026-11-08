@@ -26,7 +26,7 @@
 --
 -- 数量列 decimal(24,3)（internal/pkg/qty 毫单位，ADR 0017）；金额列 decimal(12,2)
 --（internal/pkg/money）；实体底座 id/created_at/updated_at/deleted_at/creator/updater
--- + tenant_id（ADR 0002）。租户隔离靠租户插件（六表登记 TenantTables）。
+-- + tenant_id（ADR 0002）。租户隔离靠租户插件（七表登记 TenantTables）。
 -- 外键语义关联，不设物理外键（与 00029 同风格）。
 
 CREATE TABLE `erp_stock` (
