@@ -2,8 +2,10 @@
 // §4.9）：#89 预留的 WarehouseRefChecker 与 #88 预留的 ProductRefChecker 在本票
 // 落地实现，app 装配处注册后主数据删除约束自动生效（spec §2：模块内自洽）。
 //
-//   - 仓库：被 erp_stock 非零记录或任何流水引用禁删（append-only 流水即零余额
-//     行也构成历史引用）；
+//   - 仓库：被 erp_stock 非零记录、任何流水或任何单据主表（含未审核；调拨
+//     计调出/调入两仓、盘点计盘点仓）引用禁删（append-only 流水即零余额行也
+//     构成历史引用；单据引用含未审核，防「建单→删仓→审核」向已删仓库落账，
+//     #98 审查 MINOR）；
 //   - 产品：被任何单据明细引用禁删（本票为其它入库/出库明细；#91+ 的引用类型
 //     以 RefCheckerChain 追加组合）。
 package service
@@ -29,6 +31,13 @@ func (s *Service) CheckWarehouseRefs(ctx context.Context, warehouseID int64) err
 	}
 	if recordRows > 0 {
 		return xerr.Conflict("仓库存在出入库流水，禁止删除")
+	}
+	docRows, err := s.repo.CountWarehouseDocRefs(ctx, warehouseID)
+	if err != nil {
+		return err
+	}
+	if docRows > 0 {
+		return xerr.Conflict("仓库被单据引用（含未审核），禁止删除")
 	}
 	return nil
 }

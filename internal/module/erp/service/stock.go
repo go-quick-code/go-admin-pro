@@ -64,6 +64,16 @@ func (s *Service) ApplyStockChange(ctx context.Context, tx *repository.Repositor
 	if ch.Count.Milli() == 0 {
 		return xerr.BadRequest("库存变动量不能为 0")
 	}
+	// 仓库存在性复核（spec §4.9，#98 审查 MINOR 双保险）：仓库可能在单据创建
+	// 后被软删，审核落账前再确认一次，绝不向已删除仓库写余额/流水。删除侧的
+	// CountWarehouseDocRefs（含未审核单据引用）是第一道闸，这里是兜底。
+	warehouse, err := tx.FindWarehouseByID(ctx, ch.WarehouseID)
+	if err != nil {
+		return err
+	}
+	if warehouse == nil {
+		return xerr.Conflict("仓库不存在或已删除，禁止库存入账")
+	}
 	tenantID := erpTenantID(ctx)
 
 	// 1) 物化余额行（幂等；唯一键 upsert 在行锁内完成，避免 LockStock 落 gap 锁）。
