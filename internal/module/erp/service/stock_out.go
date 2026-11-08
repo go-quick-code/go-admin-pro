@@ -166,7 +166,7 @@ func (s *Service) CreateStockOut(ctx context.Context, req *dto.StockOutCreateReq
 	if err != nil {
 		return nil, err
 	}
-	return s.stockOutKernel().Create(ctx,
+	return s.stockOutKernel().Create(ctx, nil,
 		func(ctx context.Context) (*model.StockOut, error) {
 			return &model.StockOut{
 				WarehouseID: req.WarehouseId,
@@ -203,7 +203,7 @@ func (s *Service) UpdateStockOut(ctx context.Context, req *dto.StockOutUpdateReq
 			docType, err = validateDocType(req.Type, model.ValidStockOutType, "出库单")
 			return err
 		},
-		func(ctx context.Context, d *model.StockOut) error {
+		func(ctx context.Context, _ doc.Tx[*model.StockOut, model.StockOutItem], d *model.StockOut) error {
 			d.WarehouseID = req.WarehouseId
 			d.OutTime = outTime
 			d.Type = docType

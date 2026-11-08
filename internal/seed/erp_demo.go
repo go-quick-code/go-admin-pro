@@ -444,17 +444,21 @@ func erpDemoSeedPurchase(ctx context.Context, stock erpDemoStockApplier, tx *gor
 	}
 	purchaseIn := erpmodel.PurchaseIn{
 		BaseEntity: erpDemoBase(erpDemoPurchaseInID, inTime, creator),
-		TenantID:   erpDemoTenantID, No: inNo,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:          inNo,
 		SupplierID:  erpDemoSupplierHQID,
 		OrderID:     order.ID,
 		WarehouseID: erpDemoWarehouseMainID,
 		InTime:      inTime,
-		Status:      erpmodel.DocStatusApproved,
 		TotalPrice:  orderTotal,
 		// 付款单（FK）审核后回写；本演示付款金额等于入库金额（全额核销）。
 		PaymentPrice: orderTotal,
 		Remark:       "演示采购入库：审核后库存增加",
-		OwnerUserID:  admin.ID, OwnerDeptID: admin.DeptID,
 	}
 	if err := tenant.Skip(tx).Create(&purchaseIn).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示采购入库单: %w", err)

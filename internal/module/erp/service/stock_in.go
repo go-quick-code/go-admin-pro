@@ -167,7 +167,7 @@ func (s *Service) CreateStockIn(ctx context.Context, req *dto.StockInCreateReq) 
 	if err != nil {
 		return nil, err
 	}
-	return s.stockInKernel().Create(ctx,
+	return s.stockInKernel().Create(ctx, nil,
 		func(ctx context.Context) (*model.StockIn, error) {
 			return &model.StockIn{
 				WarehouseID: req.WarehouseId,
@@ -205,7 +205,7 @@ func (s *Service) UpdateStockIn(ctx context.Context, req *dto.StockInUpdateReq) 
 			docType, err = validateDocType(req.Type, model.ValidStockInType, "入库单")
 			return err
 		},
-		func(ctx context.Context, d *model.StockIn) error {
+		func(ctx context.Context, _ doc.Tx[*model.StockIn, model.StockInItem], d *model.StockIn) error {
 			d.WarehouseID = req.WarehouseId
 			d.InTime = inTime
 			d.Type = docType

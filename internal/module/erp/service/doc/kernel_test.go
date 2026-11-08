@@ -251,7 +251,7 @@ func newUnaudited(id int64) *fakeHeader {
 func TestKernelCreate(t *testing.T) {
 	k, store, _, _ := newTestKernel(t)
 	bizTime := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
-	created, err := k.Create(context.Background(),
+	created, err := k.Create(context.Background(), nil,
 		func(context.Context) (*fakeHeader, error) {
 			return &fakeHeader{BizTime: bizTime}, nil
 		},
@@ -286,7 +286,7 @@ func TestKernelCreate(t *testing.T) {
 
 func TestKernelCreateRollsBackOnItemError(t *testing.T) {
 	k, store, _, _ := newTestKernel(t)
-	_, err := k.Create(context.Background(),
+	_, err := k.Create(context.Background(), nil,
 		func(context.Context) (*fakeHeader, error) { return &fakeHeader{}, nil },
 		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, errors.New("明细构造失败") },
 	)
@@ -301,7 +301,7 @@ func TestKernelCreateRollsBackOnItemError(t *testing.T) {
 func TestKernelCreateOwnerError(t *testing.T) {
 	k, store, env, _ := newTestKernel(t)
 	env.ownerErr = errors.New("用户无部门")
-	_, err := k.Create(context.Background(),
+	_, err := k.Create(context.Background(), nil,
 		func(context.Context) (*fakeHeader, error) { return &fakeHeader{}, nil },
 		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
 	)
@@ -313,15 +313,37 @@ func TestKernelCreateOwnerError(t *testing.T) {
 	}
 }
 
+func TestKernelCreatePrepareError(t *testing.T) {
+	k, store, _, _ := newTestKernel(t)
+	prepareCalls := 0
+	_, err := k.Create(context.Background(),
+		func(context.Context, doc.Tx[*fakeHeader, fakeItem]) error {
+			prepareCalls++
+			return errors.New("订单未审核")
+		},
+		func(context.Context) (*fakeHeader, error) { return &fakeHeader{}, nil },
+		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
+	)
+	if err == nil || err.Error() != "订单未审核" {
+		t.Fatalf("err = %v，期望 订单未审核", err)
+	}
+	if prepareCalls != 1 {
+		t.Fatalf("prepare 调用 %d 次，期望 1", prepareCalls)
+	}
+	if store.seq != 0 || len(store.docs) != 0 {
+		t.Fatalf("prepare 失败不应发号/落库（seq=%d docs=%d）", store.seq, len(store.docs))
+	}
+}
+
 func TestKernelUpdateRejectsApprovedBeforeValidate(t *testing.T) {
 	k, store, _, _ := newTestKernel(t)
-	doc := newUnaudited(1)
-	doc.Base().SetStatus(model.DocStatusApproved)
-	store.docs[1] = doc
+	row := newUnaudited(1)
+	row.Base().SetStatus(model.DocStatusApproved)
+	store.docs[1] = row
 	validateCalls := 0
 	err := k.Update(context.Background(), 1,
 		func(context.Context, *fakeHeader) error { validateCalls++; return nil },
-		func(context.Context, *fakeHeader) error { return nil },
+		func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error { return nil },
 		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
 	)
 	if err == nil || err.Error() != "已审核单据不可修改" {
@@ -338,7 +360,7 @@ func TestKernelUpdateLockRecheck(t *testing.T) {
 	store.lockHook = func(d *fakeHeader) { d.Base().SetStatus(model.DocStatusApproved) }
 	mutateCalls := 0
 	err := k.Update(context.Background(), 1, nil,
-		func(context.Context, *fakeHeader) error { mutateCalls++; return nil },
+		func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error { mutateCalls++; return nil },
 		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
 	)
 	if err == nil || err.Error() != "已审核单据不可修改" {
@@ -351,11 +373,11 @@ func TestKernelUpdateLockRecheck(t *testing.T) {
 
 func TestKernelUpdateReplacesItems(t *testing.T) {
 	k, store, _, _ := newTestKernel(t)
-	doc := newUnaudited(1)
-	doc.Items = []fakeItem{{ID: 9, ProductID: 99}}
-	store.docs[1] = doc
+	row := newUnaudited(1)
+	row.Items = []fakeItem{{ID: 9, ProductID: 99}}
+	store.docs[1] = row
 	err := k.Update(context.Background(), 1, nil,
-		func(_ context.Context, d *fakeHeader) error {
+		func(_ context.Context, _ doc.Tx[*fakeHeader, fakeItem], d *fakeHeader) error {
 			d.BizTime = time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 			return nil
 		},

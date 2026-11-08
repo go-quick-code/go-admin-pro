@@ -1,7 +1,7 @@
 //go:build integration
 
-// 单据内核 adapter conformance（ADR 0018，01a tracer）：同一组 9 步生命周期
-// 断言跑 stock-in / stock-out，锁住「内核重构前后 HTTP 行为逐字等价」。
+// 单据内核 adapter conformance（ADR 0018）：同一组 9 步生命周期断言跑
+// stock-in / stock-out / purchase-in，锁住「内核重构前后 HTTP 行为逐字等价」。
 package erp_test
 
 import (
@@ -20,9 +20,10 @@ type docConformanceCase struct {
 	path      string // /erp/stock-in
 	docType   string // stock-in
 	noPattern *regexp.Regexp
-	create    func(env *testutil.IntegrationEnv, warehouseID, productID int64) map[string]any
-	update    func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64) map[string]any
-	seed      func(t *testing.T, env *testutil.IntegrationEnv, token string, warehouseID, productID int64)
+	// setup 可选：返回 (warehouseID, productID, extras)；nil 时用 setupStockEnv。
+	setup  func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any)
+	create func(env *testutil.IntegrationEnv, warehouseID, productID int64, extras map[string]any) map[string]any
+	update func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64, extras map[string]any) map[string]any
 }
 
 func docConformanceCases() []docConformanceCase {
@@ -32,7 +33,7 @@ func docConformanceCases() []docConformanceCase {
 			path:      "/erp/stock-in",
 			docType:   "stock-in",
 			noPattern: stockInNoRe,
-			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64) map[string]any {
+			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64, _ map[string]any) map[string]any {
 				return map[string]any{
 					"warehouseId": warehouseID,
 					"inTime":      env.Date() + " 10:00:00",
@@ -41,7 +42,7 @@ func docConformanceCases() []docConformanceCase {
 					"items":       []map[string]any{stockItemJSON(productID, "5", "2.50")},
 				}
 			},
-			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64) map[string]any {
+			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64, _ map[string]any) map[string]any {
 				return map[string]any{
 					"id":          docID,
 					"warehouseId": warehouseID,
@@ -57,27 +58,9 @@ func docConformanceCases() []docConformanceCase {
 			path:      "/erp/stock-out",
 			docType:   "stock-out",
 			noPattern: stockOutNoRe,
-			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64) map[string]any {
-				return map[string]any{
-					"warehouseId": warehouseID,
-					"outTime":     env.Date() + " 10:00:00",
-					"type":        99,
-					"remark":      "conformance",
-					"items":       []map[string]any{stockItemJSON(productID, "2", "2.50")},
-				}
-			},
-			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64) map[string]any {
-				return map[string]any{
-					"id":          docID,
-					"warehouseId": warehouseID,
-					"outTime":     env.Date() + " 11:00:00",
-					"type":        99,
-					"remark":      "conformance-updated",
-					"items":       []map[string]any{stockItemJSON(productID, "2", "3.00")},
-				}
-			},
-			seed: func(t *testing.T, env *testutil.IntegrationEnv, token string, warehouseID, productID int64) {
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
 				t.Helper()
+				warehouseID, productID := setupStockEnv(t, env, token, tag)
 				in := createStockInDoc(t, env, token, map[string]any{
 					"warehouseId": warehouseID,
 					"inTime":      env.Date() + " 09:00:00",
@@ -87,14 +70,73 @@ func docConformanceCases() []docConformanceCase {
 				if status, api := approveDoc(t, env, token, "stock-in", int64(in["id"].(float64)), 20); status != http.StatusOK || api.Code != 0 {
 					t.Fatalf("seed 入库审核：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 				}
+				return warehouseID, productID, nil
+			},
+			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64, _ map[string]any) map[string]any {
+				return map[string]any{
+					"warehouseId": warehouseID,
+					"outTime":     env.Date() + " 10:00:00",
+					"type":        99,
+					"remark":      "conformance",
+					"items":       []map[string]any{stockItemJSON(productID, "2", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64, _ map[string]any) map[string]any {
+				return map[string]any{
+					"id":          docID,
+					"warehouseId": warehouseID,
+					"outTime":     env.Date() + " 11:00:00",
+					"type":        99,
+					"remark":      "conformance-updated",
+					"items":       []map[string]any{stockItemJSON(productID, "2", "3.00")},
+				}
+			},
+		},
+		{
+			name:      "purchase-in",
+			path:      "/erp/purchase-in",
+			docType:   "purchase-in",
+			noPattern: purchaseInNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, tag)
+				order := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+					"supplierId": supplierID,
+					"orderTime":  env.Date() + " 09:00:00",
+					"items":      []map[string]any{purchaseItemJSON(productID, "100", "2.50")},
+				})
+				orderID := int64(order["id"].(float64))
+				mustApprovePurchaseDoc(t, env, token, "purchase-order", orderID)
+				return warehouseID, productID, map[string]any{"supplierId": supplierID, "orderId": orderID}
+			},
+			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"supplierId":  extras["supplierId"],
+					"orderId":     extras["orderId"],
+					"warehouseId": warehouseID,
+					"inTime":      env.Date() + " 10:00:00",
+					"remark":      "conformance",
+					"items":       []map[string]any{purchaseItemJSON(productID, "5", "2.50")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, warehouseID, productID int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":          docID,
+					"supplierId":  extras["supplierId"],
+					"orderId":     extras["orderId"],
+					"warehouseId": warehouseID,
+					"inTime":      env.Date() + " 11:00:00",
+					"remark":      "conformance-updated",
+					"items":       []map[string]any{purchaseItemJSON(productID, "2", "3.00")},
+				}
 			},
 		},
 	}
 }
 
-func createConformanceDoc(t *testing.T, env *testutil.IntegrationEnv, token string, tc docConformanceCase, warehouseID, productID int64) map[string]any {
+func createConformanceDoc(t *testing.T, env *testutil.IntegrationEnv, token string, tc docConformanceCase, warehouseID, productID int64, extras map[string]any) map[string]any {
 	t.Helper()
-	status, api := env.Request(t, http.MethodPost, tc.path, token, tc.create(env, warehouseID, productID))
+	status, api := env.Request(t, http.MethodPost, tc.path, token, tc.create(env, warehouseID, productID, extras))
 	if status != http.StatusOK || api.Code != 0 {
 		t.Fatalf("创建：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 	}
@@ -105,9 +147,9 @@ func createConformanceDoc(t *testing.T, env *testutil.IntegrationEnv, token stri
 	return row
 }
 
-func updateConformanceDoc(t *testing.T, env *testutil.IntegrationEnv, token string, tc docConformanceCase, docID, warehouseID, productID int64) (int, testutil.APIResponse) {
+func updateConformanceDoc(t *testing.T, env *testutil.IntegrationEnv, token string, tc docConformanceCase, docID, warehouseID, productID int64, extras map[string]any) (int, testutil.APIResponse) {
 	t.Helper()
-	return env.Request(t, http.MethodPut, tc.path, token, tc.update(env, docID, warehouseID, productID))
+	return env.Request(t, http.MethodPut, tc.path, token, tc.update(env, docID, warehouseID, productID, extras))
 }
 
 func deleteConformanceDoc(t *testing.T, env *testutil.IntegrationEnv, token string, tc docConformanceCase, docID int64) (int, testutil.APIResponse) {
@@ -128,13 +170,18 @@ func TestIntegrationDocConformance(t *testing.T) {
 	for _, tc := range docConformanceCases() {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			warehouseID, productID := setupStockEnv(t, env, token, "一致性"+tc.name)
-			if tc.seed != nil {
-				tc.seed(t, env, token, warehouseID, productID)
+			var (
+				warehouseID, productID int64
+				extras                 map[string]any
+			)
+			if tc.setup != nil {
+				warehouseID, productID, extras = tc.setup(t, env, token, "一致性"+tc.name)
+			} else {
+				warehouseID, productID = setupStockEnv(t, env, token, "一致性"+tc.name)
 			}
 
 			// 1. create：未审核、单号格式。
-			created := createConformanceDoc(t, env, token, tc, warehouseID, productID)
+			created := createConformanceDoc(t, env, token, tc, warehouseID, productID, extras)
 			docID := int64(created["id"].(float64))
 			if created["status"] != float64(10) {
 				t.Fatalf("新建状态 = %v，期望 10", created["status"])
@@ -149,7 +196,7 @@ func TestIntegrationDocConformance(t *testing.T) {
 			}
 
 			// 3. update（未审核）：成功。
-			if status, api := updateConformanceDoc(t, env, token, tc, docID, warehouseID, productID); status != http.StatusOK || api.Code != 0 {
+			if status, api := updateConformanceDoc(t, env, token, tc, docID, warehouseID, productID, extras); status != http.StatusOK || api.Code != 0 {
 				t.Fatalf("未审核编辑：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 			}
 
@@ -159,7 +206,7 @@ func TestIntegrationDocConformance(t *testing.T) {
 			}
 
 			// 5. update（已审核）：409。
-			if status, api := updateConformanceDoc(t, env, token, tc, docID, warehouseID, productID); status != http.StatusConflict || !strings.Contains(api.Msg, "已审核单据不可修改") {
+			if status, api := updateConformanceDoc(t, env, token, tc, docID, warehouseID, productID, extras); status != http.StatusConflict || !strings.Contains(api.Msg, "已审核单据不可修改") {
 				t.Fatalf("已审核编辑：HTTP %d msg %q，期望 409/已审核单据不可修改", status, api.Msg)
 			}
 
@@ -174,7 +221,7 @@ func TestIntegrationDocConformance(t *testing.T) {
 			}
 
 			// 8. update（反审核后）：成功。
-			if status, api := updateConformanceDoc(t, env, token, tc, docID, warehouseID, productID); status != http.StatusOK || api.Code != 0 {
+			if status, api := updateConformanceDoc(t, env, token, tc, docID, warehouseID, productID, extras); status != http.StatusOK || api.Code != 0 {
 				t.Fatalf("反审核后编辑：HTTP %d code %d msg %q", status, api.Code, api.Msg)
 			}
 
@@ -187,7 +234,7 @@ func TestIntegrationDocConformance(t *testing.T) {
 			}
 
 			// 10. 幂等目标态：重复审核 200 且状态保持 20。
-			idem := createConformanceDoc(t, env, token, tc, warehouseID, productID)
+			idem := createConformanceDoc(t, env, token, tc, warehouseID, productID, extras)
 			idemID := int64(idem["id"].(float64))
 			for i := 0; i < 2; i++ {
 				if status, api := approveDoc(t, env, token, tc.docType, idemID, 20); status != http.StatusOK || api.Code != 0 {

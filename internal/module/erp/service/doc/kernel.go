@@ -56,10 +56,12 @@ func (k *Kernel[H, I]) findOne(ctx context.Context, id int64, withItems bool) (H
 	return row, nil
 }
 
-// Create 创建单据：owner 快照（事务外）→ 事务内发号 → 建头 → 建明细。
-// buildHeader 只填类型特有字段；单号/状态/归属由内核统一写入。
+// Create 创建单据：owner 快照（事务外）→ 事务内 prepare（挂单锁/配额等）
+// → 发号 → 建头 → 建明细。buildHeader 只填类型特有字段；单号/状态/归属由
+// 内核统一写入。prepare 可为 nil。
 func (k *Kernel[H, I]) Create(
 	ctx context.Context,
+	prepare func(ctx context.Context, tx Tx[H, I]) error,
 	buildHeader func(ctx context.Context) (H, error),
 	buildItems func(ctx context.Context, doc H) ([]I, error),
 ) (H, error) {
@@ -71,6 +73,11 @@ func (k *Kernel[H, I]) Create(
 	}
 	var created H
 	err = k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		if prepare != nil {
+			if err := prepare(ctx, tx); err != nil {
+				return err
+			}
+		}
 		no, err := tx.NextNo(ctx, k.spec.SeqBizType, k.spec.NoPrefix)
 		if err != nil {
 			return err
@@ -103,12 +110,13 @@ func (k *Kernel[H, I]) Create(
 }
 
 // Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内锁重读
-// 复核 status=10 → mutate → 整体替换明细。validate/mutate 可为 nil。
+// 复核 status=10 → mutate（可做挂单锁/配额等事务内校验）→ 整体替换明细。
+// validate/mutate 可为 nil。
 func (k *Kernel[H, I]) Update(
 	ctx context.Context,
 	id int64,
 	validate func(ctx context.Context, doc H) error,
-	mutate func(ctx context.Context, doc H) error,
+	mutate func(ctx context.Context, tx Tx[H, I], doc H) error,
 	buildItems func(ctx context.Context, doc H) ([]I, error),
 ) error {
 	row, err := k.Find(ctx, id)
@@ -132,7 +140,7 @@ func (k *Kernel[H, I]) Update(
 			return errApprovedUpdate()
 		}
 		if mutate != nil {
-			if err := mutate(ctx, locked); err != nil {
+			if err := mutate(ctx, tx, locked); err != nil {
 				return err
 			}
 		}
@@ -190,8 +198,12 @@ func (k *Kernel[H, I]) SetStatus(ctx context.Context, id int64, target int8) err
 	if idempotent {
 		return nil
 	}
+	isolation := k.spec.ApproveIsolation
+	if target == model.DocStatusUnaudited {
+		isolation = k.spec.UnapproveIsolation
+	}
 	run := k.store.Transaction
-	if k.spec.Isolation == IsolationReadCommitted {
+	if isolation == IsolationReadCommitted {
 		run = k.store.TransactionReadCommitted
 	}
 	return run(ctx, func(tx Tx[H, I]) error {

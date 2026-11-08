@@ -80,10 +80,13 @@ const (
 
 // Spec 是一类单据对内核的声明。
 type Spec[H Header, I any] struct {
-	Labels     Labels
-	Isolation  Isolation
-	NoPrefix   string
-	SeqBizType string
+	Labels Labels
+	// ApproveIsolation/UnapproveIsolation 分别控制审核/反审核事务的隔离级别；
+	// 零值 IsolationDefault（仓储默认，REPEATABLE READ）。
+	ApproveIsolation   Isolation
+	UnapproveIsolation Isolation
+	NoPrefix           string
+	SeqBizType         string
 
 	// Approve/Unapprove 在事务内、状态认领成功后执行落账/回滚。
 	Approve   func(ctx context.Context, tx Tx[H, I], doc H) error

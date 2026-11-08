@@ -205,20 +205,7 @@ type PurchaseInFilter struct {
 	SelfOwnerUserID int64
 }
 
-// CreatePurchaseIn 创建采购入库单主表。
-func (r *Repository) CreatePurchaseIn(ctx context.Context, row *model.PurchaseIn) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreatePurchaseInItems 批量创建采购入库单明细。
-func (r *Repository) CreatePurchaseInItems(ctx context.Context, items []model.PurchaseInItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindPurchaseInByID 按 ID 查入库单主表，不存在返回 nil。
+// FindPurchaseInByID 按 ID 查入库单主表，不存在返回 nil（财务/退货域仍用）。
 func (r *Repository) FindPurchaseInByID(ctx context.Context, id int64) (*model.PurchaseIn, error) {
 	var row model.PurchaseIn
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
@@ -293,31 +280,6 @@ func (r *Repository) purchaseInQuery(ctx context.Context, f PurchaseInFilter) *g
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// SavePurchaseIn 全量保存入库单主表（更新路径）。
-func (r *Repository) SavePurchaseIn(ctx context.Context, row *model.PurchaseIn) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeletePurchaseInIfUnaudited 条件软删除采购入库单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeletePurchaseInIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.PurchaseIn{}, id, model.DocStatusUnaudited)
-}
-
-// DeletePurchaseInItems 软删除入库单的全部明细。
-func (r *Repository) DeletePurchaseInItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("purchase_in_id = ?", docID).
-		Delete(&model.PurchaseInItem{}).Error
-}
-
-// UpdatePurchaseInStatusIf 乐观认领入库单审核状态（防双审模式同 #90）。
-func (r *Repository) UpdatePurchaseInStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.PurchaseIn{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountPurchaseInItemsByProduct 产品删除引用计数的一部分：入库单明细引用行数。

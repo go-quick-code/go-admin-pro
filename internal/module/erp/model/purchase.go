@@ -74,28 +74,30 @@ func (PurchaseOrderItem) TableName() string { return "erp_purchase_order_items" 
 // PurchaseIn 是采购入库单主表。
 type PurchaseIn struct {
 	model.BaseEntity
-	TenantID int64  `gorm:"index;not null;default:1" json:"tenantId"`
-	No       string `gorm:"size:32;not null" json:"no"`
+	DocBase `gorm:"embedded"`
+	No      string `gorm:"size:32;not null" json:"no"`
 	// SupplierID 必须与挂单订单的供应商一致（服务端校验）。
 	SupplierID int64 `gorm:"not null" json:"supplierId"`
 	// OrderID 必填且必须是已审核采购订单（spec §4.4）。
 	OrderID     int64     `gorm:"not null" json:"orderId"`
 	WarehouseID int64     `gorm:"not null" json:"warehouseId"`
 	InTime      time.Time `gorm:"not null" json:"inTime"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	// TotalPrice 单据金额 = 明细行金额合计（服务端计算冗余）。
 	TotalPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 	// PaymentPrice 已核销付款回写（本票只落列，核销在 #94）。
 	PaymentPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"paymentPrice"`
 	Remark       string      `gorm:"size:500" json:"remark"`
 
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
-
 	Items []PurchaseInItem `gorm:"foreignKey:PurchaseInID" json:"items,omitempty"`
 }
 
 func (PurchaseIn) TableName() string { return "erp_purchase_in" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 in_time）。
+func (d *PurchaseIn) GetNo() string          { return d.No }
+func (d *PurchaseIn) SetNo(v string)         { d.No = v }
+func (d *PurchaseIn) GetBizTime() time.Time  { return d.InTime }
+func (d *PurchaseIn) SetBizTime(v time.Time) { d.InTime = v }
 
 // PurchaseInItem 是采购入库单明细。
 type PurchaseInItem struct {
