@@ -21,7 +21,7 @@ import (
 // （核销上限的聚合必须是当前读）。
 func (s *Service) financePaymentKernel() *doc.Kernel[*model.FinancePayment, model.FinancePaymentItem] {
 	return doc.New(docEnv{s}, s.financePaymentStore(), doc.Spec[*model.FinancePayment, model.FinancePaymentItem]{
-		Labels:             doc.Labels{Doc: "付款单", Item: "核销明细"},
+		Labels:             doc.Labels{Doc: "付款单"},
 		NoPrefix:           FinancePaymentNoPrefix,
 		SeqBizType:         SeqBizTypeFinancePayment,
 		ApproveIsolation:   doc.IsolationReadCommitted,
@@ -34,8 +34,9 @@ func (s *Service) financePaymentKernel() *doc.Kernel[*model.FinancePayment, mode
 // financePaymentStore 装配付款单的泛型存储。
 func (s *Service) financePaymentStore() doc.Store[*model.FinancePayment, model.FinancePaymentItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.FinancePayment, model.FinancePaymentItem]{
-		New:     func() *model.FinancePayment { return &model.FinancePayment{} },
-		ItemsFK: "payment_id",
+		New:          func() *model.FinancePayment { return &model.FinancePayment{} },
+		ItemsFK:      "payment_id",
+		SetItemDocID: func(it *model.FinancePaymentItem, id int64) { it.PaymentID = id },
 	})
 }
 
@@ -294,11 +295,6 @@ func (s *Service) unapproveFinancePaymentDoc(ctx context.Context, tx doc.Tx[*mod
 		return err
 	}
 	return s.lockAndRecomputeFinanceWritebacks(ctx, repo, financeSidePayment, own)
-}
-
-// findFinancePayment 取付款单并做可见性校验（数据范围外一律 404）。
-func (s *Service) findFinancePayment(ctx context.Context, id int64) (*model.FinancePayment, error) {
-	return s.financePaymentKernel().Find(ctx, id)
 }
 
 // financePaymentBizNos 批量解析付款明细指向的被核销单据单号。

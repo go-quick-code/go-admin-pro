@@ -109,9 +109,10 @@ func (k *Kernel[H, I]) Create(
 	return created, nil
 }
 
-// Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内锁重读
-// 复核 status=10 → mutate（可做挂单锁/配额等事务内校验）→ 整体替换明细。
-// validate/mutate 可为 nil。
+// Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内
+// beforeLock（可先锁父单，保证与审核一致的锁序）→ 锁自身行重读并复核
+// status=10 → mutate（可做挂单锁/配额等事务内校验）→ 整体替换明细。
+// validate/beforeLock/mutate 可为 nil。
 func (k *Kernel[H, I]) Update(
 	ctx context.Context,
 	id int64,

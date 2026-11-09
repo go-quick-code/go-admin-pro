@@ -21,7 +21,7 @@ import (
 // stockMoveKernel 构造库存调拨单内核（无父单；审核/反审核各生成成对流水）。
 func (s *Service) stockMoveKernel() *doc.Kernel[*model.StockMove, model.StockMoveItem] {
 	return doc.New(docEnv{s}, s.stockMoveStore(), doc.Spec[*model.StockMove, model.StockMoveItem]{
-		Labels:     doc.Labels{Doc: "库存调拨单", Item: "调拨明细"},
+		Labels:     doc.Labels{Doc: "库存调拨单"},
 		NoPrefix:   StockMoveNoPrefix,
 		SeqBizType: SeqBizTypeStockMove,
 		Approve:    s.approveStockMoveDoc,
@@ -32,8 +32,9 @@ func (s *Service) stockMoveKernel() *doc.Kernel[*model.StockMove, model.StockMov
 // stockMoveStore 装配库存调拨单的泛型存储。
 func (s *Service) stockMoveStore() doc.Store[*model.StockMove, model.StockMoveItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockMove, model.StockMoveItem]{
-		New:     func() *model.StockMove { return &model.StockMove{} },
-		ItemsFK: "stock_move_id",
+		New:          func() *model.StockMove { return &model.StockMove{} },
+		ItemsFK:      "stock_move_id",
+		SetItemDocID: func(it *model.StockMoveItem, id int64) { it.StockMoveID = id },
 	})
 }
 
@@ -347,11 +348,6 @@ func (s *Service) ExportStockMoves(ctx context.Context, req *dto.StockMovePageRe
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findStockMove 取调拨单并做可见性校验（数据范围外一律 404）。
-func (s *Service) findStockMove(ctx context.Context, id int64) (*model.StockMove, error) {
-	return s.stockMoveKernel().Find(ctx, id)
 }
 
 // checkWarehousesExist 校验一批仓库在租户内存在（跨租户/不存在一律 400，

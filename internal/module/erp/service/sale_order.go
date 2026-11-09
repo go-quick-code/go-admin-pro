@@ -21,7 +21,7 @@ import (
 // 存在已审核出库/退货时 409，删除在存在出库引用时 409。
 func (s *Service) saleOrderKernel() *doc.Kernel[*model.SaleOrder, model.SaleOrderItem] {
 	return doc.New(docEnv{s}, s.saleOrderStore(), doc.Spec[*model.SaleOrder, model.SaleOrderItem]{
-		Labels:       doc.Labels{Doc: "销售订单", Item: "销售订单明细"},
+		Labels:       doc.Labels{Doc: "销售订单"},
 		NoPrefix:     SaleOrderNoPrefix,
 		SeqBizType:   SeqBizTypeSaleOrder,
 		Unapprove:    s.unapproveSaleOrderDoc,
@@ -32,8 +32,9 @@ func (s *Service) saleOrderKernel() *doc.Kernel[*model.SaleOrder, model.SaleOrde
 // saleOrderStore 装配销售订单的泛型存储。
 func (s *Service) saleOrderStore() doc.Store[*model.SaleOrder, model.SaleOrderItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.SaleOrder, model.SaleOrderItem]{
-		New:     func() *model.SaleOrder { return &model.SaleOrder{} },
-		ItemsFK: "sale_order_id",
+		New:          func() *model.SaleOrder { return &model.SaleOrder{} },
+		ItemsFK:      "sale_order_id",
+		SetItemDocID: func(it *model.SaleOrderItem, id int64) { it.SaleOrderID = id },
 	})
 }
 
@@ -321,11 +322,6 @@ func (s *Service) ExportSaleOrders(ctx context.Context, req *dto.SaleOrderPageRe
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findSaleOrder 取订单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findSaleOrder(ctx context.Context, id int64) (*model.SaleOrder, error) {
-	return s.saleOrderKernel().Find(ctx, id)
 }
 
 func customerIDsOfOrders(list []model.SaleOrder) []int64 {

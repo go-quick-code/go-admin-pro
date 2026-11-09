@@ -40,11 +40,8 @@ type SaleOrder struct {
 
 func (SaleOrder) TableName() string { return "erp_sale_order" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 order_time）。
-func (d *SaleOrder) GetNo() string          { return d.OrderNo }
-func (d *SaleOrder) SetNo(v string)         { d.OrderNo = v }
-func (d *SaleOrder) GetBizTime() time.Time  { return d.OrderTime }
-func (d *SaleOrder) SetBizTime(v time.Time) { d.OrderTime = v }
+// SetNo 实现 doc.Header（业务时间列 order_time）。
+func (d *SaleOrder) SetNo(v string) { d.OrderNo = v }
 
 // 销售链路的库存流水 biz_type（spec §4.3/§4.8：与单据表名一致 + _CANCEL 对，
 // 命名延续 #90 的 StockRecordBiz* 风格；#91 采购同构追加）。
@@ -98,11 +95,8 @@ type SaleOut struct {
 
 func (SaleOut) TableName() string { return "erp_sale_out" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 out_time）。
-func (d *SaleOut) GetNo() string          { return d.No }
-func (d *SaleOut) SetNo(v string)         { d.No = v }
-func (d *SaleOut) GetBizTime() time.Time  { return d.OutTime }
-func (d *SaleOut) SetBizTime(v time.Time) { d.OutTime = v }
+// SetNo 实现 doc.Header（业务时间列 out_time）。
+func (d *SaleOut) SetNo(v string) { d.No = v }
 
 // SaleOutItem 是销售出库单明细。
 type SaleOutItem struct {
@@ -138,11 +132,8 @@ type SaleReturn struct {
 
 func (SaleReturn) TableName() string { return "erp_sale_return" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 return_time）。
-func (d *SaleReturn) GetNo() string          { return d.No }
-func (d *SaleReturn) SetNo(v string)         { d.No = v }
-func (d *SaleReturn) GetBizTime() time.Time  { return d.ReturnTime }
-func (d *SaleReturn) SetBizTime(v time.Time) { d.ReturnTime = v }
+// SetNo 实现 doc.Header（业务时间列 return_time）。
+func (d *SaleReturn) SetNo(v string) { d.No = v }
 
 // SaleReturnItem 是销售退货单明细。
 type SaleReturnItem struct {

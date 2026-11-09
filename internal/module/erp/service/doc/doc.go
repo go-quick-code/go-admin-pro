@@ -9,7 +9,6 @@ package doc
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 )
@@ -24,10 +23,7 @@ var ErrNotFound = errors.New("doc: not found")
 type Header interface {
 	GetID() int64
 	Base() *model.DocBase
-	GetNo() string
 	SetNo(string)
-	GetBizTime() time.Time
-	SetBizTime(time.Time)
 }
 
 // Store 是内核的存储入口：事务外 finder + 两种隔离级别的事务。
@@ -64,8 +60,7 @@ type Env interface {
 
 // Labels 是内核标准文案的单据/明细名。
 type Labels struct {
-	Doc  string
-	Item string
+	Doc string
 }
 
 // Isolation 是审核/反审核事务的隔离级别。

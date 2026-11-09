@@ -41,6 +41,8 @@ type fakeStore struct {
 	lockHook   func(*fakeHeader)
 	claimHook  func() (int64, error)
 	deleteHook func() (int64, error)
+	txCalls    int
+	rcCalls    int
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{docs: map[int64]*fakeHeader{}} }
@@ -70,10 +72,12 @@ func (s *fakeStore) FindWithItems(ctx context.Context, id int64) (*fakeHeader, e
 }
 
 func (s *fakeStore) Transaction(_ context.Context, fn func(doc.Tx[*fakeHeader, fakeItem]) error) error {
+	s.txCalls++
 	return s.run(fn)
 }
 
 func (s *fakeStore) TransactionReadCommitted(_ context.Context, fn func(doc.Tx[*fakeHeader, fakeItem]) error) error {
+	s.rcCalls++
 	return s.run(fn)
 }
 
@@ -224,7 +228,7 @@ func newTestKernel(t *testing.T) (*doc.Kernel[*fakeHeader, fakeItem], *fakeStore
 	env := &fakeEnv{userID: 7, deptID: 8}
 	hooks := &hookState{}
 	spec := doc.Spec[*fakeHeader, fakeItem]{
-		Labels:       doc.Labels{Doc: "测试单", Item: "测试明细"},
+		Labels:       doc.Labels{Doc: "测试单"},
 		NoPrefix:     "TS",
 		SeqBizType:   "test",
 		Approve:      hooks.approve,
@@ -447,6 +451,34 @@ func TestKernelDeleteBeforeDeleteError(t *testing.T) {
 	}
 	if store.docs[1] == nil {
 		t.Fatal("禁令失败时单据应保留")
+	}
+}
+
+func TestKernelSetStatusIsolation(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{userID: 7, deptID: 8}
+	hooks := &hookState{}
+	spec := doc.Spec[*fakeHeader, fakeItem]{
+		Labels:           doc.Labels{Doc: "测试单"},
+		NoPrefix:         "TS",
+		SeqBizType:       "test",
+		ApproveIsolation: doc.IsolationReadCommitted,
+		Approve:          hooks.approve,
+	}
+	k := doc.New[*fakeHeader, fakeItem](env, store, spec)
+	store.docs[1] = newUnaudited(1)
+	if err := k.SetStatus(context.Background(), 1, model.DocStatusApproved); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if store.rcCalls != 1 || store.txCalls != 0 {
+		t.Fatalf("approve 事务计数 tx=%d rc=%d，期望 0/1", store.txCalls, store.rcCalls)
+	}
+	store.docs[1].Base().SetStatus(model.DocStatusApproved)
+	if err := k.SetStatus(context.Background(), 1, model.DocStatusUnaudited); err != nil {
+		t.Fatalf("unapprove: %v", err)
+	}
+	if store.txCalls != 1 || store.rcCalls != 1 {
+		t.Fatalf("unapprove 事务计数 tx=%d rc=%d，期望 1/1", store.txCalls, store.rcCalls)
 	}
 }
 

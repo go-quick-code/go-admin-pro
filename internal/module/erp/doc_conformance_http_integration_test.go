@@ -1,7 +1,8 @@
 //go:build integration
 
-// 单据内核 adapter conformance（ADR 0018）：同一组 9 步生命周期断言跑
-// stock-in / stock-out / purchase-in，锁住「内核重构前后 HTTP 行为逐字等价」。
+// 单据内核 adapter conformance（ADR 0018）：同一组 10 步生命周期断言跑
+// 12 类单据（stock-in/out、purchase-order/in/return、sale-order/sale-out/sale-return、
+// stock-move/check、finance-receipt/payment），锁住「内核重构前后 HTTP 行为等价」。
 package erp_test
 
 import (
@@ -255,7 +256,20 @@ func docConformanceCases() []docConformanceCase {
 				})
 				orderID := int64(order["id"].(float64))
 				mustApproveSale(t, env, token, "sale-order", orderID, 20)
-				return warehouseID, productID, map[string]any{"customerId": customerID, "orderId": orderID}
+				// 第二张已审核订单：编辑时把出库单从 order1 换挂到 order2，
+				// 覆盖 beforeLock 存在的理由（编辑可换父单）。
+				order2 := createSaleOrderDoc(t, env, token, map[string]any{
+					"customerId": customerID,
+					"orderTime":  env.Date() + " 09:30:00",
+					"items":      []map[string]any{saleItemJSON(productID, "10", "3.00")},
+				})
+				order2ID := int64(order2["id"].(float64))
+				mustApproveSale(t, env, token, "sale-order", order2ID, 20)
+				return warehouseID, productID, map[string]any{
+					"customerId": customerID,
+					"orderId":    orderID,
+					"orderId2":   order2ID,
+				}
 			},
 			create: func(env *testutil.IntegrationEnv, warehouseID, productID int64, extras map[string]any) map[string]any {
 				return map[string]any{
@@ -270,7 +284,7 @@ func docConformanceCases() []docConformanceCase {
 				return map[string]any{
 					"id":          docID,
 					"customerId":  extras["customerId"],
-					"orderId":     extras["orderId"],
+					"orderId":     extras["orderId2"],
 					"warehouseId": warehouseID,
 					"outTime":     env.Date() + " 11:00:00",
 					"items":       []map[string]any{saleItemJSON(productID, "2", "3.00")},

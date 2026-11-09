@@ -24,7 +24,7 @@ import (
 // 反审核按已入账流水净额反向）。
 func (s *Service) stockCheckKernel() *doc.Kernel[*model.StockCheck, model.StockCheckItem] {
 	return doc.New(docEnv{s}, s.stockCheckStore(), doc.Spec[*model.StockCheck, model.StockCheckItem]{
-		Labels:     doc.Labels{Doc: "库存盘点单", Item: "盘点明细"},
+		Labels:     doc.Labels{Doc: "库存盘点单"},
 		NoPrefix:   StockCheckNoPrefix,
 		SeqBizType: SeqBizTypeStockCheck,
 		Approve:    s.approveStockCheckDoc,
@@ -35,8 +35,9 @@ func (s *Service) stockCheckKernel() *doc.Kernel[*model.StockCheck, model.StockC
 // stockCheckStore 装配库存盘点单的泛型存储。
 func (s *Service) stockCheckStore() doc.Store[*model.StockCheck, model.StockCheckItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockCheck, model.StockCheckItem]{
-		New:     func() *model.StockCheck { return &model.StockCheck{} },
-		ItemsFK: "stock_check_id",
+		New:          func() *model.StockCheck { return &model.StockCheck{} },
+		ItemsFK:      "stock_check_id",
+		SetItemDocID: func(it *model.StockCheckItem, id int64) { it.StockCheckID = id },
 	})
 }
 
@@ -356,11 +357,6 @@ func (s *Service) ExportStockChecks(ctx context.Context, req *dto.StockCheckPage
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findStockCheck 取盘点单并做可见性校验（数据范围外一律 404）。
-func (s *Service) findStockCheck(ctx context.Context, id int64) (*model.StockCheck, error) {
-	return s.stockCheckKernel().Find(ctx, id)
 }
 
 // buildCheckDraftsWithBase 校验仓库/产品引用并快照当前账面数（base_count）。

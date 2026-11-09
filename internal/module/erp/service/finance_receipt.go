@@ -21,7 +21,7 @@ import (
 // （核销上限的聚合必须是当前读）。
 func (s *Service) financeReceiptKernel() *doc.Kernel[*model.FinanceReceipt, model.FinanceReceiptItem] {
 	return doc.New(docEnv{s}, s.financeReceiptStore(), doc.Spec[*model.FinanceReceipt, model.FinanceReceiptItem]{
-		Labels:             doc.Labels{Doc: "收款单", Item: "核销明细"},
+		Labels:             doc.Labels{Doc: "收款单"},
 		NoPrefix:           FinanceReceiptNoPrefix,
 		SeqBizType:         SeqBizTypeFinanceReceipt,
 		ApproveIsolation:   doc.IsolationReadCommitted,
@@ -34,8 +34,9 @@ func (s *Service) financeReceiptKernel() *doc.Kernel[*model.FinanceReceipt, mode
 // financeReceiptStore 装配收款单的泛型存储。
 func (s *Service) financeReceiptStore() doc.Store[*model.FinanceReceipt, model.FinanceReceiptItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.FinanceReceipt, model.FinanceReceiptItem]{
-		New:     func() *model.FinanceReceipt { return &model.FinanceReceipt{} },
-		ItemsFK: "receipt_id",
+		New:          func() *model.FinanceReceipt { return &model.FinanceReceipt{} },
+		ItemsFK:      "receipt_id",
+		SetItemDocID: func(it *model.FinanceReceiptItem, id int64) { it.ReceiptID = id },
 	})
 }
 
@@ -299,11 +300,6 @@ func (s *Service) unapproveFinanceReceiptDoc(ctx context.Context, tx doc.Tx[*mod
 		return err
 	}
 	return s.lockAndRecomputeFinanceWritebacks(ctx, repo, financeSideReceipt, own)
-}
-
-// findFinanceReceipt 取收款单并做可见性校验（数据范围外一律 404）。
-func (s *Service) findFinanceReceipt(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
-	return s.financeReceiptKernel().Find(ctx, id)
 }
 
 // financeReceiptBizNos 批量解析收款明细指向的被核销单据单号。

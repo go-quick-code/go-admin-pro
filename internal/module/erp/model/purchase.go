@@ -50,11 +50,8 @@ type PurchaseOrder struct {
 
 func (PurchaseOrder) TableName() string { return "erp_purchase_order" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 order_time）。
-func (d *PurchaseOrder) GetNo() string          { return d.OrderNo }
-func (d *PurchaseOrder) SetNo(v string)         { d.OrderNo = v }
-func (d *PurchaseOrder) GetBizTime() time.Time  { return d.OrderTime }
-func (d *PurchaseOrder) SetBizTime(v time.Time) { d.OrderTime = v }
+// SetNo 实现 doc.Header（业务时间列 order_time）。
+func (d *PurchaseOrder) SetNo(v string) { d.OrderNo = v }
 
 // PurchaseOrderItem 是采购订单明细。InCount/ReturnCount 为进度回写列
 // （服务端重算，创建/编辑入参不采纳）。
@@ -95,11 +92,8 @@ type PurchaseIn struct {
 
 func (PurchaseIn) TableName() string { return "erp_purchase_in" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 in_time）。
-func (d *PurchaseIn) GetNo() string          { return d.No }
-func (d *PurchaseIn) SetNo(v string)         { d.No = v }
-func (d *PurchaseIn) GetBizTime() time.Time  { return d.InTime }
-func (d *PurchaseIn) SetBizTime(v time.Time) { d.InTime = v }
+// SetNo 实现 doc.Header（业务时间列 in_time）。
+func (d *PurchaseIn) SetNo(v string) { d.No = v }
 
 // PurchaseInItem 是采购入库单明细。
 type PurchaseInItem struct {
@@ -137,11 +131,8 @@ type PurchaseReturn struct {
 
 func (PurchaseReturn) TableName() string { return "erp_purchase_return" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 return_time）。
-func (d *PurchaseReturn) GetNo() string          { return d.No }
-func (d *PurchaseReturn) SetNo(v string)         { d.No = v }
-func (d *PurchaseReturn) GetBizTime() time.Time  { return d.ReturnTime }
-func (d *PurchaseReturn) SetBizTime(v time.Time) { d.ReturnTime = v }
+// SetNo 实现 doc.Header（业务时间列 return_time）。
+func (d *PurchaseReturn) SetNo(v string) { d.No = v }
 
 // PurchaseReturnItem 是采购退货单明细。
 type PurchaseReturnItem struct {
