@@ -43,7 +43,7 @@ const erpDocMenuParent int64 = 700
 // #88：700 dir、710–712（分类/单位/产品）+ 按钮 7101–7124；#89：720 仓库 /
 // 730 供应商 / 740 客户 + 按钮 7201–7204/7301–7304/7401–7404；#95：701 首页
 // 统计；#90：721–722 库存只读页；#94：750 结算账户。按钮 = 菜单ID×10+n
-//（grep 去重确认未占用）。权限码仍为字面量，与路由的一致性由 S4 AST
+// （grep 去重确认未占用）。权限码仍为字面量，与路由的一致性由 S4 AST
 // 双向比对兜底（erp_perm_sets_test.go）。
 func erpCoreMenus() []sysmodel.Menu {
 	return []sysmodel.Menu{
@@ -104,7 +104,7 @@ func erpCoreMenus() []sysmodel.Menu {
 // erpDocMenus 从单据类型注册表（internal/module/erp/doctype，ADR 0020）投影
 // 12 类单据的菜单段：每类 1 个菜单行（ID = MenuID、路径/组件 = key 派生、
 // 权限 = <PermPrefix>:query、图标/排序/标题 = 条目字段）+ 5 个按钮行
-//（ID = MenuID*10+n、名称 = 前缀 + 动作后缀、权限 = 派生动作码、sort = n，
+// （ID = MenuID*10+n、名称 = 前缀 + 动作后缀、权限 = 派生动作码、sort = n，
 // n=1..5 对应 create/update/delete/approve/export）。共 72 行，逐字段等于
 // 重构前的 72 行字面量（golden CSV 兜底，issue #125 S3）。
 // 号段分配（spec §7）：723/724 其它出入库（#90）、725/726 调拨/盘点（#93）、
