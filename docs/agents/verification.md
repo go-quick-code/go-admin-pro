@@ -22,6 +22,8 @@ go run ./cmd/migrate -c configs/config.yaml -expect-tables 17 verify
 
 新增迁移导致表数量变化时，同步更新 `scripts/verify-migration.sh` 的 `EXPECTED_TABLES` 默认值；CI 继承脚本默认值，不再单独配置。
 
+新增或删除表后，还必须在 `internal/pkg/database/tenant_tables.go` 的 `TenantTables` 或 `PlatformTables` 登记（平台级表附理由）。启动时 `VerifyTenantTables` 会与 `information_schema` 精确比对：未分类表、登记表缺 `tenant_id`、平台表带 `tenant_id` 都会让启动失败，不必等 CI。
+
 脚本依赖 `bash`、`curl`、`python3`、`lsof` 和 `go`。
 
 ## 手工调试注意
