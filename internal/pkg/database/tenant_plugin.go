@@ -114,6 +114,10 @@ func (p *TenantPlugin) createCallback(db *gorm.DB) {
 		return
 	}
 	table, _ := p.table(db)
+	if isMapReflectValue(db.Statement.ReflectValue) {
+		db.AddError(fmt.Errorf("写入租户表 %s：Create 的 dest 是 map，租户插件无法自动回填 tenant_id；请改用结构体或 tenant.Skip 显式跳过", table))
+		return
+	}
 	db.AddError(fmt.Errorf("写入租户表 %s：模型缺少可写的 TenantID 字段（系统级写入请用 tenant.Skip 显式跳过）", table))
 }
 
@@ -156,12 +160,25 @@ func fillTenantID(v reflect.Value, id int64) bool {
 }
 
 func typeHasTenantID(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Interface {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
+	switch t.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Array:
+		return typeHasTenantID(t.Elem())
+	case reflect.Struct:
+		field, ok := t.FieldByName("TenantID")
+		return ok && field.Type.Kind() == reflect.Int64
+	default:
+		// interface、map 等无法确定元素/键类型，按不可回填处理（fail-closed）。
 		return false
 	}
-	field, ok := t.FieldByName("TenantID")
-	return ok && field.Type.Kind() == reflect.Int64
+}
+
+// isMapReflectValue 判断 Create 的 dest 是否为 map；map 无法按结构体字段回填。
+func isMapReflectValue(v reflect.Value) bool {
+	for v.IsValid() && (v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface) {
+		if v.IsNil() {
+			return false
+		}
+		v = v.Elem()
+	}
+	return v.IsValid() && v.Kind() == reflect.Map
 }

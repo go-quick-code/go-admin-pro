@@ -31,7 +31,7 @@ func (e *TenantTableRegistryError) Error() string {
 	b.WriteString("租户表登记与数据库 schema 不一致：\n")
 	writeRegistrySection(&b, "有 tenant_id 列但未登记（疑似漏登记，读写会跨租户）", e.UnregisteredTenantTables)
 	writeRegistrySection(&b, "既不是租户表也不是平台表（未分类）", e.UnclassifiedTables)
-	writeRegistrySection(&b, "已登记但数据库里不存在（迁移缺失或表名写错）", e.MissingTables)
+	writeRegistrySection(&b, "已登记但数据库里不存在（迁移缺失、表名写错，或应用账号无表权限——information_schema 只列出有权限的对象）", e.MissingTables)
 	writeRegistrySection(&b, "登记为租户表但缺 tenant_id 列", e.MissingTenantColumns)
 	writeRegistrySection(&b, "登记为平台表却带 tenant_id 列（分类冲突）", e.TenantColumnOnPlatform)
 	writeRegistrySection(&b, "重复登记", e.DuplicateEntries)
@@ -61,11 +61,13 @@ func VerifyTenantTables(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("读取 tenant_id 列清单: %w", err)
 	}
-	return classifyTenantTables(tables, columns, TenantTables, PlatformTables)
+	return ClassifyTenantTables(tables, columns, TenantTables, PlatformTables)
 }
 
-// classifyTenantTables 是纯函数：把差异一次性收集成 *TenantTableRegistryError。
-func classifyTenantTables(allTables, tenantColumnTables, tenantTables []string, platformTables map[string]string) error {
+// ClassifyTenantTables 把三组表清单的差异一次性收集成 *TenantTableRegistryError。
+// 纯函数，不连数据库：allTables 是库中全部 BASE TABLE，tenantColumnTables 是
+// 带 tenant_id 列的表，tenantTables/platformTables 是两张登记清单。
+func ClassifyTenantTables(allTables, tenantColumnTables, tenantTables []string, platformTables map[string]string) error {
 	all := make(map[string]struct{}, len(allTables))
 	for _, table := range allTables {
 		all[table] = struct{}{}

@@ -1,18 +1,20 @@
-package database
+package database_test
 
 import (
 	"errors"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 )
 
-func requireRegistryError(t *testing.T, err error) *TenantTableRegistryError {
+func requireRegistryError(t *testing.T, err error) *database.TenantTableRegistryError {
 	t.Helper()
 	if err == nil {
 		t.Fatal("期望租户表登记错误，实际为 nil")
 	}
-	var target *TenantTableRegistryError
+	var target *database.TenantTableRegistryError
 	if !errors.As(err, &target) {
 		t.Fatalf("期望 *TenantTableRegistryError，实际 %T: %v", err, err)
 	}
@@ -21,7 +23,7 @@ func requireRegistryError(t *testing.T, err error) *TenantTableRegistryError {
 
 // 分类正确时不应产生任何差异。
 func TestClassifyTenantTablesConsistent(t *testing.T) {
-	err := classifyTenantTables(
+	err := database.ClassifyTenantTables(
 		[]string{"system_user", "system_menu"},
 		[]string{"system_user"},
 		[]string{"system_user"},
@@ -34,7 +36,7 @@ func TestClassifyTenantTablesConsistent(t *testing.T) {
 
 // 一次收集全部差异，避免启动时改一处、重启再撞下一处。
 func TestClassifyTenantTablesReportsAllMismatches(t *testing.T) {
-	err := classifyTenantTables(
+	err := database.ClassifyTenantTables(
 		[]string{"system_user", "crm_new", "stray", "system_menu", "tenant_no_column"},
 		[]string{"system_user", "crm_new", "system_menu"},
 		[]string{"system_user", "system_user", "listed_but_missing", "tenant_no_column"},
@@ -65,7 +67,7 @@ func TestClassifyTenantTablesReportsAllMismatches(t *testing.T) {
 
 // 租户表缺 tenant_id 列：插件会生成 tenant_id 谓词但列不存在，必须启动失败。
 func TestClassifyTenantTablesMissingTenantColumn(t *testing.T) {
-	err := classifyTenantTables(
+	err := database.ClassifyTenantTables(
 		[]string{"system_user"},
 		nil,
 		[]string{"system_user"},
@@ -79,7 +81,7 @@ func TestClassifyTenantTablesMissingTenantColumn(t *testing.T) {
 
 // 同一张表同时出现在两张清单：分类冲突，必须只保留一种归属。
 func TestClassifyTenantTablesRejectsOverlap(t *testing.T) {
-	err := classifyTenantTables(
+	err := database.ClassifyTenantTables(
 		[]string{"system_user"},
 		[]string{"system_user"},
 		[]string{"system_user"},
@@ -93,7 +95,7 @@ func TestClassifyTenantTablesRejectsOverlap(t *testing.T) {
 
 // 视图等非 BASE TABLE 对象即使有 tenant_id 列也不参与分类。
 func TestClassifyTenantTablesIgnoresObjectsOutsideBaseTables(t *testing.T) {
-	err := classifyTenantTables(
+	err := database.ClassifyTenantTables(
 		[]string{"system_user"},
 		[]string{"system_user", "some_view"},
 		[]string{"system_user"},
@@ -106,7 +108,7 @@ func TestClassifyTenantTablesIgnoresObjectsOutsideBaseTables(t *testing.T) {
 
 // 错误信息必须点名差异表并给出修复入口。
 func TestTenantTableRegistryErrorFormat(t *testing.T) {
-	err := classifyTenantTables(
+	err := database.ClassifyTenantTables(
 		[]string{"crm_new"},
 		[]string{"crm_new"},
 		nil,

@@ -219,3 +219,36 @@ func TestTenantPluginCreateFailsClosedWhenModelLacksTenantID(t *testing.T) {
 		t.Fatalf("失败的写入不应落库，期望 3 行，实际 %d 行", got)
 	}
 }
+
+// interface 元素类型不能反射出 TenantID：必须 fail-closed，不能 panic。
+func TestTenantPluginCreateEmptyInterfaceSliceFailsClosed(t *testing.T) {
+	db := newPluginDB(t)
+
+	ctx := tenant.WithTenantID(context.Background(), 3)
+	err := db.WithContext(ctx).Table("system_user").Create(&[]any{}).Error
+	if err == nil {
+		t.Fatal("interface 切片 dest：期望报错，实际写入成功")
+	}
+	if !strings.Contains(err.Error(), "TenantID") {
+		t.Fatalf("错误信息应点明无法回填 TenantID，实际 %v", err)
+	}
+}
+
+// GORM 支持 map dest，但插件无法按字段回填：给出专门的错误文案并拒绝写入。
+func TestTenantPluginCreateMapDestFailsClosed(t *testing.T) {
+	db := newPluginDB(t)
+
+	ctx := tenant.WithTenantID(context.Background(), 3)
+	err := db.WithContext(ctx).Model(&tenantRow{}).Create(map[string]any{
+		"id": 21, "tenant_id": 3, "name": "map-dest",
+	}).Error
+	if err == nil {
+		t.Fatal("map dest：期望报错，实际写入成功")
+	}
+	if !strings.Contains(err.Error(), "map") || !strings.Contains(err.Error(), "tenant.Skip") {
+		t.Fatalf("错误应说明 map dest 无法回填并提示 tenant.Skip，实际 %v", err)
+	}
+	if got := countRows(t, db); got != 3 {
+		t.Fatalf("失败的写入不应落库，期望 3 行，实际 %d 行", got)
+	}
+}
