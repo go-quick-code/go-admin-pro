@@ -103,38 +103,65 @@ func (p *TenantPlugin) writeCallback(db *gorm.DB) {
 }
 
 // createCallback 在插入时自动回填 tenant_id，避免各业务层重复赋值。
+// 已登记表若模型没有可写的 TenantID 字段，直接报错：否则 INSERT 会省略
+// tenant_id 并落到列默认值，数据静默写入默认租户（ADR 0019）。
 func (p *TenantPlugin) createCallback(db *gorm.DB) {
 	if !p.guard(db) {
 		return
 	}
 	id := tenant.ID(db.Statement.Context)
-	rv := db.Statement.ReflectValue
-	switch rv.Kind() {
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < rv.Len(); i++ {
-			setTenantID(rv.Index(i), id)
-		}
-	case reflect.Struct:
-		setTenantID(rv, id)
-	case reflect.Ptr:
-		if !rv.IsNil() {
-			setTenantID(rv.Elem(), id)
-		}
+	if fillTenantID(db.Statement.ReflectValue, id) {
+		return
 	}
+	table, _ := p.table(db)
+	db.AddError(fmt.Errorf("写入租户表 %s：模型缺少可写的 TenantID 字段（系统级写入请用 tenant.Skip 显式跳过）", table))
 }
 
-func setTenantID(v reflect.Value, id int64) {
-	if v.Kind() == reflect.Ptr {
+// fillTenantID 回填租户 ID，并报告模型是否具备可写的 TenantID 字段。
+// 支持结构体、指针、结构体切片/数组与空切片（按元素类型判断）。
+func fillTenantID(v reflect.Value, id int64) bool {
+	if !v.IsValid() {
+		return false
+	}
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 		if v.IsNil() {
-			return
+			return false
 		}
 		v = v.Elem()
 	}
-	if v.Kind() != reflect.Struct {
-		return
+	switch v.Kind() {
+	case reflect.Slice, reflect.Array:
+		if v.Len() == 0 {
+			return typeHasTenantID(v.Type().Elem())
+		}
+		ok := true
+		for i := 0; i < v.Len(); i++ {
+			if !fillTenantID(v.Index(i), id) {
+				ok = false
+			}
+		}
+		return ok
+	case reflect.Struct:
+		field := v.FieldByName("TenantID")
+		if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Int64 {
+			return false
+		}
+		if field.Int() == 0 {
+			field.SetInt(id)
+		}
+		return true
+	default:
+		return false
 	}
-	field := v.FieldByName("TenantID")
-	if field.IsValid() && field.CanSet() && field.Kind() == reflect.Int64 && field.Int() == 0 {
-		field.SetInt(id)
+}
+
+func typeHasTenantID(t reflect.Type) bool {
+	for t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Interface {
+		t = t.Elem()
 	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	field, ok := t.FieldByName("TenantID")
+	return ok && field.Type.Kind() == reflect.Int64
 }

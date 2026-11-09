@@ -100,6 +100,12 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	if err := database.VerifyMigrationVersion(verifyCtx, sqlDB); err != nil {
 		return nil, fmt.Errorf("verify migration version: %w", err)
 	}
+	// 租户表登记校验（ADR 0019）：每张表必须且只能属于 TenantTables 或
+	// PlatformTables；分类缺失/冲突直接拒绝启动。无条件执行——分类正确性
+	// 是 schema 事实，与本次进程是否启用租户无关；两次元数据查询成本可忽略。
+	if err := database.VerifyTenantTables(verifyCtx, sqlDB); err != nil {
+		return nil, fmt.Errorf("verify tenant table registry: %w", err)
+	}
 
 	if cfg.Tenant.Enabled {
 		if err := db.Use(database.NewTenantPlugin(database.TenantTables)); err != nil {
