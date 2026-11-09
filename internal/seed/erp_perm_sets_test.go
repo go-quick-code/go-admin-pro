@@ -22,6 +22,8 @@ import (
 //
 // 不硬编码路由数（134）或 distinct 码数（111）：断言的是集合相等——
 // 单据码重构后不再出现在字面量里，由注册表派生补齐比对。
+// 口径分工：S2（erp/api/doc_route_test.go）锁形状与逐条映射，其 134/50
+// 硬编码总数是稳定契约；S4 锁集合相等，不硬编码计数防漂移。
 func TestErpPermSetsConverge(t *testing.T) {
 	routeCodes := scanErpRoutePermLiterals(t)
 	if len(routeCodes) == 0 {
