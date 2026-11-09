@@ -158,7 +158,9 @@ export function exportStockRecords(params?: Record<string, any>) {
 // ---------- ERP 单据客户端工厂（issue #125，ADR 0020 单据类型注册表的前端侧） ----------
 // 12 类单据（其它出入库/调拨/盘点、采购三单、销售三单、收付款单）的 7 个端点
 // 完全同构，仅 URL 段不同：本工厂是这 12 类单据 API 的唯一实现，行为与重构前的
-// 手写函数逐字一致；下方 84 个具名导出为一行别名，导出名与参数形态不变，视图零改动。
+// 手写函数逐字一致。下方每类单据先在模块级建一个 client 单例（resource 字面量
+// 全文件仅出现 12 次，编译器可拦住单组拼错），再从单例上解构出 84 个具名导出；
+// 这 84 个具名导出是本段唯一对外面，导出名与参数形态不变，视图零改动。
 function createDocClient(resource: string) {
   return {
     page: (params: any) => request.get(`/erp/${resource}/page`, { params }) as Promise<any>,
@@ -175,21 +177,23 @@ function createDocClient(resource: string) {
 // 单号由服务端经 erp_sequence 发放（入参无单号字段，伪造不可采纳）；行金额
 // 服务端按 单价×数量 计算（入参无 totalPrice 字段）。审核/反审核走
 // update-status（幂等目标态：20 审核 / 10 反审核），approve 为独立权限码。
-export const pageStockIns = createDocClient('stock-in').page
-export const getStockIn = createDocClient('stock-in').get
-export const createStockIn = createDocClient('stock-in').create
-export const updateStockIn = createDocClient('stock-in').update
-export const deleteStockIn = createDocClient('stock-in').delete
-export const updateStockInStatus = createDocClient('stock-in').updateStatus
-export const exportStockIns = createDocClient('stock-in').export
+const stockIn = createDocClient('stock-in')
+export const pageStockIns = stockIn.page
+export const getStockIn = stockIn.get
+export const createStockIn = stockIn.create
+export const updateStockIn = stockIn.update
+export const deleteStockIn = stockIn.delete
+export const updateStockInStatus = stockIn.updateStatus
+export const exportStockIns = stockIn.export
 
-export const pageStockOuts = createDocClient('stock-out').page
-export const getStockOut = createDocClient('stock-out').get
-export const createStockOut = createDocClient('stock-out').create
-export const updateStockOut = createDocClient('stock-out').update
-export const deleteStockOut = createDocClient('stock-out').delete
-export const updateStockOutStatus = createDocClient('stock-out').updateStatus
-export const exportStockOuts = createDocClient('stock-out').export
+const stockOut = createDocClient('stock-out')
+export const pageStockOuts = stockOut.page
+export const getStockOut = stockOut.get
+export const createStockOut = stockOut.create
+export const updateStockOut = stockOut.update
+export const deleteStockOut = stockOut.delete
+export const updateStockOutStatus = stockOut.updateStatus
+export const exportStockOuts = stockOut.export
 
 // ---------- ERP 销售三单（issue #92，spec §3.4/§4.1/§4.5） ----------
 // 销售订单（XS）/ 销售出库（CK）/ 销售退货（ST）：单号由服务端经 erp_sequence
@@ -197,66 +201,72 @@ export const exportStockOuts = createDocClient('stock-out').export
 // 退货必挂已审核销售出库（outId，仓库服务端取自出库单，入参不传）；审核/反审核
 // 走 update-status（幂等目标态：20 审核 / 10 反审核），approve 为独立权限码；
 // 进度（outCount/returnCount）与核销金额（receiptPrice/refundPrice）服务端回写。
-export const pageSaleOrders = createDocClient('sale-order').page
-export const getSaleOrder = createDocClient('sale-order').get
-export const createSaleOrder = createDocClient('sale-order').create
-export const updateSaleOrder = createDocClient('sale-order').update
-export const deleteSaleOrder = createDocClient('sale-order').delete
-export const updateSaleOrderStatus = createDocClient('sale-order').updateStatus
-export const exportSaleOrders = createDocClient('sale-order').export
+const saleOrder = createDocClient('sale-order')
+export const pageSaleOrders = saleOrder.page
+export const getSaleOrder = saleOrder.get
+export const createSaleOrder = saleOrder.create
+export const updateSaleOrder = saleOrder.update
+export const deleteSaleOrder = saleOrder.delete
+export const updateSaleOrderStatus = saleOrder.updateStatus
+export const exportSaleOrders = saleOrder.export
 
-export const pageSaleOuts = createDocClient('sale-out').page
-export const getSaleOut = createDocClient('sale-out').get
-export const createSaleOut = createDocClient('sale-out').create
-export const updateSaleOut = createDocClient('sale-out').update
-export const deleteSaleOut = createDocClient('sale-out').delete
-export const updateSaleOutStatus = createDocClient('sale-out').updateStatus
-export const exportSaleOuts = createDocClient('sale-out').export
+const saleOut = createDocClient('sale-out')
+export const pageSaleOuts = saleOut.page
+export const getSaleOut = saleOut.get
+export const createSaleOut = saleOut.create
+export const updateSaleOut = saleOut.update
+export const deleteSaleOut = saleOut.delete
+export const updateSaleOutStatus = saleOut.updateStatus
+export const exportSaleOuts = saleOut.export
 
-export const pageSaleReturns = createDocClient('sale-return').page
-export const getSaleReturn = createDocClient('sale-return').get
-export const createSaleReturn = createDocClient('sale-return').create
-export const updateSaleReturn = createDocClient('sale-return').update
-export const deleteSaleReturn = createDocClient('sale-return').delete
-export const updateSaleReturnStatus = createDocClient('sale-return').updateStatus
-export const exportSaleReturns = createDocClient('sale-return').export
+const saleReturn = createDocClient('sale-return')
+export const pageSaleReturns = saleReturn.page
+export const getSaleReturn = saleReturn.get
+export const createSaleReturn = saleReturn.create
+export const updateSaleReturn = saleReturn.update
+export const deleteSaleReturn = saleReturn.delete
+export const updateSaleReturnStatus = saleReturn.updateStatus
+export const exportSaleReturns = saleReturn.export
 
 // ---------- ERP 采购订单（CG，issue #91，spec §3.3/§4.4） ----------
 // 单号由服务端经 erp_sequence 发放（入参无单号字段，伪造不可采纳）；行金额服务端
 // 按 单价×数量 计算（入参无 totalPrice 字段）；明细 inCount/returnCount 为服务端
 // 重算的进度回写（只计已审核单）。审核/反审核走 update-status（幂等目标态：
 // 20 审核 / 10 反审核），approve 为独立权限码；存在已审核入库/退货时订单不可反审核（409）。
-export const pagePurchaseOrders = createDocClient('purchase-order').page
-export const getPurchaseOrder = createDocClient('purchase-order').get
-export const createPurchaseOrder = createDocClient('purchase-order').create
-export const updatePurchaseOrder = createDocClient('purchase-order').update
-export const deletePurchaseOrder = createDocClient('purchase-order').delete
-export const updatePurchaseOrderStatus = createDocClient('purchase-order').updateStatus
-export const exportPurchaseOrders = createDocClient('purchase-order').export
+const purchaseOrder = createDocClient('purchase-order')
+export const pagePurchaseOrders = purchaseOrder.page
+export const getPurchaseOrder = purchaseOrder.get
+export const createPurchaseOrder = purchaseOrder.create
+export const updatePurchaseOrder = purchaseOrder.update
+export const deletePurchaseOrder = purchaseOrder.delete
+export const updatePurchaseOrderStatus = purchaseOrder.updateStatus
+export const exportPurchaseOrders = purchaseOrder.export
 
 // ---------- ERP 采购入库单（RK，issue #91，spec §3.3/§4.4） ----------
 // 必挂已审核采购订单（orderId 必填，前端挂单选择只出已审核单 status=20）；审核后
 // 增库存并回写订单 in_count；反审核生成反向流水回滚（存在已审核退货时 409）。
 // paymentPrice 为核销回写列（#94），只读展示。
-export const pagePurchaseIns = createDocClient('purchase-in').page
-export const getPurchaseIn = createDocClient('purchase-in').get
-export const createPurchaseIn = createDocClient('purchase-in').create
-export const updatePurchaseIn = createDocClient('purchase-in').update
-export const deletePurchaseIn = createDocClient('purchase-in').delete
-export const updatePurchaseInStatus = createDocClient('purchase-in').updateStatus
-export const exportPurchaseIns = createDocClient('purchase-in').export
+const purchaseIn = createDocClient('purchase-in')
+export const pagePurchaseIns = purchaseIn.page
+export const getPurchaseIn = purchaseIn.get
+export const createPurchaseIn = purchaseIn.create
+export const updatePurchaseIn = purchaseIn.update
+export const deletePurchaseIn = purchaseIn.delete
+export const updatePurchaseInStatus = purchaseIn.updateStatus
+export const exportPurchaseIns = purchaseIn.export
 
 // ---------- ERP 采购退货单（RT，issue #91，spec §3.3/§4.4） ----------
 // 必挂已审核采购入库单（inId 必填，前端挂单选择只出已审核单 status=20）；仓库取自
 // 入库单（入参无仓库字段）；审核后减库存并回写订单 return_count（经入库单关联）。
 // refundPrice 为核销回写列（#94），只读展示。
-export const pagePurchaseReturns = createDocClient('purchase-return').page
-export const getPurchaseReturn = createDocClient('purchase-return').get
-export const createPurchaseReturn = createDocClient('purchase-return').create
-export const updatePurchaseReturn = createDocClient('purchase-return').update
-export const deletePurchaseReturn = createDocClient('purchase-return').delete
-export const updatePurchaseReturnStatus = createDocClient('purchase-return').updateStatus
-export const exportPurchaseReturns = createDocClient('purchase-return').export
+const purchaseReturn = createDocClient('purchase-return')
+export const pagePurchaseReturns = purchaseReturn.page
+export const getPurchaseReturn = purchaseReturn.get
+export const createPurchaseReturn = purchaseReturn.create
+export const updatePurchaseReturn = purchaseReturn.update
+export const deletePurchaseReturn = purchaseReturn.delete
+export const updatePurchaseReturnStatus = purchaseReturn.updateStatus
+export const exportPurchaseReturns = purchaseReturn.export
 
 // ---------- ERP 结算账户（issue #94，spec §3.6/§4.7） ----------
 // 无余额入参：列表/详情返回「已审核收付款净额」实时余额列（不落库）；默认账户
@@ -282,25 +292,27 @@ export function deleteFinanceAccount(id: number) {
 // 本次核销金额（审核时校验「本单合计 + 其它已审核核销 ≤ 单据总额」，超限 409）；
 // 审核回写 sale_out.receiptPrice / sale_return.refundPrice，反审核重算释放额度；
 // 单号服务端发放（入参无单号字段）。
-export const pageFinanceReceipts = createDocClient('finance-receipt').page
-export const getFinanceReceipt = createDocClient('finance-receipt').get
-export const createFinanceReceipt = createDocClient('finance-receipt').create
-export const updateFinanceReceipt = createDocClient('finance-receipt').update
-export const deleteFinanceReceipt = createDocClient('finance-receipt').delete
-export const updateFinanceReceiptStatus = createDocClient('finance-receipt').updateStatus
-export const exportFinanceReceipts = createDocClient('finance-receipt').export
+const financeReceipt = createDocClient('finance-receipt')
+export const pageFinanceReceipts = financeReceipt.page
+export const getFinanceReceipt = financeReceipt.get
+export const createFinanceReceipt = financeReceipt.create
+export const updateFinanceReceipt = financeReceipt.update
+export const deleteFinanceReceipt = financeReceipt.delete
+export const updateFinanceReceiptStatus = financeReceipt.updateStatus
+export const exportFinanceReceipts = financeReceipt.export
 
 // ---------- ERP 付款单（FK，issue #94，spec §3.6/§4.7） ----------
 // 收款单镜像：明细只挂已审核采购入库（bizType=purchase_in）/采购退货
 // （purchase_return）；审核回写 purchase_in.paymentPrice /
 // purchase_return.refundPrice，反审核重算释放额度。
-export const pageFinancePayments = createDocClient('finance-payment').page
-export const getFinancePayment = createDocClient('finance-payment').get
-export const createFinancePayment = createDocClient('finance-payment').create
-export const updateFinancePayment = createDocClient('finance-payment').update
-export const deleteFinancePayment = createDocClient('finance-payment').delete
-export const updateFinancePaymentStatus = createDocClient('finance-payment').updateStatus
-export const exportFinancePayments = createDocClient('finance-payment').export
+const financePayment = createDocClient('finance-payment')
+export const pageFinancePayments = financePayment.page
+export const getFinancePayment = financePayment.get
+export const createFinancePayment = financePayment.create
+export const updateFinancePayment = financePayment.update
+export const deleteFinancePayment = financePayment.delete
+export const updateFinancePaymentStatus = financePayment.updateStatus
+export const exportFinancePayments = financePayment.export
 
 // ---------- ERP 首页统计（issue #95，spec §5/§6：菜单 701，权限码 erp:statistics:query） ----------
 // 口径：销售额 = Σ已审核销售出库 totalPrice（按 outTime 落区间）− Σ已审核销售退货
@@ -325,23 +337,25 @@ export function getPurchaseStatisticsTimeSummary(params?: { months?: number }) {
 // 负、入仓正两笔流水同额成对（两仓必须不同、源仓不足 409）；反审核各生成
 // 反向流水。审核/反审核走 update-status（幂等目标态：20 审核 / 10 反审核），
 // approve 为独立权限码。
-export const pageStockMoves = createDocClient('stock-move').page
-export const getStockMove = createDocClient('stock-move').get
-export const createStockMove = createDocClient('stock-move').create
-export const updateStockMove = createDocClient('stock-move').update
-export const deleteStockMove = createDocClient('stock-move').delete
-export const updateStockMoveStatus = createDocClient('stock-move').updateStatus
-export const exportStockMoves = createDocClient('stock-move').export
+const stockMove = createDocClient('stock-move')
+export const pageStockMoves = stockMove.page
+export const getStockMove = stockMove.get
+export const createStockMove = stockMove.create
+export const updateStockMove = stockMove.update
+export const deleteStockMove = stockMove.delete
+export const updateStockMoveStatus = stockMove.updateStatus
+export const exportStockMoves = stockMove.export
 
 // ---------- ERP 库存盘点单（PD，issue #93，spec §3.5/§4.6） ----------
 // 明细 actualCount 为实际清点数（≥ 0，十进制字符串）；baseCount 为创建时账面
 // 数快照（服务端写入、只读展示，审核以当时账面为准，入参无该字段）。审核按
 // 「差异 = actualCount − 当时账面数」调整库存（差正盘盈、差负盘亏），审核后
 // 账面 = 实际数；反审核按已入账流水净额反向。
-export const pageStockChecks = createDocClient('stock-check').page
-export const getStockCheck = createDocClient('stock-check').get
-export const createStockCheck = createDocClient('stock-check').create
-export const updateStockCheck = createDocClient('stock-check').update
-export const deleteStockCheck = createDocClient('stock-check').delete
-export const updateStockCheckStatus = createDocClient('stock-check').updateStatus
-export const exportStockChecks = createDocClient('stock-check').export
+const stockCheck = createDocClient('stock-check')
+export const pageStockChecks = stockCheck.page
+export const getStockCheck = stockCheck.get
+export const createStockCheck = stockCheck.create
+export const updateStockCheck = stockCheck.update
+export const deleteStockCheck = stockCheck.delete
+export const updateStockCheckStatus = stockCheck.updateStatus
+export const exportStockChecks = stockCheck.export
