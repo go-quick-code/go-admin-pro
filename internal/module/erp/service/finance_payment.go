@@ -261,7 +261,7 @@ func (s *Service) DeleteFinancePayment(ctx context.Context, id int64) error {
 }
 
 // UpdateFinancePaymentStatus 审核（10→20）/反审核（20→10），幂等目标态。
-func (s *Service) UpdateFinancePaymentStatus(ctx context.Context, req *dto.FinanceDocUpdateStatusReq) error {
+func (s *Service) UpdateFinancePaymentStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.financePaymentKernel().SetStatus(ctx, req.ID, req.Status)
 }
 

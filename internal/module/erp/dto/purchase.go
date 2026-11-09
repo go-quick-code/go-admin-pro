@@ -20,7 +20,7 @@ import (
 //   - 入库 paymentPrice / 退货 refundPrice 为核销回写列（本票只落列，#94 回写），
 //     详情只读展示；
 //   - update-status 以目标态提交（幂等）：20 审核、10 反审核（复用 #90 的
-//     StockDocUpdateStatusReq——十二类单据共用一个审核语义，spec §4.1）。
+//     DocUpdateStatusReq——十二类单据共用一个审核语义，spec §4.1）。
 
 // PurchaseItemPayload 是采购明细条目（创建/修改入参，三单共用；形状与
 // 杂项单据的 StockDocItemPayload 相同，别名复用避免重复定义）。

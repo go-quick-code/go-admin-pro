@@ -343,7 +343,7 @@ func (s *Service) beforeDeletePurchaseIn(ctx context.Context, tx doc.Tx[*model.P
 }
 
 // UpdatePurchaseInStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
-func (s *Service) UpdatePurchaseInStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
+func (s *Service) UpdatePurchaseInStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.purchaseInKernel().SetStatus(ctx, req.ID, req.Status)
 }
 

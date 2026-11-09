@@ -225,7 +225,7 @@ func (s *Service) beforeDeletePurchaseOrder(ctx context.Context, tx doc.Tx[*mode
 
 // UpdatePurchaseOrderStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1）。
 // 订单审核不动库存；反审核在存在已审核入库/退货时 409（spec §4.4 反审核禁令）。
-func (s *Service) UpdatePurchaseOrderStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
+func (s *Service) UpdatePurchaseOrderStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.purchaseOrderKernel().SetStatus(ctx, req.ID, req.Status)
 }
 

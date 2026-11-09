@@ -39,27 +39,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	h.RegisterWarehouseRoutes(rg)
 	h.RegisterCustomerRoutes(rg)
 	h.RegisterSupplierRoutes(rg)
-	// 库存核心与其它入库/出库单（issue #90，spec §3.2/§3.5/§5）。
+	// 库存核心与出入库流水只读页（issue #90，spec §3.2/§3.5/§5）。
 	h.RegisterStockRoutes(rg)
 	h.RegisterStockRecordRoutes(rg)
-	h.RegisterStockInRoutes(rg)
-	h.RegisterStockOutRoutes(rg)
-	// 销售三单：销售订单/出库/退货（issue #92，spec §3.4/§4.5/§5；#91 采购三单
-	// 同构追加在后面）。
-	h.RegisterSaleOrderRoutes(rg)
-	h.RegisterSaleOutRoutes(rg)
-	h.RegisterSaleReturnRoutes(rg)
-	// 采购三单（issue #91，spec §3.3/§4.4/§5）：订单/入库/退货。
-	h.RegisterPurchaseOrderRoutes(rg)
-	h.RegisterPurchaseInRoutes(rg)
-	h.RegisterPurchaseReturnRoutes(rg)
-	// 财务域（issue #94，spec §3.6/§4.7/§5）：结算账户 + 收款单（SK）/付款单（FK）。
+	// 结算账户主数据（issue #94，spec §3.6/§5；收付款单据进注册表，见下）。
 	h.RegisterFinanceAccountRoutes(rg)
-	h.RegisterFinanceReceiptRoutes(rg)
-	h.RegisterFinancePaymentRoutes(rg)
-	// 库存调拨/盘点（issue #93，spec §3.5/§4.6/§5）：DB 调拨、PD 盘点。
-	h.RegisterStockMoveRoutes(rg)
-	h.RegisterStockCheckRoutes(rg)
+	// 12 类单据（issue #125，ADR 0020）：7 端点由单据类型注册表循环注册
+	//（历史：#90 其它出入库、#91 采购三单、#92 销售三单、#93 调拨/盘点、
+	// #94 收付款——曾是 12 个同构 handler 文件）。
+	h.registerDocRoutes(rg)
 	// 首页统计（issue #95，spec §5/§6）：销售/采购 × summary/time-summary。
 	h.RegisterStatisticsRoutes(rg)
 }

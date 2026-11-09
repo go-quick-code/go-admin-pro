@@ -87,10 +87,6 @@ type FinanceReceiptItemPayload struct {
 	Price   money.Money `json:"price"`
 }
 
-// FinanceDocUpdateStatusReq 收付款单审核状态目标态（与其它单据同构：20 审核、
-// 10 反审核，幂等）。
-type FinanceDocUpdateStatusReq = StockDocUpdateStatusReq
-
 // FinanceReceiptCreateReq 新建收款单。
 type FinanceReceiptCreateReq struct {
 	CustomerId    int64                       `json:"customerId" binding:"required"`

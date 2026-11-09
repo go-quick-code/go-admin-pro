@@ -56,8 +56,10 @@ type StockInPageReq struct {
 	EndTime     string `form:"endTime"`
 }
 
-// StockDocUpdateStatus 审核/反审核请求（目标态幂等，spec §4.1/§5）。
-type StockDocUpdateStatusReq struct {
+// DocUpdateStatusReq 审核/反审核请求（目标态幂等，spec §4.1/§5）。12 类单据
+// 共用（issue #125：原 SaleDocUpdateStatusReq / FinanceDocUpdateStatusReq
+// 别名收成单一类型，线上 JSON 不变）。
+type DocUpdateStatusReq struct {
 	ID     int64 `json:"id" binding:"required"`
 	Status int8  `json:"status" binding:"required"`
 }

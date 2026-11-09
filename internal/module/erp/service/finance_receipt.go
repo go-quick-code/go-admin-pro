@@ -264,7 +264,7 @@ func (s *Service) DeleteFinanceReceipt(ctx context.Context, id int64) error {
 }
 
 // UpdateFinanceReceiptStatus 审核（10→20）/反审核（20→10），幂等目标态。
-func (s *Service) UpdateFinanceReceiptStatus(ctx context.Context, req *dto.FinanceDocUpdateStatusReq) error {
+func (s *Service) UpdateFinanceReceiptStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.financeReceiptKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
