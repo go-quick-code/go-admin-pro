@@ -118,7 +118,7 @@ func (FinanceReceiptItem) TableName() string { return "erp_finance_receipt_items
 // FinancePayment 是付款单主表（明细挂已审核采购入库/采购退货，收款单镜像）。
 type FinancePayment struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// No 是付款单号：FK + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一。
 	No         string `gorm:"size:32;not null" json:"no"`
 	SupplierID int64  `gorm:"index;not null" json:"supplierId"`
@@ -126,16 +126,18 @@ type FinancePayment struct {
 	// PaymentUserID 经手人（纯记录字段；> 0 时校验用户存在）。
 	PaymentUserID int64     `gorm:"not null;default:0" json:"paymentUserId"`
 	PaymentTime   time.Time `gorm:"not null" json:"paymentTime"`
-	Status        int8      `gorm:"not null;default:10" json:"status"`
 	Remark        string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	Items []FinancePaymentItem `gorm:"foreignKey:PaymentID" json:"items,omitempty"`
 }
 
 func (FinancePayment) TableName() string { return "erp_finance_payment" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 payment_time）。
+func (d *FinancePayment) GetNo() string          { return d.No }
+func (d *FinancePayment) SetNo(v string)         { d.No = v }
+func (d *FinancePayment) GetBizTime() time.Time  { return d.PaymentTime }
+func (d *FinancePayment) SetBizTime(v time.Time) { d.PaymentTime = v }
 
 // FinancePaymentItem 是付款单明细：biz_type + biz_id 指向已审核采购入库/采购
 // 退货，price 是本次核销金额。

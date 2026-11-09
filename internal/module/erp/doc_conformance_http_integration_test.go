@@ -431,6 +431,58 @@ func docConformanceCases() []docConformanceCase {
 				}
 			},
 		},
+		{
+			name:      "finance-payment",
+			path:      "/erp/finance-payment",
+			docType:   "finance-payment",
+			noPattern: financePaymentNoRe,
+			setup: func(t *testing.T, env *testutil.IntegrationEnv, token, tag string) (int64, int64, map[string]any) {
+				t.Helper()
+				warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, tag)
+				order := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+					"supplierId": supplierID,
+					"orderTime":  env.Date() + " 09:00:00",
+					"items":      []map[string]any{purchaseItemJSON(productID, "100", "2.50")},
+				})
+				orderID := int64(order["id"].(float64))
+				mustApprovePurchaseDoc(t, env, token, "purchase-order", orderID)
+				in := createPurchaseDoc(t, env, token, "purchase-in", map[string]any{
+					"supplierId":  supplierID,
+					"orderId":     orderID,
+					"warehouseId": warehouseID,
+					"inTime":      env.Date() + " 10:00:00",
+					"items":       []map[string]any{purchaseItemJSON(productID, "10", "2.50")},
+				})
+				inID := int64(in["id"].(float64))
+				mustApprovePurchaseDoc(t, env, token, "purchase-in", inID)
+				account := createFinanceAccountDoc(t, env, token, tag+"账户", nil)
+				return warehouseID, productID, map[string]any{
+					"supplierId":    supplierID,
+					"accountId":     int64(account["id"].(float64)),
+					"purchaseInId":  inID,
+					"paymentUserId": 1,
+				}
+			},
+			create: func(env *testutil.IntegrationEnv, _, _ int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"supplierId":    extras["supplierId"],
+					"accountId":     extras["accountId"],
+					"paymentUserId": extras["paymentUserId"],
+					"paymentTime":   env.Date() + " 12:00:00",
+					"items":         []map[string]any{financeItemJSON("purchase_in", extras["purchaseInId"].(int64), "5.00")},
+				}
+			},
+			update: func(env *testutil.IntegrationEnv, docID, _, _ int64, extras map[string]any) map[string]any {
+				return map[string]any{
+					"id":            docID,
+					"supplierId":    extras["supplierId"],
+					"accountId":     extras["accountId"],
+					"paymentUserId": extras["paymentUserId"],
+					"paymentTime":   env.Date() + " 12:30:00",
+					"items":         []map[string]any{financeItemJSON("purchase_in", extras["purchaseInId"].(int64), "2.00")},
+				}
+			},
+		},
 	}
 }
 

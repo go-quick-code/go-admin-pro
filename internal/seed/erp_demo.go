@@ -703,11 +703,18 @@ func erpDemoSeedFinance(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, d
 	}
 	payment := erpmodel.FinancePayment{
 		BaseEntity: erpDemoBase(erpDemoPaymentID, paymentTime, creator),
-		TenantID:   erpDemoTenantID, No: paymentNo,
-		SupplierID: erpDemoSupplierHQID, AccountID: erpDemoAccountICBCID,
-		PaymentUserID: admin.ID, PaymentTime: paymentTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示付款：全额核销采购入库",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:            paymentNo,
+		SupplierID:    erpDemoSupplierHQID,
+		AccountID:     erpDemoAccountICBCID,
+		PaymentUserID: admin.ID,
+		PaymentTime:   paymentTime,
+		Remark:        "演示付款：全额核销采购入库",
 	}
 	if err := tenant.Skip(tx).Create(&payment).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示付款单: %w", err)
