@@ -3,6 +3,7 @@ package database_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
@@ -28,6 +29,15 @@ type plainRow struct {
 }
 
 func (plainRow) TableName() string { return "system_menu" }
+
+// tenantRowMissingTenantID 映射到已登记的 system_user，但模型漏了 TenantID：
+// 写入必须 fail-closed，不能静默落到列默认租户（ADR 0019）。
+type tenantRowMissingTenantID struct {
+	ID   int64  `gorm:"primaryKey"`
+	Name string `gorm:"size:64"`
+}
+
+func (tenantRowMissingTenantID) TableName() string { return "system_user" }
 
 // newPluginDB 建立装好租户插件的独立 sqlite 库，并写入两个租户的行。
 // 限制单连接：内存库按连接隔离，必须让所有语句走同一个连接。
@@ -190,5 +200,55 @@ func TestTenantPluginInsideTransactionKeepsTenantContext(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("事务内查询: %v", err)
+	}
+}
+
+// 已登记表的模型缺 TenantID 字段：插入必须报错且不落库，而不是写到默认租户。
+func TestTenantPluginCreateFailsClosedWhenModelLacksTenantID(t *testing.T) {
+	db := newPluginDB(t)
+
+	ctx := tenant.WithTenantID(context.Background(), 3)
+	err := db.WithContext(ctx).Create(&tenantRowMissingTenantID{ID: 20, Name: "no-field"}).Error
+	if err == nil {
+		t.Fatal("登记表模型缺 TenantID：期望报错，实际写入成功")
+	}
+	if !strings.Contains(err.Error(), "TenantID") {
+		t.Fatalf("错误信息应点明缺少 TenantID 字段，实际 %v", err)
+	}
+	if got := countRows(t, db); got != 3 {
+		t.Fatalf("失败的写入不应落库，期望 3 行，实际 %d 行", got)
+	}
+}
+
+// interface 元素类型不能反射出 TenantID：必须 fail-closed，不能 panic。
+func TestTenantPluginCreateEmptyInterfaceSliceFailsClosed(t *testing.T) {
+	db := newPluginDB(t)
+
+	ctx := tenant.WithTenantID(context.Background(), 3)
+	err := db.WithContext(ctx).Table("system_user").Create(&[]any{}).Error
+	if err == nil {
+		t.Fatal("interface 切片 dest：期望报错，实际写入成功")
+	}
+	if !strings.Contains(err.Error(), "TenantID") {
+		t.Fatalf("错误信息应点明无法回填 TenantID，实际 %v", err)
+	}
+}
+
+// GORM 支持 map dest，但插件无法按字段回填：给出专门的错误文案并拒绝写入。
+func TestTenantPluginCreateMapDestFailsClosed(t *testing.T) {
+	db := newPluginDB(t)
+
+	ctx := tenant.WithTenantID(context.Background(), 3)
+	err := db.WithContext(ctx).Model(&tenantRow{}).Create(map[string]any{
+		"id": 21, "tenant_id": 3, "name": "map-dest",
+	}).Error
+	if err == nil {
+		t.Fatal("map dest：期望报错，实际写入成功")
+	}
+	if !strings.Contains(err.Error(), "map") || !strings.Contains(err.Error(), "tenant.Skip") {
+		t.Fatalf("错误应说明 map dest 无法回填并提示 tenant.Skip，实际 %v", err)
+	}
+	if got := countRows(t, db); got != 3 {
+		t.Fatalf("失败的写入不应落库，期望 3 行，实际 %d 行", got)
 	}
 }

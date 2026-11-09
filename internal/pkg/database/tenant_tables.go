@@ -187,3 +187,18 @@ var TenantTables = []string{
 	"erp_stock_check",
 	"erp_stock_check_item",
 }
+
+// PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。
+//
+// 每张表必须在此登记并写明理由，且不得带 tenant_id 列。启动时
+// VerifyTenantTables 校验「数据库全部业务表 = TenantTables ∪ PlatformTables」，
+// 未分类或分类冲突直接拒绝启动（ADR 0019）。
+var PlatformTables = map[string]string{
+	"system_tenant":         "租户注册表本身，平台管理，无租户归属",
+	"system_menu":           "全局菜单目录，全租户共享；租户经 system_role_menu 绑定",
+	"system_tenant_package": "平台定义的套餐目录",
+	"message_channel":       "平台级消息通道配置",
+	"message_template":      "平台级消息模板",
+	"system_social_client":  "平台级社交登录应用配置",
+	"system_area":           "平台级行政区划参考数据",
+}
