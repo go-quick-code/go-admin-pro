@@ -22,7 +22,7 @@ import (
 // 出库），反审核用 READ COMMITTED（收款核销禁令的聚合需要当前读）。
 func (s *Service) saleReturnKernel() *doc.Kernel[*model.SaleReturn, model.SaleReturnItem] {
 	return doc.New(docEnv{s}, s.saleReturnStore(), doc.Spec[*model.SaleReturn, model.SaleReturnItem]{
-		Labels:             doc.Labels{Doc: "销售退货单", Item: "退货明细"},
+		Labels:             doc.Labels{Doc: "销售退货单"},
 		NoPrefix:           SaleReturnNoPrefix,
 		SeqBizType:         SeqBizTypeSaleReturn,
 		UnapproveIsolation: doc.IsolationReadCommitted,
@@ -35,8 +35,9 @@ func (s *Service) saleReturnKernel() *doc.Kernel[*model.SaleReturn, model.SaleRe
 // saleReturnStore 装配销售退货单的泛型存储。
 func (s *Service) saleReturnStore() doc.Store[*model.SaleReturn, model.SaleReturnItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.SaleReturn, model.SaleReturnItem]{
-		New:     func() *model.SaleReturn { return &model.SaleReturn{} },
-		ItemsFK: "sale_return_id",
+		New:          func() *model.SaleReturn { return &model.SaleReturn{} },
+		ItemsFK:      "sale_return_id",
+		SetItemDocID: func(it *model.SaleReturnItem, id int64) { it.SaleReturnID = id },
 	})
 }
 
@@ -358,6 +359,9 @@ func (s *Service) approveSaleReturnDoc(ctx context.Context, tx doc.Tx[*model.Sal
 	if err != nil {
 		return err
 	}
+	// 已知窄窗口（P3，非本次引入）：编辑换父单时 beforeLock 锁新父单、审核
+	// BeforeClaim 锁旧父单；若二者在「新父单 == 对方旧父单」上交叉，InnoDB 可能
+	// 返回 1213。旧代码同样是父单→自身，语义未变；事务回滚，无数据丢失。
 	out, err := repo.FindSaleOutByIDForUpdate(ctx, d.OutID)
 	if err != nil {
 		return err
@@ -495,11 +499,6 @@ func (s *Service) ExportSaleReturns(ctx context.Context, req *dto.SaleReturnPage
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findSaleReturn 取退货单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findSaleReturn(ctx context.Context, id int64) (*model.SaleReturn, error) {
-	return s.saleReturnKernel().Find(ctx, id)
 }
 
 func saleReturnItemProducts(items []model.SaleReturnItem) []int64 {

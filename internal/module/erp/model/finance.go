@@ -96,11 +96,8 @@ type FinanceReceipt struct {
 
 func (FinanceReceipt) TableName() string { return "erp_finance_receipt" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 receipt_time）。
-func (d *FinanceReceipt) GetNo() string          { return d.No }
-func (d *FinanceReceipt) SetNo(v string)         { d.No = v }
-func (d *FinanceReceipt) GetBizTime() time.Time  { return d.ReceiptTime }
-func (d *FinanceReceipt) SetBizTime(v time.Time) { d.ReceiptTime = v }
+// SetNo 实现 doc.Header（业务时间列 receipt_time）。
+func (d *FinanceReceipt) SetNo(v string) { d.No = v }
 
 // FinanceReceiptItem 是收款单明细：biz_type + biz_id 指向已审核销售出库/销售
 // 退货，price 是本次核销金额（审核时校验上限并回写）。
@@ -133,11 +130,8 @@ type FinancePayment struct {
 
 func (FinancePayment) TableName() string { return "erp_finance_payment" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 payment_time）。
-func (d *FinancePayment) GetNo() string          { return d.No }
-func (d *FinancePayment) SetNo(v string)         { d.No = v }
-func (d *FinancePayment) GetBizTime() time.Time  { return d.PaymentTime }
-func (d *FinancePayment) SetBizTime(v time.Time) { d.PaymentTime = v }
+// SetNo 实现 doc.Header（业务时间列 payment_time）。
+func (d *FinancePayment) SetNo(v string) { d.No = v }
 
 // FinancePaymentItem 是付款单明细：biz_type + biz_id 指向已审核采购入库/采购
 // 退货，price 是本次核销金额。

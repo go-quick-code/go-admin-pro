@@ -21,7 +21,7 @@ import (
 // stockInKernel 构造其它入库单的内核实例（每次调用廉价；钩子捕获 Service）。
 func (s *Service) stockInKernel() *doc.Kernel[*model.StockIn, model.StockInItem] {
 	return doc.New(docEnv{s}, s.stockInStore(), doc.Spec[*model.StockIn, model.StockInItem]{
-		Labels:     doc.Labels{Doc: "其它入库单", Item: "入库明细"},
+		Labels:     doc.Labels{Doc: "其它入库单"},
 		NoPrefix:   StockInNoPrefix,
 		SeqBizType: SeqBizTypeStockIn,
 		Approve:    s.approveStockInDoc,
@@ -32,8 +32,9 @@ func (s *Service) stockInKernel() *doc.Kernel[*model.StockIn, model.StockInItem]
 // stockInStore 装配其它入库单的泛型存储（候选 02a；表名/关联由模型自带）。
 func (s *Service) stockInStore() doc.Store[*model.StockIn, model.StockInItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockIn, model.StockInItem]{
-		New:     func() *model.StockIn { return &model.StockIn{} },
-		ItemsFK: "stock_in_id",
+		New:          func() *model.StockIn { return &model.StockIn{} },
+		ItemsFK:      "stock_in_id",
+		SetItemDocID: func(it *model.StockInItem, id int64) { it.StockInID = id },
 	})
 }
 
@@ -333,11 +334,6 @@ func (s *Service) ExportStockIns(ctx context.Context, req *dto.StockInPageReq) (
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findStockIn 取入库单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findStockIn(ctx context.Context, id int64) (*model.StockIn, error) {
-	return s.stockInKernel().Find(ctx, id)
 }
 
 // checkDocRefsForWrite 校验单据写入引用：仓库与全部产品必须存在（租户内，

@@ -24,9 +24,13 @@ import (
 // READ COMMITTED（与既有口径一致；退货/付款禁令的聚合需要当前读）。
 func (s *Service) purchaseInKernel() *doc.Kernel[*model.PurchaseIn, model.PurchaseInItem] {
 	return doc.New(docEnv{s}, s.purchaseInStore(), doc.Spec[*model.PurchaseIn, model.PurchaseInItem]{
-		Labels:             doc.Labels{Doc: "采购入库单", Item: "入库明细"},
-		NoPrefix:           PurchaseInNoPrefix,
-		SeqBizType:         SeqBizTypePurchaseIn,
+		Labels:     doc.Labels{Doc: "采购入库单"},
+		NoPrefix:   PurchaseInNoPrefix,
+		SeqBizType: SeqBizTypePurchaseIn,
+		// 审核也必须 READ COMMITTED：内核在订单锁之前先做普通 SELECT 装载明细，
+		// RR 快照会漏掉等待订单锁期间另一张入库单已提交的 status=20，重算
+		// in_count 时覆盖成单边值（#119 P0，并发回归测试已复现）。
+		ApproveIsolation:   doc.IsolationReadCommitted,
 		UnapproveIsolation: doc.IsolationReadCommitted,
 		Approve:            s.approvePurchaseInDoc,
 		Unapprove:          s.unapprovePurchaseInDoc,
@@ -37,8 +41,9 @@ func (s *Service) purchaseInKernel() *doc.Kernel[*model.PurchaseIn, model.Purcha
 // purchaseInStore 装配采购入库单的泛型存储（候选 02a）。
 func (s *Service) purchaseInStore() doc.Store[*model.PurchaseIn, model.PurchaseInItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.PurchaseIn, model.PurchaseInItem]{
-		New:     func() *model.PurchaseIn { return &model.PurchaseIn{} },
-		ItemsFK: "purchase_in_id",
+		New:          func() *model.PurchaseIn { return &model.PurchaseIn{} },
+		ItemsFK:      "purchase_in_id",
+		SetItemDocID: func(it *model.PurchaseInItem, id int64) { it.PurchaseInID = id },
 	})
 }
 
@@ -357,7 +362,7 @@ func (s *Service) approvePurchaseInDoc(ctx context.Context, tx doc.Tx[*model.Pur
 	if err := s.checkOrderQuota(ctx, repo, order.ID, d.ID, purchaseInItemDrafts(d.Items)); err != nil {
 		return err
 	}
-	warehouseName, err := s.warehouseName(ctx, d.WarehouseID)
+	warehouseName, err := s.warehouseNameIn(ctx, repo, d.WarehouseID)
 	if err != nil {
 		return err
 	}
@@ -412,7 +417,7 @@ func (s *Service) unapprovePurchaseInDoc(ctx context.Context, tx doc.Tx[*model.P
 	if paymentItems > 0 {
 		return xerr.Conflict("入库单存在已审核付款单，不可反审核")
 	}
-	warehouseName, err := s.warehouseName(ctx, d.WarehouseID)
+	warehouseName, err := s.warehouseNameIn(ctx, repo, d.WarehouseID)
 	if err != nil {
 		return err
 	}
@@ -489,11 +494,6 @@ func (s *Service) ExportPurchaseIns(ctx context.Context, req *dto.PurchaseInPage
 		})
 	}
 	return excel.Export(out, excel.ExportOptions{NativeDates: true})
-}
-
-// findPurchaseIn 取入库单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findPurchaseIn(ctx context.Context, id int64) (*model.PurchaseIn, error) {
-	return s.purchaseInKernel().Find(ctx, id)
 }
 
 // ---------- 采购域共享助手（purchase_return.go 复用） ----------
@@ -573,9 +573,9 @@ func recalcPurchaseOrderProgress(ctx context.Context, tx *repository.Repository,
 	return nil
 }
 
-// warehouseName 409 文案用的仓库名（缺省回退 ID 展示）。
-func (s *Service) warehouseName(ctx context.Context, warehouseID int64) (string, error) {
-	names, err := s.repo.FindWarehouseNamesIn(ctx, []int64{warehouseID})
+// warehouseNameIn 409 文案用的仓库名（在事务句柄内读取，缺省回退 ID 展示）。
+func (s *Service) warehouseNameIn(ctx context.Context, repo *repository.Repository, warehouseID int64) (string, error) {
+	names, err := repo.FindWarehouseNamesIn(ctx, []int64{warehouseID})
 	if err != nil {
 		return "", err
 	}

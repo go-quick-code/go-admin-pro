@@ -22,7 +22,7 @@ import (
 // 反审核用 READ COMMITTED（退货/收款禁令的聚合需要当前读）。
 func (s *Service) saleOutKernel() *doc.Kernel[*model.SaleOut, model.SaleOutItem] {
 	return doc.New(docEnv{s}, s.saleOutStore(), doc.Spec[*model.SaleOut, model.SaleOutItem]{
-		Labels:             doc.Labels{Doc: "销售出库单", Item: "出库明细"},
+		Labels:             doc.Labels{Doc: "销售出库单"},
 		NoPrefix:           SaleOutNoPrefix,
 		SeqBizType:         SeqBizTypeSaleOut,
 		UnapproveIsolation: doc.IsolationReadCommitted,
@@ -36,8 +36,9 @@ func (s *Service) saleOutKernel() *doc.Kernel[*model.SaleOut, model.SaleOutItem]
 // saleOutStore 装配销售出库单的泛型存储。
 func (s *Service) saleOutStore() doc.Store[*model.SaleOut, model.SaleOutItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.SaleOut, model.SaleOutItem]{
-		New:     func() *model.SaleOut { return &model.SaleOut{} },
-		ItemsFK: "sale_out_id",
+		New:          func() *model.SaleOut { return &model.SaleOut{} },
+		ItemsFK:      "sale_out_id",
+		SetItemDocID: func(it *model.SaleOutItem, id int64) { it.SaleOutID = id },
 	})
 }
 
@@ -370,6 +371,9 @@ func (s *Service) approveSaleOutDoc(ctx context.Context, tx doc.Tx[*model.SaleOu
 	if err != nil {
 		return err
 	}
+	// 已知窄窗口（P3，非本次引入）：编辑换父单时 beforeLock 锁新父单、审核
+	// BeforeClaim 锁旧父单；若二者在「新父单 == 对方旧父单」上交叉，InnoDB 可能
+	// 返回 1213。旧代码同样是父单→自身，语义未变；事务回滚，无数据丢失。
 	order, err := repo.FindSaleOrderByIDForUpdate(ctx, d.OrderID)
 	if err != nil {
 		return err
@@ -492,11 +496,6 @@ func (s *Service) ExportSaleOuts(ctx context.Context, req *dto.SaleOutPageReq) (
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findSaleOut 取出库单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findSaleOut(ctx context.Context, id int64) (*model.SaleOut, error) {
-	return s.saleOutKernel().Find(ctx, id)
 }
 
 func saleOutItemProducts(items []model.SaleOutItem) []int64 {

@@ -40,11 +40,8 @@ type StockMove struct {
 
 func (StockMove) TableName() string { return "erp_stock_move" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 move_time）。
-func (d *StockMove) GetNo() string          { return d.No }
-func (d *StockMove) SetNo(v string)         { d.No = v }
-func (d *StockMove) GetBizTime() time.Time  { return d.MoveTime }
-func (d *StockMove) SetBizTime(v time.Time) { d.MoveTime = v }
+// SetNo 实现 doc.Header（业务时间列 move_time）。
+func (d *StockMove) SetNo(v string) { d.No = v }
 
 // StockMoveItem 是库存调拨单明细。
 type StockMoveItem struct {
@@ -73,11 +70,8 @@ type StockCheck struct {
 
 func (StockCheck) TableName() string { return "erp_stock_check" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 check_time）。
-func (d *StockCheck) GetNo() string          { return d.No }
-func (d *StockCheck) SetNo(v string)         { d.No = v }
-func (d *StockCheck) GetBizTime() time.Time  { return d.CheckTime }
-func (d *StockCheck) SetBizTime(v time.Time) { d.CheckTime = v }
+// SetNo 实现 doc.Header（业务时间列 check_time）。
+func (d *StockCheck) SetNo(v string) { d.No = v }
 
 // StockCheckItem 是库存盘点单明细。
 type StockCheckItem struct {

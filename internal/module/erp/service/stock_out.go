@@ -20,7 +20,7 @@ import (
 // stockOutKernel 构造其它出库单的内核实例（每次调用廉价；钩子捕获 Service）。
 func (s *Service) stockOutKernel() *doc.Kernel[*model.StockOut, model.StockOutItem] {
 	return doc.New(docEnv{s}, s.stockOutStore(), doc.Spec[*model.StockOut, model.StockOutItem]{
-		Labels:     doc.Labels{Doc: "其它出库单", Item: "出库明细"},
+		Labels:     doc.Labels{Doc: "其它出库单"},
 		NoPrefix:   StockOutNoPrefix,
 		SeqBizType: SeqBizTypeStockOut,
 		Approve:    s.approveStockOutDoc,
@@ -31,8 +31,9 @@ func (s *Service) stockOutKernel() *doc.Kernel[*model.StockOut, model.StockOutIt
 // stockOutStore 装配其它出库单的泛型存储（候选 02a；表名/关联由模型自带）。
 func (s *Service) stockOutStore() doc.Store[*model.StockOut, model.StockOutItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockOut, model.StockOutItem]{
-		New:     func() *model.StockOut { return &model.StockOut{} },
-		ItemsFK: "stock_out_id",
+		New:          func() *model.StockOut { return &model.StockOut{} },
+		ItemsFK:      "stock_out_id",
+		SetItemDocID: func(it *model.StockOutItem, id int64) { it.StockOutID = id },
 	})
 }
 
@@ -330,11 +331,6 @@ func (s *Service) ExportStockOuts(ctx context.Context, req *dto.StockOutPageReq)
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findStockOut 取出库单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findStockOut(ctx context.Context, id int64) (*model.StockOut, error) {
-	return s.stockOutKernel().Find(ctx, id)
 }
 
 func buildStockOutItemRows(docID int64, drafts []docItemDraft) []model.StockOutItem {

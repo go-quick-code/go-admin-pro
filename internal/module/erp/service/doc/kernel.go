@@ -109,9 +109,10 @@ func (k *Kernel[H, I]) Create(
 	return created, nil
 }
 
-// Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内锁重读
-// 复核 status=10 → mutate（可做挂单锁/配额等事务内校验）→ 整体替换明细。
-// validate/mutate 可为 nil。
+// Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内
+// beforeLock（可先锁父单，保证与审核一致的锁序）→ 锁自身行重读并复核
+// status=10 → mutate（可做挂单锁/配额等事务内校验）→ 整体替换明细。
+// validate/beforeLock/mutate 可为 nil。
 func (k *Kernel[H, I]) Update(
 	ctx context.Context,
 	id int64,
@@ -174,8 +175,17 @@ func (k *Kernel[H, I]) Delete(ctx context.Context, id int64) error {
 		return errApprovedDelete()
 	}
 	return k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		// 先锁自身行再跑下游引用检查：子单创建先锁父单，删除等锁后能看到已
+		// 提交的子单，避免「检查漏计 → 子单提交 → 父单删除」的 TOCTOU。
+		locked, err := tx.Lock(ctx, id)
+		if err != nil {
+			return k.mapNotFound(err)
+		}
+		if locked.Base().Status != model.DocStatusUnaudited {
+			return errApprovedDelete()
+		}
 		if k.spec.BeforeDelete != nil {
-			if err := k.spec.BeforeDelete(ctx, tx, row); err != nil {
+			if err := k.spec.BeforeDelete(ctx, tx, locked); err != nil {
 				return err
 			}
 		}

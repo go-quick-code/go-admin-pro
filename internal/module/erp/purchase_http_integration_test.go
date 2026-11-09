@@ -739,6 +739,74 @@ func TestIntegrationPurchaseUnapproveConcurrentInvariant(t *testing.T) {
 	}
 }
 
+// TestIntegrationPurchaseProgressConcurrentApprove 并发审核同订单的两张入库单：
+// 订单进度 in_count 必须等于两单之和。回归 #119 P0：内核在订单锁之前先做了普通
+// SELECT（RR 快照），等待订单锁期间另一张入库单已提交的 status=20 不在快照里，
+// 重算把 in_count 覆盖成单边值；修复为 purchase_in 审核使用 READ COMMITTED。
+func TestIntegrationPurchaseProgressConcurrentApprove(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	token := env.Login(t, "admin", "123456")
+	warehouseID, productID, supplierID := setupPurchaseEnv(t, env, token, "并发进度")
+
+	for i := 0; i < 20; i++ {
+		order := createPurchaseDoc(t, env, token, "purchase-order", map[string]any{
+			"supplierId": supplierID, "orderTime": env.Date() + " 09:00:00",
+			"items": []map[string]any{purchaseItemJSON(productID, "100", "1.00")},
+		})
+		orderID := int64(order["id"].(float64))
+		mustApprovePurchaseDoc(t, env, token, "purchase-order", orderID)
+		mkIn := func() int64 {
+			in := createPurchaseDoc(t, env, token, "purchase-in", map[string]any{
+				"supplierId": supplierID, "orderId": orderID, "warehouseId": warehouseID,
+				"inTime": env.Date() + " 10:00:00",
+				"items":  []map[string]any{purchaseItemJSON(productID, "50", "1.00")},
+			})
+			return int64(in["id"].(float64))
+		}
+		inA, inB := mkIn(), mkIn()
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var aStatus, bStatus int
+		var aAPI, bAPI testutil.APIResponse
+		var aErr, bErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			aStatus, aAPI, aErr = approveDocOnce(env, token, "purchase-in", inA, 20)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			bStatus, bAPI, bErr = approveDocOnce(env, token, "purchase-in", inB, 20)
+		}()
+		close(start)
+		wg.Wait()
+		for _, res := range []struct {
+			label  string
+			status int
+			api    testutil.APIResponse
+			err    error
+		}{
+			{"入库单 A", aStatus, aAPI, aErr},
+			{"入库单 B", bStatus, bAPI, bErr},
+		} {
+			if res.err != nil {
+				t.Fatalf("第 %d 轮 %s 请求错误: %v", i+1, res.label, res.err)
+			}
+			if res.status != http.StatusOK || res.api.Code != 0 {
+				t.Fatalf("第 %d 轮 %s：HTTP %d code %d msg %q，期望 200",
+					i+1, res.label, res.status, res.api.Code, res.api.Msg)
+			}
+		}
+		inCount, _ := purchaseOrderItemProgress(t, getPurchaseDetail(t, env, token, "purchase-order", orderID), productID)
+		if inCount != "100.000" {
+			t.Fatalf("第 %d 轮 in_count = %s，期望 100.000（两单并发审核不得互相覆盖）", i+1, inCount)
+		}
+	}
+}
+
 // TestIntegrationPurchaseUnapproveBans 反审核禁令与回滚（spec §4.4 + §8.2）：
 // 订单存在已审核入库 → 409；入库存在已审核退货 → 409；退货反审核恢复库存与
 // 进度；入库反审核经反向流水回滚库存与进度（原流水保留、代数和=余额）。

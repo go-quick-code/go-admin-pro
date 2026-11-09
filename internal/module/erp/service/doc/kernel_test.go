@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,6 +42,9 @@ type fakeStore struct {
 	lockHook   func(*fakeHeader)
 	claimHook  func() (int64, error)
 	deleteHook func() (int64, error)
+	txCalls    int
+	rcCalls    int
+	calls      []string
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{docs: map[int64]*fakeHeader{}} }
@@ -70,10 +74,12 @@ func (s *fakeStore) FindWithItems(ctx context.Context, id int64) (*fakeHeader, e
 }
 
 func (s *fakeStore) Transaction(_ context.Context, fn func(doc.Tx[*fakeHeader, fakeItem]) error) error {
+	s.txCalls++
 	return s.run(fn)
 }
 
 func (s *fakeStore) TransactionReadCommitted(_ context.Context, fn func(doc.Tx[*fakeHeader, fakeItem]) error) error {
+	s.rcCalls++
 	return s.run(fn)
 }
 
@@ -98,6 +104,7 @@ func (t *fakeTx) FindWithItems(ctx context.Context, id int64) (*fakeHeader, erro
 }
 
 func (t *fakeTx) Lock(ctx context.Context, id int64) (*fakeHeader, error) {
+	t.store.calls = append(t.store.calls, "lock")
 	row, err := t.store.Find(ctx, id)
 	if err != nil {
 		return nil, err
@@ -146,6 +153,7 @@ func (t *fakeTx) DeleteItems(_ context.Context, docID int64) error {
 }
 
 func (t *fakeTx) DeleteIfStatus(_ context.Context, id int64, status int8) (int64, error) {
+	t.store.calls = append(t.store.calls, "delete")
 	if t.store.deleteHook != nil {
 		return t.store.deleteHook()
 	}
@@ -158,6 +166,7 @@ func (t *fakeTx) DeleteIfStatus(_ context.Context, id int64, status int8) (int64
 }
 
 func (t *fakeTx) UpdateStatusIf(_ context.Context, id int64, from, to int8) (int64, error) {
+	t.store.calls = append(t.store.calls, "claim")
 	if t.store.claimHook != nil {
 		return t.store.claimHook()
 	}
@@ -224,7 +233,7 @@ func newTestKernel(t *testing.T) (*doc.Kernel[*fakeHeader, fakeItem], *fakeStore
 	env := &fakeEnv{userID: 7, deptID: 8}
 	hooks := &hookState{}
 	spec := doc.Spec[*fakeHeader, fakeItem]{
-		Labels:       doc.Labels{Doc: "测试单", Item: "测试明细"},
+		Labels:       doc.Labels{Doc: "测试单"},
 		NoPrefix:     "TS",
 		SeqBizType:   "test",
 		Approve:      hooks.approve,
@@ -395,6 +404,29 @@ func TestKernelUpdateReplacesItems(t *testing.T) {
 	}
 }
 
+func TestKernelDeleteLocksBeforeHook(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{userID: 7, deptID: 8}
+	spec := doc.Spec[*fakeHeader, fakeItem]{
+		Labels:     doc.Labels{Doc: "测试单"},
+		NoPrefix:   "TS",
+		SeqBizType: "test",
+		BeforeDelete: func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error {
+			store.calls = append(store.calls, "beforeDelete")
+			return nil
+		},
+	}
+	k := doc.New[*fakeHeader, fakeItem](env, store, spec)
+	store.docs[1] = newUnaudited(1)
+	if err := k.Delete(context.Background(), 1); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	want := []string{"lock", "beforeDelete", "delete"}
+	if !slices.Equal(store.calls, want) {
+		t.Fatalf("calls = %v，期望 %v（删除必须先锁自身行再跑引用检查）", store.calls, want)
+	}
+}
+
 func TestKernelDeleteRejectsApproved(t *testing.T) {
 	k, store, _, hooks := newTestKernel(t)
 	doc := newUnaudited(1)
@@ -447,6 +479,110 @@ func TestKernelDeleteBeforeDeleteError(t *testing.T) {
 	}
 	if store.docs[1] == nil {
 		t.Fatal("禁令失败时单据应保留")
+	}
+}
+
+func TestKernelSetStatusIsolation(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{userID: 7, deptID: 8}
+	hooks := &hookState{}
+	spec := doc.Spec[*fakeHeader, fakeItem]{
+		Labels:           doc.Labels{Doc: "测试单"},
+		NoPrefix:         "TS",
+		SeqBizType:       "test",
+		ApproveIsolation: doc.IsolationReadCommitted,
+		Approve:          hooks.approve,
+	}
+	k := doc.New[*fakeHeader, fakeItem](env, store, spec)
+	store.docs[1] = newUnaudited(1)
+	if err := k.SetStatus(context.Background(), 1, model.DocStatusApproved); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if store.rcCalls != 1 || store.txCalls != 0 {
+		t.Fatalf("approve 事务计数 tx=%d rc=%d，期望 0/1", store.txCalls, store.rcCalls)
+	}
+	store.docs[1].Base().SetStatus(model.DocStatusApproved)
+	if err := k.SetStatus(context.Background(), 1, model.DocStatusUnaudited); err != nil {
+		t.Fatalf("unapprove: %v", err)
+	}
+	if store.txCalls != 1 || store.rcCalls != 1 {
+		t.Fatalf("unapprove 事务计数 tx=%d rc=%d，期望 1/1", store.txCalls, store.rcCalls)
+	}
+}
+
+func TestKernelUpdateBeforeLockOrder(t *testing.T) {
+	k, store, _, _ := newTestKernel(t)
+	store.docs[1] = newUnaudited(1)
+	err := k.Update(context.Background(), 1, nil,
+		func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error {
+			store.calls = append(store.calls, "beforeLock")
+			return nil
+		},
+		func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error {
+			store.calls = append(store.calls, "mutate")
+			return nil
+		},
+		func(context.Context, *fakeHeader) ([]fakeItem, error) { return nil, nil },
+	)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	want := []string{"beforeLock", "lock", "mutate"}
+	if !slices.Equal(store.calls, want) {
+		t.Fatalf("calls = %v，期望 %v（beforeLock 必须先于自身行锁）", store.calls, want)
+	}
+}
+
+func TestKernelSetStatusBeforeClaimOrder(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{userID: 7, deptID: 8}
+	hooks := &hookState{}
+	spec := doc.Spec[*fakeHeader, fakeItem]{
+		Labels:     doc.Labels{Doc: "测试单"},
+		NoPrefix:   "TS",
+		SeqBizType: "test",
+		BeforeClaim: func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error {
+			store.calls = append(store.calls, "beforeClaim")
+			return nil
+		},
+		Approve: hooks.approve,
+	}
+	k := doc.New[*fakeHeader, fakeItem](env, store, spec)
+	store.docs[1] = newUnaudited(1)
+	if err := k.SetStatus(context.Background(), 1, model.DocStatusApproved); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	want := []string{"beforeClaim", "claim"}
+	if !slices.Equal(store.calls, want) {
+		t.Fatalf("calls = %v，期望 %v（BeforeClaim 必须先于认领）", store.calls, want)
+	}
+}
+
+func TestKernelSetStatusIdempotentSkipsHooks(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{userID: 7, deptID: 8}
+	hooks := &hookState{}
+	beforeClaimCalls := 0
+	spec := doc.Spec[*fakeHeader, fakeItem]{
+		Labels:     doc.Labels{Doc: "测试单"},
+		NoPrefix:   "TS",
+		SeqBizType: "test",
+		BeforeClaim: func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error {
+			beforeClaimCalls++
+			return nil
+		},
+		Approve: hooks.approve,
+	}
+	k := doc.New[*fakeHeader, fakeItem](env, store, spec)
+	row := newUnaudited(1)
+	row.Base().SetStatus(model.DocStatusApproved)
+	store.docs[1] = row
+	if err := k.SetStatus(context.Background(), 1, model.DocStatusApproved); err != nil {
+		t.Fatalf("幂等目标态应放行: %v", err)
+	}
+	if beforeClaimCalls != 0 || hooks.approveCalls != 0 || store.txCalls != 0 || store.rcCalls != 0 {
+		t.Fatalf("幂等目标态不应开事务或触发钩子（beforeClaim=%d approve=%d tx=%d rc=%d）",
+			beforeClaimCalls, hooks.approveCalls, store.txCalls, store.rcCalls)
 	}
 }
 

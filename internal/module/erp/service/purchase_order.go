@@ -21,7 +21,7 @@ import (
 // 反审核在存在已审核入库/退货时 409，删除在存在入库引用时 409。
 func (s *Service) purchaseOrderKernel() *doc.Kernel[*model.PurchaseOrder, model.PurchaseOrderItem] {
 	return doc.New(docEnv{s}, s.purchaseOrderStore(), doc.Spec[*model.PurchaseOrder, model.PurchaseOrderItem]{
-		Labels:       doc.Labels{Doc: "采购订单", Item: "订单明细"},
+		Labels:       doc.Labels{Doc: "采购订单"},
 		NoPrefix:     PurchaseOrderNoPrefix,
 		SeqBizType:   SeqBizTypePurchaseOrder,
 		Unapprove:    s.unapprovePurchaseOrderDoc,
@@ -32,8 +32,9 @@ func (s *Service) purchaseOrderKernel() *doc.Kernel[*model.PurchaseOrder, model.
 // purchaseOrderStore 装配采购订单的泛型存储。
 func (s *Service) purchaseOrderStore() doc.Store[*model.PurchaseOrder, model.PurchaseOrderItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.PurchaseOrder, model.PurchaseOrderItem]{
-		New:     func() *model.PurchaseOrder { return &model.PurchaseOrder{} },
-		ItemsFK: "purchase_order_id",
+		New:          func() *model.PurchaseOrder { return &model.PurchaseOrder{} },
+		ItemsFK:      "purchase_order_id",
+		SetItemDocID: func(it *model.PurchaseOrderItem, id int64) { it.PurchaseOrderID = id },
 	})
 }
 
@@ -285,11 +286,6 @@ func (s *Service) ExportPurchaseOrders(ctx context.Context, req *dto.PurchaseOrd
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findPurchaseOrder 取订单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findPurchaseOrder(ctx context.Context, id int64) (*model.PurchaseOrder, error) {
-	return s.purchaseOrderKernel().Find(ctx, id)
 }
 
 // checkPurchasePartyForWrite 校验采购单据写入引用：供应商必须存在（租户内，

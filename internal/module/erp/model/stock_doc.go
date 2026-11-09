@@ -88,11 +88,8 @@ type StockIn struct {
 
 func (StockIn) TableName() string { return "erp_stock_in" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 in_time）。
-func (d *StockIn) GetNo() string          { return d.No }
-func (d *StockIn) SetNo(v string)         { d.No = v }
-func (d *StockIn) GetBizTime() time.Time  { return d.InTime }
-func (d *StockIn) SetBizTime(v time.Time) { d.InTime = v }
+// SetNo 实现 doc.Header（业务时间列 in_time）。
+func (d *StockIn) SetNo(v string) { d.No = v }
 
 // StockInItem 是其它入库单明细。
 type StockInItem struct {
@@ -124,11 +121,8 @@ type StockOut struct {
 
 func (StockOut) TableName() string { return "erp_stock_out" }
 
-// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 out_time）。
-func (d *StockOut) GetNo() string          { return d.No }
-func (d *StockOut) SetNo(v string)         { d.No = v }
-func (d *StockOut) GetBizTime() time.Time  { return d.OutTime }
-func (d *StockOut) SetBizTime(v time.Time) { d.OutTime = v }
+// SetNo 实现 doc.Header（业务时间列 out_time）。
+func (d *StockOut) SetNo(v string) { d.No = v }
 
 // StockOutItem 是其它出库单明细。
 type StockOutItem struct {

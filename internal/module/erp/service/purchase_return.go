@@ -21,11 +21,11 @@ import (
 )
 
 // purchaseReturnKernel 构造采购退货单内核：锁序统一为入库单行→订单行→自身
-// （BeforeClaim/BeforeUpdateLock 先锁父单，再认领/锁自身）；反审核用
+// （BeforeClaim + Update 的 beforeLock 先锁父单，再认领/锁自身）；反审核用
 // READ COMMITTED（付款核销禁令的聚合需要当前读）。
 func (s *Service) purchaseReturnKernel() *doc.Kernel[*model.PurchaseReturn, model.PurchaseReturnItem] {
 	return doc.New(docEnv{s}, s.purchaseReturnStore(), doc.Spec[*model.PurchaseReturn, model.PurchaseReturnItem]{
-		Labels:             doc.Labels{Doc: "采购退货单", Item: "退货明细"},
+		Labels:             doc.Labels{Doc: "采购退货单"},
 		NoPrefix:           PurchaseReturnNoPrefix,
 		SeqBizType:         SeqBizTypePurchaseReturn,
 		UnapproveIsolation: doc.IsolationReadCommitted,
@@ -38,8 +38,9 @@ func (s *Service) purchaseReturnKernel() *doc.Kernel[*model.PurchaseReturn, mode
 // purchaseReturnStore 装配采购退货单的泛型存储。
 func (s *Service) purchaseReturnStore() doc.Store[*model.PurchaseReturn, model.PurchaseReturnItem] {
 	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.PurchaseReturn, model.PurchaseReturnItem]{
-		New:     func() *model.PurchaseReturn { return &model.PurchaseReturn{} },
-		ItemsFK: "purchase_return_id",
+		New:          func() *model.PurchaseReturn { return &model.PurchaseReturn{} },
+		ItemsFK:      "purchase_return_id",
+		SetItemDocID: func(it *model.PurchaseReturnItem, id int64) { it.PurchaseReturnID = id },
 	})
 }
 
@@ -275,7 +276,7 @@ func (s *Service) UpdatePurchaseReturn(ctx context.Context, req *dto.PurchaseRet
 			if err != nil {
 				return err
 			}
-			// BeforeUpdateLock 已按 in→order 锁父单；这里重取（同事务重入无副作用）
+			// Update 的 beforeLock 已按 in→order 锁父单；这里重取（同事务重入无副作用）
 			// 并用父单快照做仓库/供应商一致性校验。
 			inDoc, err := s.lockApprovedPurchaseIn(ctx, repo, d.InID)
 			if err != nil {
@@ -367,7 +368,7 @@ func (s *Service) approvePurchaseReturnDoc(ctx context.Context, tx doc.Tx[*model
 	if err := s.checkInReturnQuota(ctx, repo, inDoc.ID, d.ID, purchaseReturnItemDrafts(d.Items)); err != nil {
 		return err
 	}
-	warehouseName, err := s.warehouseName(ctx, d.WarehouseID)
+	warehouseName, err := s.warehouseNameIn(ctx, repo, d.WarehouseID)
 	if err != nil {
 		return err
 	}
@@ -419,7 +420,7 @@ func (s *Service) unapprovePurchaseReturnDoc(ctx context.Context, tx doc.Tx[*mod
 	if paymentItems > 0 {
 		return xerr.Conflict("退货单存在已审核付款单，不可反审核")
 	}
-	warehouseName, err := s.warehouseName(ctx, d.WarehouseID)
+	warehouseName, err := s.warehouseNameIn(ctx, repo, d.WarehouseID)
 	if err != nil {
 		return err
 	}

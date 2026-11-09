@@ -48,6 +48,9 @@ type DocSchema[H doc.Header, I any] struct {
 	New func() H
 	// ItemsFK 是明细表指向主表的外键列（如 stock_in_id）。
 	ItemsFK string
+	// SetItemDocID 把明细外键指向主表。由 store 在插入前统一写入，避免 adapter
+	// 漏写 buildItems 的 FK 时静默产生 xxx_id=0 的孤儿明细。
+	SetItemDocID func(item *I, docID int64)
 }
 
 // genericDocStore 实现 doc.Store：事务外 finder + 事务内 Tx 面。
@@ -142,6 +145,11 @@ func (t *genericDocTx[H, I]) Save(ctx context.Context, d H) error {
 func (t *genericDocTx[H, I]) CreateItems(ctx context.Context, docID int64, items []I) error {
 	if len(items) == 0 {
 		return nil
+	}
+	if t.schema.SetItemDocID != nil {
+		for i := range items {
+			t.schema.SetItemDocID(&items[i], docID)
+		}
 	}
 	return t.repo.DB().WithContext(ctx).Create(&items).Error
 }
