@@ -255,29 +255,44 @@ func waitFor(t *testing.T, timeout time.Duration, what string, fn func() bool) {
 	t.Fatalf("等待 %s 超时（%v）", what, timeout)
 }
 
-// runRecycleJobAndWait 手动触发回收任务并等 job 日志落成功行
+// runRecycleJobAndWait 手动触发回收任务并等本轮 job 日志落成功行
 // （job 日志在 handler 完成后同步写入，是「本轮回收已提交」的完成信号）。
+// 先记录触发前的成功日志数，再等总数增长：同一用例多次触发时，不能只看
+// Total >= 1——上一轮的日志会让等待立即返回，断言与异步 job 竞态。
 func runRecycleJobAndWait(t *testing.T, env *testutil.IntegrationEnv, token string) {
 	t.Helper()
 	jobID := recycleJobID(t, env, token)
+
+	before, ok := recycleSuccessLogTotal(t, env, token, jobID)
+	if !ok {
+		t.Fatalf("查询回收任务初始 job 日志失败")
+	}
+
 	status, api := env.Request(t, http.MethodPut,
 		fmt.Sprintf("/infra/job/%d/run", jobID), token, nil)
 	mustOK(t, "手动触发回收任务", status, api)
 
 	waitFor(t, 10*time.Second, "回收任务执行完成（job 日志）", func() bool {
-		status, api := env.Request(t, http.MethodGet,
-			fmt.Sprintf("/infra/job/log/page?pageNo=1&pageSize=10&jobId=%d&result=0", jobID), token, nil)
-		if status != http.StatusOK || api.Code != 0 {
-			return false
-		}
-		var page struct {
-			Total int64 `json:"total"`
-		}
-		if err := json.Unmarshal(api.Data, &page); err != nil {
-			return false
-		}
-		return page.Total >= 1
+		total, ok := recycleSuccessLogTotal(t, env, token, jobID)
+		return ok && total > before
 	})
+}
+
+// recycleSuccessLogTotal 返回回收任务成功日志总数；ok=false 表示本次查询失败。
+func recycleSuccessLogTotal(t *testing.T, env *testutil.IntegrationEnv, token string, jobID int64) (int64, bool) {
+	t.Helper()
+	status, api := env.Request(t, http.MethodGet,
+		fmt.Sprintf("/infra/job/log/page?pageNo=1&pageSize=10&jobId=%d&result=0", jobID), token, nil)
+	if status != http.StatusOK || api.Code != 0 {
+		return 0, false
+	}
+	var page struct {
+		Total int64 `json:"total"`
+	}
+	if err := json.Unmarshal(api.Data, &page); err != nil {
+		return 0, false
+	}
+	return page.Total, true
 }
 
 // ownerOf 查询客户详情当前负责人（0 = 公海）。
