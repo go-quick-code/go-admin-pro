@@ -73,24 +73,26 @@ func ValidStockOutType(v int8) bool {
 // StockIn 是其它入库单主表。
 type StockIn struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// No 是单号：QR + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一，
 	// erp_sequence 事务内原子发放。
 	No          string    `gorm:"size:32;not null" json:"no"`
 	WarehouseID int64     `gorm:"not null" json:"warehouseId"`
 	InTime      time.Time `gorm:"not null" json:"inTime"`
 	Type        int8      `gorm:"not null;default:99" json:"type"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	Remark      string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	// Items 是明细（Get/Create/Update 路径装载，列表分页不装载）。
 	Items []StockInItem `gorm:"foreignKey:StockInID" json:"items,omitempty"`
 }
 
 func (StockIn) TableName() string { return "erp_stock_in" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 in_time）。
+func (d *StockIn) GetNo() string          { return d.No }
+func (d *StockIn) SetNo(v string)         { d.No = v }
+func (d *StockIn) GetBizTime() time.Time  { return d.InTime }
+func (d *StockIn) SetBizTime(v time.Time) { d.InTime = v }
 
 // StockInItem 是其它入库单明细。
 type StockInItem struct {
@@ -110,21 +112,23 @@ func (StockInItem) TableName() string { return "erp_stock_in_item" }
 // StockOut 是其它出库单主表（与 StockIn 镜像：out_time/type、QC 前缀）。
 type StockOut struct {
 	model.BaseEntity
-	TenantID    int64     `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase     `gorm:"embedded"`
 	No          string    `gorm:"size:32;not null" json:"no"`
 	WarehouseID int64     `gorm:"not null" json:"warehouseId"`
 	OutTime     time.Time `gorm:"not null" json:"outTime"`
 	Type        int8      `gorm:"not null;default:99" json:"type"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	Remark      string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	Items []StockOutItem `gorm:"foreignKey:StockOutID" json:"items,omitempty"`
 }
 
 func (StockOut) TableName() string { return "erp_stock_out" }
+
+// GetNo/SetNo/GetBizTime/SetBizTime 实现 doc.Header（业务时间列 out_time）。
+func (d *StockOut) GetNo() string          { return d.No }
+func (d *StockOut) SetNo(v string)         { d.No = v }
+func (d *StockOut) GetBizTime() time.Time  { return d.OutTime }
+func (d *StockOut) SetBizTime(v time.Time) { d.OutTime = v }
 
 // StockOutItem 是其它出库单明细。
 type StockOutItem struct {
