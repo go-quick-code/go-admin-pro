@@ -141,48 +141,6 @@ type FinanceReceiptFilter struct {
 	SelfOwnerUserID int64
 }
 
-// CreateFinanceReceipt 创建收款单主表。
-func (r *Repository) CreateFinanceReceipt(ctx context.Context, row *model.FinanceReceipt) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateFinanceReceiptItems 批量创建收款单明细。
-func (r *Repository) CreateFinanceReceiptItems(ctx context.Context, items []model.FinanceReceiptItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindFinanceReceiptByID 按 ID 查收款单主表（租户插件自动过滤），不存在返回 nil。
-func (r *Repository) FindFinanceReceiptByID(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
-	var row model.FinanceReceipt
-	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindFinanceReceiptByIDForUpdate 行锁读取收款单（安全 F1：编辑事务内重读并
-// 复核 status=10，与审核认领串行化）。只能在事务内调用。
-func (r *Repository) FindFinanceReceiptByIDForUpdate(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
-	var row model.FinanceReceipt
-	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindFinanceReceiptWithItems 查询收款单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindFinanceReceiptWithItems(ctx context.Context, id int64) (*model.FinanceReceipt, error) {
-	var row model.FinanceReceipt
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
 // ListFinanceReceipts 按筛选与数据范围谓词分页查询收款单（固定 id DESC）。
 func (r *Repository) ListFinanceReceipts(ctx context.Context, f FinanceReceiptFilter, offset, limit int) ([]model.FinanceReceipt, int64, error) {
 	q := r.financeReceiptQuery(ctx, f)
@@ -230,31 +188,6 @@ func (r *Repository) financeReceiptQuery(ctx context.Context, f FinanceReceiptFi
 	return applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 }
 
-// SaveFinanceReceipt 全量保存收款单主表（更新路径）。
-func (r *Repository) SaveFinanceReceipt(ctx context.Context, row *model.FinanceReceipt) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteFinanceReceiptIfUnaudited 条件软删除收款单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteFinanceReceiptIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.FinanceReceipt{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteFinanceReceiptItems 软删除收款单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeleteFinanceReceiptItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("receipt_id = ?", docID).
-		Delete(&model.FinanceReceiptItem{}).Error
-}
-
-// UpdateFinanceReceiptStatusIf 乐观认领审核状态（防并发双重审核/反审核双重回写）。
-func (r *Repository) UpdateFinanceReceiptStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.FinanceReceipt{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
-}
-
 // ---------- 付款单（FK） ----------
 
 // FinancePaymentFilter 是付款单列表查询条件（筛选 + 数据范围谓词）。
@@ -268,48 +201,6 @@ type FinancePaymentFilter struct {
 
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
-}
-
-// CreateFinancePayment 创建付款单主表。
-func (r *Repository) CreateFinancePayment(ctx context.Context, row *model.FinancePayment) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateFinancePaymentItems 批量创建付款单明细。
-func (r *Repository) CreateFinancePaymentItems(ctx context.Context, items []model.FinancePaymentItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindFinancePaymentByID 按 ID 查付款单主表，不存在返回 nil。
-func (r *Repository) FindFinancePaymentByID(ctx context.Context, id int64) (*model.FinancePayment, error) {
-	var row model.FinancePayment
-	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindFinancePaymentByIDForUpdate 行锁读取付款单（安全 F1：编辑事务内重读并
-// 复核 status=10，与审核认领串行化）。只能在事务内调用。
-func (r *Repository) FindFinancePaymentByIDForUpdate(ctx context.Context, id int64) (*model.FinancePayment, error) {
-	var row model.FinancePayment
-	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindFinancePaymentWithItems 查询付款单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindFinancePaymentWithItems(ctx context.Context, id int64) (*model.FinancePayment, error) {
-	var row model.FinancePayment
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
 }
 
 // ListFinancePayments 按筛选与数据范围谓词分页查询付款单（固定 id DESC）。
@@ -357,31 +248,6 @@ func (r *Repository) financePaymentQuery(ctx context.Context, f FinancePaymentFi
 		q = q.Where("payment_time < ?", *f.EndTime)
 	}
 	return applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
-}
-
-// SaveFinancePayment 全量保存付款单主表（更新路径）。
-func (r *Repository) SaveFinancePayment(ctx context.Context, row *model.FinancePayment) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteFinancePaymentIfUnaudited 条件软删除付款单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteFinancePaymentIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.FinancePayment{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteFinancePaymentItems 软删除付款单的全部明细。
-func (r *Repository) DeleteFinancePaymentItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("payment_id = ?", docID).
-		Delete(&model.FinancePaymentItem{}).Error
-}
-
-// UpdateFinancePaymentStatusIf 乐观认领付款单审核状态。
-func (r *Repository) UpdateFinancePaymentStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.FinancePayment{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // ---------- 核销金额聚合 ----------

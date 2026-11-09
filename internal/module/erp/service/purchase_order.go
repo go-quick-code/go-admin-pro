@@ -6,14 +6,37 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// purchaseOrderKernel 构造采购订单内核：审核只翻状态（无落账钩子），
+// 反审核在存在已审核入库/退货时 409，删除在存在入库引用时 409。
+func (s *Service) purchaseOrderKernel() *doc.Kernel[*model.PurchaseOrder, model.PurchaseOrderItem] {
+	return doc.New(docEnv{s}, s.purchaseOrderStore(), doc.Spec[*model.PurchaseOrder, model.PurchaseOrderItem]{
+		Labels:       doc.Labels{Doc: "采购订单"},
+		NoPrefix:     PurchaseOrderNoPrefix,
+		SeqBizType:   SeqBizTypePurchaseOrder,
+		Unapprove:    s.unapprovePurchaseOrderDoc,
+		BeforeDelete: s.beforeDeletePurchaseOrder,
+	})
+}
+
+// purchaseOrderStore 装配采购订单的泛型存储。
+func (s *Service) purchaseOrderStore() doc.Store[*model.PurchaseOrder, model.PurchaseOrderItem] {
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.PurchaseOrder, model.PurchaseOrderItem]{
+		New:          func() *model.PurchaseOrder { return &model.PurchaseOrder{} },
+		ItemsFK:      "purchase_order_id",
+		SetItemDocID: func(it *model.PurchaseOrderItem, id int64) { it.PurchaseOrderID = id },
+	})
+}
 
 // ListPurchaseOrders 采购订单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListPurchaseOrders(ctx context.Context, req *dto.PurchaseOrderPageReq) ([]dto.PurchaseOrderRow, int64, error) {
@@ -74,11 +97,7 @@ func (s *Service) purchaseOrderFilter(ctx context.Context, req *dto.PurchaseOrde
 
 // GetPurchaseOrder 采购订单详情（带头 + 明细 + 进度回写列，产品名服务端解析）。
 func (s *Service) GetPurchaseOrder(ctx context.Context, id int64) (*dto.PurchaseOrderDetail, error) {
-	doc, err := s.findPurchaseOrder(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindPurchaseOrderWithItems(ctx, doc.ID)
+	full, err := s.purchaseOrderKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +140,8 @@ func (s *Service) GetPurchaseOrder(ctx context.Context, id int64) (*dto.Purchase
 	}, nil
 }
 
-// CreatePurchaseOrder 创建采购订单（仅未审核）：明细校验 → 供应商/产品存在性 →
-// 事务内发放单号（CG，erp_sequence）→ 落主表 + 明细。不动库存、不回写进度
-// （spec §4.1：只有审核动作落账，订单审核亦不动库存）。
+// CreatePurchaseOrder 创建采购订单（仅未审核）：明细/供应商校验 → 内核事务内
+// 发号落主表与明细。不动库存、不回写进度（spec §4.1）。
 func (s *Service) CreatePurchaseOrder(ctx context.Context, req *dto.PurchaseOrderCreateReq) (*model.PurchaseOrder, error) {
 	items, err := buildDocItems(req.Items, "订单明细")
 	if err != nil {
@@ -136,145 +154,79 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, req *dto.PurchaseOrde
 	if err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.PurchaseOrder
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypePurchaseOrder, PurchaseOrderNoPrefix)
-		if err != nil {
-			return err
-		}
-		doc = &model.PurchaseOrder{
-			OrderNo:     no,
-			SupplierID:  req.SupplierId,
-			OrderTime:   orderTime,
-			Status:      model.DocStatusUnaudited,
-			Remark:      req.Remark,
-			OwnerUserID: ownerID,
-			OwnerDeptID: deptID,
-		}
-		if err := tx.CreatePurchaseOrder(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreatePurchaseOrderItems(ctx, buildPurchaseOrderItemRows(doc.ID, items))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return s.purchaseOrderKernel().Create(ctx, nil,
+		func(ctx context.Context) (*model.PurchaseOrder, error) {
+			return &model.PurchaseOrder{
+				SupplierID: req.SupplierId,
+				OrderTime:  orderTime,
+				Remark:     req.Remark,
+			}, nil
+		},
+		func(ctx context.Context, d *model.PurchaseOrder) ([]model.PurchaseOrderItem, error) {
+			return buildPurchaseOrderItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // UpdatePurchaseOrder 修改采购订单（仅未审核，已审核 409，spec §4.1）：
 // 字段全量覆盖；单号不采纳（保持原号）；明细整体替换（软删旧明细）。
 func (s *Service) UpdatePurchaseOrder(ctx context.Context, req *dto.PurchaseOrderUpdateReq) error {
-	row, err := s.findPurchaseOrder(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	items, err := buildDocItems(req.Items, "订单明细")
-	if err != nil {
-		return err
-	}
-	if err := s.checkPurchasePartyForWrite(ctx, req.SupplierId, 0, items); err != nil {
-		return err
-	}
-	orderTime, err := s.parseDocTime(req.OrderTime, "下单时间")
-	if err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
-		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
-		locked, err := tx.LockPurchaseOrder(ctx, row.ID)
-		if err != nil {
+	var items []docItemDraft
+	var orderTime time.Time
+	return s.purchaseOrderKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.PurchaseOrder) error {
+			var err error
+			items, err = buildDocItems(req.Items, "订单明细")
+			if err != nil {
+				return err
+			}
+			if err := s.checkPurchasePartyForWrite(ctx, req.SupplierId, 0, items); err != nil {
+				return err
+			}
+			orderTime, err = s.parseDocTime(req.OrderTime, "下单时间")
 			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("采购订单不存在")
-		}
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		locked.SupplierID = req.SupplierId
-		locked.OrderTime = orderTime
-		locked.Remark = req.Remark
-		if err := tx.SavePurchaseOrder(ctx, locked); err != nil {
-			return err
-		}
-		// 明细整体替换：软删旧行 + 插入新行（未审核单无入库/退货可挂，安全）。
-		if err := tx.DeletePurchaseOrderItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreatePurchaseOrderItems(ctx, buildPurchaseOrderItemRows(row.ID, items))
-	})
+		},
+		nil,
+		func(ctx context.Context, _ doc.Tx[*model.PurchaseOrder, model.PurchaseOrderItem], d *model.PurchaseOrder) error {
+			d.SupplierID = req.SupplierId
+			d.OrderTime = orderTime
+			d.Remark = req.Remark
+			return nil
+		},
+		func(ctx context.Context, d *model.PurchaseOrder) ([]model.PurchaseOrderItem, error) {
+			return buildPurchaseOrderItemRows(d.ID, items), nil
+		},
+	)
 }
 
 // DeletePurchaseOrder 删除采购订单（仅未审核，已审核 409，spec §4.1/§4.9）：
 // 主表 + 明细一并软删除；存在入库单引用（含未审核，退货经入库单归属到订单）
 // 时禁删——挂单引用悬空会让占用/进度校验失去锚点（与销售订单对称）。
 func (s *Service) DeletePurchaseOrder(ctx context.Context, id int64) error {
-	row, err := s.findPurchaseOrder(ctx, id)
+	return s.purchaseOrderKernel().Delete(ctx, id)
+}
+
+// beforeDeletePurchaseOrder 下游禁令：存在入库单引用（含未审核，退货经入库单
+// 归属到订单）时禁删——挂单引用悬空会让占用/进度校验失去锚点。
+func (s *Service) beforeDeletePurchaseOrder(ctx context.Context, tx doc.Tx[*model.PurchaseOrder, model.PurchaseOrderItem], d *model.PurchaseOrder) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
+	inRefs, err := repo.CountPurchaseInsByOrder(ctx, d.ID, 0)
+	if err != nil {
+		return err
 	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		inRefs, err := tx.CountPurchaseInsByOrder(ctx, row.ID, 0)
-		if err != nil {
-			return err
-		}
-		if inRefs > 0 {
-			return xerr.Conflict("采购订单存在入库/退货单引用，禁止删除")
-		}
-		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
-		deleted, err := tx.DeletePurchaseOrderIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeletePurchaseOrderItems(ctx, row.ID)
-	})
+	if inRefs > 0 {
+		return xerr.Conflict("采购订单存在入库/退货单引用，禁止删除")
+	}
+	return nil
 }
 
 // UpdatePurchaseOrderStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1）。
 // 订单审核不动库存；反审核在存在已审核入库/退货时 409（spec §4.4 反审核禁令）。
 func (s *Service) UpdatePurchaseOrderStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
-	row, err := s.findPurchaseOrder(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
-	if err != nil {
-		return err
-	}
-	if idempotent {
-		return nil
-	}
-	if req.Status == model.DocStatusApproved {
-		// 订单审核：只翻状态（不动库存不回写进度——进度只来自已审核入库/退货，
-		// 而入库/退货必挂已审核订单，审核时点不可能有挂单）。
-		return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-			claimed, err := tx.UpdatePurchaseOrderStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-			if err != nil {
-				return err
-			}
-			if claimed == 0 {
-				return xerr.Conflict("单据状态已变化，请刷新后重试")
-			}
-			return nil
-		})
-	}
-	return s.unapprovePurchaseOrder(ctx, row)
+	return s.purchaseOrderKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
 // unapprovePurchaseOrder 订单反审核（spec §4.4 反审核禁令）：先乐观认领自身
@@ -284,28 +236,23 @@ func (s *Service) UpdatePurchaseOrderStatus(ctx context.Context, req *dto.StockD
 // 未审核挂单不拦截（删除或反审核后自然解除占用）。反审核只翻状态：
 // in_count/return_count 只计已审核单，而禁令保证反审核时点不存在已审核挂单，
 // 进度恒为零值无需重算。
-func (s *Service) unapprovePurchaseOrder(ctx context.Context, row *model.PurchaseOrder) error {
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdatePurchaseOrderStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		inSum, err := tx.SumPurchaseInItemsByProduct(ctx, row.ID, true, 0)
-		if err != nil {
-			return err
-		}
-		retSum, err := tx.SumPurchaseReturnItemsByProductForOrder(ctx, row.ID, true)
-		if err != nil {
-			return err
-		}
-		if len(inSum) > 0 || len(retSum) > 0 {
-			return xerr.Conflict("订单存在已审核入库/退货单，不可反审核")
-		}
-		return nil
-	})
+func (s *Service) unapprovePurchaseOrderDoc(ctx context.Context, tx doc.Tx[*model.PurchaseOrder, model.PurchaseOrderItem], d *model.PurchaseOrder) error {
+	repo, err := docRepo(tx)
+	if err != nil {
+		return err
+	}
+	inSum, err := repo.SumPurchaseInItemsByProduct(ctx, d.ID, true, 0)
+	if err != nil {
+		return err
+	}
+	retSum, err := repo.SumPurchaseReturnItemsByProductForOrder(ctx, d.ID, true)
+	if err != nil {
+		return err
+	}
+	if len(inSum) > 0 || len(retSum) > 0 {
+		return xerr.Conflict("订单存在已审核入库/退货单，不可反审核")
+	}
+	return nil
 }
 
 // ExportPurchaseOrders 导出采购订单（筛选含数据范围，spec §4.11）。
@@ -339,21 +286,6 @@ func (s *Service) ExportPurchaseOrders(ctx context.Context, req *dto.PurchaseOrd
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findPurchaseOrder 取订单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findPurchaseOrder(ctx context.Context, id int64) (*model.PurchaseOrder, error) {
-	row, err := s.repo.FindPurchaseOrderByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, xerr.NotFound("采购订单不存在")
-	}
-	if err := s.checkRowVisible(ctx, "采购订单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
 }
 
 // checkPurchasePartyForWrite 校验采购单据写入引用：供应商必须存在（租户内，

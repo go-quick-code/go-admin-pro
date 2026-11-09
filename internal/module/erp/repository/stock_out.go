@@ -5,13 +5,12 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 )
 
-// stock_out.go 是其它出库单的数据访问（issue #90，docs/erp-mvp-spec.md §3.5/§5）。
-// 与 stock_in.go 镜像（out_time/type，QC 前缀）。
+// stock_out.go 是其它出库单的读侧数据访问（issue #90；写侧已由泛型 doc store
+// 承担，候选 02a）。与 stock_in.go 镜像（out_time/type，QC 前缀）。
 
 // StockOutFilter 是其它出库单列表查询条件（筛选 + 数据范围谓词，导出复用同一口径）。
 type StockOutFilter struct {
@@ -24,37 +23,6 @@ type StockOutFilter struct {
 
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
-}
-
-// CreateStockOut 创建其它出库单主表。
-func (r *Repository) CreateStockOut(ctx context.Context, row *model.StockOut) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateStockOutItems 批量创建出库单明细。
-func (r *Repository) CreateStockOutItems(ctx context.Context, items []model.StockOutItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindStockOutByID 按 ID 查出库单主表（租户插件自动过滤），不存在返回 nil。
-func (r *Repository) FindStockOutByID(ctx context.Context, id int64) (*model.StockOut, error) {
-	var row model.StockOut
-	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindStockOutWithItems 查询出库单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindStockOutWithItems(ctx context.Context, id int64) (*model.StockOut, error) {
-	var row model.StockOut
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
 }
 
 // ListStockOuts 按筛选与数据范围谓词分页查询出库单（固定 id DESC）。
@@ -103,44 +71,6 @@ func (r *Repository) stockOutQuery(ctx context.Context, f StockOutFilter) *gorm.
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// FindStockOutByIDForUpdate 行锁读取出库单（安全 F1：编辑事务内重读并复核
-// status=10，与审核认领串行化）。只能在事务内调用。
-func (r *Repository) FindStockOutByIDForUpdate(ctx context.Context, id int64) (*model.StockOut, error) {
-	var row model.StockOut
-	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// SaveStockOut 全量保存出库单主表（更新路径）。
-func (r *Repository) SaveStockOut(ctx context.Context, row *model.StockOut) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteStockOutIfUnaudited 条件软删除出库单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteStockOutIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.StockOut{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteStockOutItems 软删除出库单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeleteStockOutItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("stock_out_id = ?", docID).
-		Delete(&model.StockOutItem{}).Error
-}
-
-// UpdateStockOutStatusIf 乐观认领审核状态：仅当当前状态为 fromStatus 时翻转为
-// toStatus，返回影响行数（0 表示状态已被并发请求改变，service 层翻译 409）。
-// 审核/反审核先认领再落账：并发重复审核在同一 WHERE 条件上串行化，杜绝双重入账。
-func (r *Repository) UpdateStockOutStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.StockOut{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountStockOutItemsByProduct 产品删除引用计数的一部分：其它出库单明细中

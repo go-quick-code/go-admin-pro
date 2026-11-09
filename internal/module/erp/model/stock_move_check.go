@@ -27,22 +27,21 @@ import (
 // StockMove 是库存调拨单主表。
 type StockMove struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// No 是单号：DB + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一。
 	No              string    `gorm:"size:32;not null" json:"no"`
 	FromWarehouseID int64     `gorm:"not null" json:"fromWarehouseId"`
 	ToWarehouseID   int64     `gorm:"not null" json:"toWarehouseId"`
 	MoveTime        time.Time `gorm:"not null" json:"moveTime"`
-	Status          int8      `gorm:"not null;default:10" json:"status"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	// Items 是明细（Get/Create/Update 路径装载，列表分页不装载）。
 	Items []StockMoveItem `gorm:"foreignKey:StockMoveID" json:"items,omitempty"`
 }
 
 func (StockMove) TableName() string { return "erp_stock_move" }
+
+// SetNo 实现 doc.Header（业务时间列 move_time）。
+func (d *StockMove) SetNo(v string) { d.No = v }
 
 // StockMoveItem 是库存调拨单明细。
 type StockMoveItem struct {
@@ -58,22 +57,21 @@ func (StockMoveItem) TableName() string { return "erp_stock_move_item" }
 // StockCheck 是库存盘点单主表。
 type StockCheck struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// No 是单号：PD + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一。
 	No          string    `gorm:"size:32;not null" json:"no"`
 	WarehouseID int64     `gorm:"not null" json:"warehouseId"`
 	CheckTime   time.Time `gorm:"not null" json:"checkTime"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	Remark      string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	// Items 是明细（Get/Create/Update 路径装载，列表分页不装载）。
 	Items []StockCheckItem `gorm:"foreignKey:StockCheckID" json:"items,omitempty"`
 }
 
 func (StockCheck) TableName() string { return "erp_stock_check" }
+
+// SetNo 实现 doc.Header（业务时间列 check_time）。
+func (d *StockCheck) SetNo(v string) { d.No = v }
 
 // StockCheckItem 是库存盘点单明细。
 type StockCheckItem struct {

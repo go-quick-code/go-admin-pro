@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/qty"
@@ -27,37 +26,6 @@ type StockMoveFilter struct {
 
 	OwnerDeptIDs    []int64
 	SelfOwnerUserID int64
-}
-
-// CreateStockMove 创建库存调拨单主表。
-func (r *Repository) CreateStockMove(ctx context.Context, row *model.StockMove) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateStockMoveItems 批量创建调拨单明细。
-func (r *Repository) CreateStockMoveItems(ctx context.Context, items []model.StockMoveItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
-// FindStockMoveByID 按 ID 查调拨单主表（租户插件自动过滤），不存在返回 nil。
-func (r *Repository) FindStockMoveByID(ctx context.Context, id int64) (*model.StockMove, error) {
-	var row model.StockMove
-	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindStockMoveWithItems 查询调拨单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindStockMoveWithItems(ctx context.Context, id int64) (*model.StockMove, error) {
-	var row model.StockMove
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
 }
 
 // ListStockMoves 按筛选与数据范围谓词分页查询调拨单（固定 id DESC）。
@@ -106,43 +74,6 @@ func (r *Repository) stockMoveQuery(ctx context.Context, f StockMoveFilter) *gor
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// FindStockMoveByIDForUpdate 行锁读取调拨单（安全 F1：编辑事务内重读并复核
-// status=10，与审核认领串行化）。只能在事务内调用。
-func (r *Repository) FindStockMoveByIDForUpdate(ctx context.Context, id int64) (*model.StockMove, error) {
-	var row model.StockMove
-	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// SaveStockMove 全量保存调拨单主表（更新路径）。
-func (r *Repository) SaveStockMove(ctx context.Context, row *model.StockMove) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteStockMoveIfUnaudited 条件软删除调拨单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteStockMoveIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.StockMove{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteStockMoveItems 软删除调拨单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeleteStockMoveItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("stock_move_id = ?", docID).
-		Delete(&model.StockMoveItem{}).Error
-}
-
-// UpdateStockMoveStatusIf 乐观认领审核状态：仅当当前状态为 fromStatus 时翻转为
-// toStatus，返回影响行数（0 表示已被并发请求改变，service 层翻译 409）。
-func (r *Repository) UpdateStockMoveStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.StockMove{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountStockMoveItemsByProduct 产品删除引用计数：调拨单明细引用该产品的行数

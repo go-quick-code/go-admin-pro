@@ -21,7 +21,7 @@ import (
 // stockInKernel 构造其它入库单的内核实例（每次调用廉价；钩子捕获 Service）。
 func (s *Service) stockInKernel() *doc.Kernel[*model.StockIn, model.StockInItem] {
 	return doc.New(docEnv{s}, s.stockInStore(), doc.Spec[*model.StockIn, model.StockInItem]{
-		Labels:     doc.Labels{Doc: "其它入库单", Item: "入库明细"},
+		Labels:     doc.Labels{Doc: "其它入库单"},
 		NoPrefix:   StockInNoPrefix,
 		SeqBizType: SeqBizTypeStockIn,
 		Approve:    s.approveStockInDoc,
@@ -29,42 +29,13 @@ func (s *Service) stockInKernel() *doc.Kernel[*model.StockIn, model.StockInItem]
 	})
 }
 
-// stockInStore 装配其它入库单的仓储面（tracer 手写；候选 02 用泛型 store 替换）。
+// stockInStore 装配其它入库单的泛型存储（候选 02a；表名/关联由模型自带）。
 func (s *Service) stockInStore() doc.Store[*model.StockIn, model.StockInItem] {
-	return newRepoDocStore(s.repo, s.businessNow, stockInOps)
-}
-
-// stockInOps 把 repository 方法装配成内核 Tx 面（nil 行翻译为 doc.ErrNotFound）。
-func stockInOps(repo *repository.Repository) repoDocOps[*model.StockIn, model.StockInItem] {
-	notFound := func(row *model.StockIn, err error) (*model.StockIn, error) {
-		if err != nil {
-			return nil, err
-		}
-		if row == nil {
-			return nil, doc.ErrNotFound
-		}
-		return row, nil
-	}
-	return repoDocOps[*model.StockIn, model.StockInItem]{
-		Find: func(ctx context.Context, id int64) (*model.StockIn, error) {
-			return notFound(repo.FindStockInByID(ctx, id))
-		},
-		FindWithItems: func(ctx context.Context, id int64) (*model.StockIn, error) {
-			return notFound(repo.FindStockInWithItems(ctx, id))
-		},
-		Lock: func(ctx context.Context, id int64) (*model.StockIn, error) {
-			return notFound(repo.FindStockInByIDForUpdate(ctx, id))
-		},
-		Create:      repo.CreateStockIn,
-		Save:        repo.SaveStockIn,
-		CreateItems: repo.CreateStockInItems,
-		DeleteItems: repo.DeleteStockInItems,
-		DeleteIfStatus: func(ctx context.Context, id int64, status int8) (int64, error) {
-			// 内核只删未审核（status 恒为 10）；仓储方法已把谓词绑定到 DELETE。
-			return repo.DeleteStockInIfUnaudited(ctx, id)
-		},
-		UpdateStatusIf: repo.UpdateStockInStatusIf,
-	}
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.StockIn, model.StockInItem]{
+		New:          func() *model.StockIn { return &model.StockIn{} },
+		ItemsFK:      "stock_in_id",
+		SetItemDocID: func(it *model.StockInItem, id int64) { it.StockInID = id },
+	})
 }
 
 // ListStockIns 其它入库单分页（筛选 + owner 数据范围，spec §5）。
@@ -136,11 +107,7 @@ func (s *Service) stockInFilter(ctx context.Context, req *dto.StockInPageReq) (r
 
 // GetStockIn 其它入库单详情（带头 + 明细，产品名称服务端解析）。
 func (s *Service) GetStockIn(ctx context.Context, id int64) (*dto.StockInDetail, error) {
-	doc, err := s.findStockIn(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindStockInWithItems(ctx, doc.ID)
+	full, err := s.stockInKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +168,7 @@ func (s *Service) CreateStockIn(ctx context.Context, req *dto.StockInCreateReq) 
 	if err != nil {
 		return nil, err
 	}
-	return s.stockInKernel().Create(ctx,
+	return s.stockInKernel().Create(ctx, nil,
 		func(ctx context.Context) (*model.StockIn, error) {
 			return &model.StockIn{
 				WarehouseID: req.WarehouseId,
@@ -239,7 +206,8 @@ func (s *Service) UpdateStockIn(ctx context.Context, req *dto.StockInUpdateReq) 
 			docType, err = validateDocType(req.Type, model.ValidStockInType, "入库单")
 			return err
 		},
-		func(ctx context.Context, d *model.StockIn) error {
+		nil,
+		func(ctx context.Context, _ doc.Tx[*model.StockIn, model.StockInItem], d *model.StockIn) error {
 			d.WarehouseID = req.WarehouseId
 			d.InTime = inTime
 			d.Type = docType
@@ -366,11 +334,6 @@ func (s *Service) ExportStockIns(ctx context.Context, req *dto.StockInPageReq) (
 		})
 	}
 	return excel.Export(rows, excel.ExportOptions{NativeDates: true})
-}
-
-// findStockIn 取入库单并做可见性校验（数据范围外一律 404，spec §4.10）。
-func (s *Service) findStockIn(ctx context.Context, id int64) (*model.StockIn, error) {
-	return s.stockInKernel().Find(ctx, id)
 }
 
 // checkDocRefsForWrite 校验单据写入引用：仓库与全部产品必须存在（租户内，

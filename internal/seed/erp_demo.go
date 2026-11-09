@@ -414,10 +414,16 @@ func erpDemoSeedPurchase(ctx context.Context, stock erpDemoStockApplier, tx *gor
 
 	order := erpmodel.PurchaseOrder{
 		BaseEntity: erpDemoBase(erpDemoPurchaseOrderID, orderTime, creator),
-		TenantID:   erpDemoTenantID, OrderNo: orderNo,
-		SupplierID: erpDemoSupplierHQID, OrderTime: orderTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示采购订单：已审核，已被采购入库占用",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		OrderNo:    orderNo,
+		SupplierID: erpDemoSupplierHQID,
+		OrderTime:  orderTime,
+		Remark:     "演示采购订单：已审核，已被采购入库占用",
 	}
 	if err := tenant.Skip(tx).Create(&order).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示采购订单: %w", err)
@@ -444,17 +450,21 @@ func erpDemoSeedPurchase(ctx context.Context, stock erpDemoStockApplier, tx *gor
 	}
 	purchaseIn := erpmodel.PurchaseIn{
 		BaseEntity: erpDemoBase(erpDemoPurchaseInID, inTime, creator),
-		TenantID:   erpDemoTenantID, No: inNo,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:          inNo,
 		SupplierID:  erpDemoSupplierHQID,
 		OrderID:     order.ID,
 		WarehouseID: erpDemoWarehouseMainID,
 		InTime:      inTime,
-		Status:      erpmodel.DocStatusApproved,
 		TotalPrice:  orderTotal,
 		// 付款单（FK）审核后回写；本演示付款金额等于入库金额（全额核销）。
 		PaymentPrice: orderTotal,
 		Remark:       "演示采购入库：审核后库存增加",
-		OwnerUserID:  admin.ID, OwnerDeptID: admin.DeptID,
 	}
 	if err := tenant.Skip(tx).Create(&purchaseIn).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示采购入库单: %w", err)
@@ -500,10 +510,16 @@ func erpDemoSeedStockCheck(ctx context.Context, stock erpDemoStockApplier, tx *g
 	}
 	doc := erpmodel.StockCheck{
 		BaseEntity: erpDemoBase(erpDemoStockCheckID, checkTime, creator),
-		TenantID:   erpDemoTenantID, No: checkNo,
-		WarehouseID: erpDemoWarehouseMainID, CheckTime: checkTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示盘点：终端盘盈 1 台、键鼠盘亏 1 盒",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:          checkNo,
+		WarehouseID: erpDemoWarehouseMainID,
+		CheckTime:   checkTime,
+		Remark:      "演示盘点：终端盘盈 1 台、键鼠盘亏 1 盒",
 	}
 	if err := tenant.Skip(tx).Create(&doc).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示盘点单: %w", err)
@@ -563,10 +579,17 @@ func erpDemoSeedSale(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB
 	}
 	order := erpmodel.SaleOrder{
 		BaseEntity: erpDemoBase(erpDemoSaleOrderID, orderTime, creator),
-		TenantID:   erpDemoTenantID, OrderNo: orderNo,
-		CustomerID: erpDemoCustomerFutureID, SaleUserID: admin.ID, OrderTime: orderTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示销售订单：已审核，已被销售出库占用",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		OrderNo:    orderNo,
+		CustomerID: erpDemoCustomerFutureID,
+		SaleUserID: admin.ID,
+		OrderTime:  orderTime,
+		Remark:     "演示销售订单：已审核，已被销售出库占用",
 	}
 	if err := tenant.Skip(tx).Create(&order).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示销售订单: %w", err)
@@ -591,14 +614,20 @@ func erpDemoSeedSale(ctx context.Context, stock erpDemoStockApplier, tx *gorm.DB
 	}
 	saleOut := erpmodel.SaleOut{
 		BaseEntity: erpDemoBase(erpDemoSaleOutID, outTime, creator),
-		TenantID:   erpDemoTenantID, No: outNo,
-		CustomerID: erpDemoCustomerFutureID, OrderID: order.ID,
-		WarehouseID: erpDemoWarehouseMainID, OutTime: outTime,
-		Status:     erpmodel.DocStatusApproved,
-		TotalPrice: orderTotal,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:          outNo,
+		CustomerID:  erpDemoCustomerFutureID,
+		OrderID:     order.ID,
+		WarehouseID: erpDemoWarehouseMainID,
+		OutTime:     outTime,
+		TotalPrice:  orderTotal,
 		// 收款单（SK）审核后回写；本演示收款金额等于出库金额（全额核销）。
 		ReceiptPrice: orderTotal,
-		OwnerUserID:  admin.ID, OwnerDeptID: admin.DeptID,
 	}
 	if err := tenant.Skip(tx).Create(&saleOut).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示销售出库单: %w", err)
@@ -642,11 +671,18 @@ func erpDemoSeedFinance(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, d
 	}
 	receipt := erpmodel.FinanceReceipt{
 		BaseEntity: erpDemoBase(erpDemoReceiptID, receiptTime, creator),
-		TenantID:   erpDemoTenantID, No: receiptNo,
-		CustomerID: erpDemoCustomerFutureID, AccountID: erpDemoAccountICBCID,
-		ReceiptUserID: admin.ID, ReceiptTime: receiptTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示收款：全额核销销售出库",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:            receiptNo,
+		CustomerID:    erpDemoCustomerFutureID,
+		AccountID:     erpDemoAccountICBCID,
+		ReceiptUserID: admin.ID,
+		ReceiptTime:   receiptTime,
+		Remark:        "演示收款：全额核销销售出库",
 	}
 	if err := tenant.Skip(tx).Create(&receipt).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示收款单: %w", err)
@@ -667,11 +703,18 @@ func erpDemoSeedFinance(tx *gorm.DB, admin erpDemoUser, seq *erpDemoSequencer, d
 	}
 	payment := erpmodel.FinancePayment{
 		BaseEntity: erpDemoBase(erpDemoPaymentID, paymentTime, creator),
-		TenantID:   erpDemoTenantID, No: paymentNo,
-		SupplierID: erpDemoSupplierHQID, AccountID: erpDemoAccountICBCID,
-		PaymentUserID: admin.ID, PaymentTime: paymentTime,
-		Status: erpmodel.DocStatusApproved, Remark: "演示付款：全额核销采购入库",
-		OwnerUserID: admin.ID, OwnerDeptID: admin.DeptID,
+		DocBase: erpmodel.DocBase{
+			TenantID:    erpDemoTenantID,
+			Status:      erpmodel.DocStatusApproved,
+			OwnerUserID: admin.ID,
+			OwnerDeptID: admin.DeptID,
+		},
+		No:            paymentNo,
+		SupplierID:    erpDemoSupplierHQID,
+		AccountID:     erpDemoAccountICBCID,
+		PaymentUserID: admin.ID,
+		PaymentTime:   paymentTime,
+		Remark:        "演示付款：全额核销采购入库",
 	}
 	if err := tenant.Skip(tx).Create(&payment).Error; err != nil {
 		return fmt.Errorf("写入 ERP 演示付款单: %w", err)

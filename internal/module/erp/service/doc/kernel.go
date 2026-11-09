@@ -27,23 +27,41 @@ func (k *Kernel[H, I]) mapNotFound(err error) error {
 
 // Find 取单据并做可见性校验（数据范围外一律 404）。
 func (k *Kernel[H, I]) Find(ctx context.Context, id int64) (H, error) {
-	row, err := k.store.Find(ctx, id)
+	return k.findOne(ctx, id, false)
+}
+
+// FindWithItems 取单据（含明细）并做可见性校验（详情页用）。
+func (k *Kernel[H, I]) FindWithItems(ctx context.Context, id int64) (H, error) {
+	return k.findOne(ctx, id, true)
+}
+
+func (k *Kernel[H, I]) findOne(ctx context.Context, id int64, withItems bool) (H, error) {
+	var zero H
+	var (
+		row H
+		err error
+	)
+	if withItems {
+		row, err = k.store.FindWithItems(ctx, id)
+	} else {
+		row, err = k.store.Find(ctx, id)
+	}
 	if err != nil {
-		var zero H
 		return zero, k.mapNotFound(err)
 	}
 	ownerUserID, ownerDeptID := row.Base().GetOwner()
 	if err := k.env.CheckRowVisible(ctx, k.spec.Labels.Doc, ownerUserID, ownerDeptID); err != nil {
-		var zero H
 		return zero, err
 	}
 	return row, nil
 }
 
-// Create 创建单据：owner 快照（事务外）→ 事务内发号 → 建头 → 建明细。
-// buildHeader 只填类型特有字段；单号/状态/归属由内核统一写入。
+// Create 创建单据：owner 快照（事务外）→ 事务内 prepare（挂单锁/配额等）
+// → 发号 → 建头 → 建明细。buildHeader 只填类型特有字段；单号/状态/归属由
+// 内核统一写入。prepare 可为 nil。
 func (k *Kernel[H, I]) Create(
 	ctx context.Context,
+	prepare func(ctx context.Context, tx Tx[H, I]) error,
 	buildHeader func(ctx context.Context) (H, error),
 	buildItems func(ctx context.Context, doc H) ([]I, error),
 ) (H, error) {
@@ -55,6 +73,11 @@ func (k *Kernel[H, I]) Create(
 	}
 	var created H
 	err = k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		if prepare != nil {
+			if err := prepare(ctx, tx); err != nil {
+				return err
+			}
+		}
 		no, err := tx.NextNo(ctx, k.spec.SeqBizType, k.spec.NoPrefix)
 		if err != nil {
 			return err
@@ -86,13 +109,16 @@ func (k *Kernel[H, I]) Create(
 	return created, nil
 }
 
-// Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内锁重读
-// 复核 status=10 → mutate → 整体替换明细。validate/mutate 可为 nil。
+// Update 编辑单据：finder/状态前置校验 → validate（事务外）→ 事务内
+// beforeLock（可先锁父单，保证与审核一致的锁序）→ 锁自身行重读并复核
+// status=10 → mutate（可做挂单锁/配额等事务内校验）→ 整体替换明细。
+// validate/beforeLock/mutate 可为 nil。
 func (k *Kernel[H, I]) Update(
 	ctx context.Context,
 	id int64,
 	validate func(ctx context.Context, doc H) error,
-	mutate func(ctx context.Context, doc H) error,
+	beforeLock func(ctx context.Context, tx Tx[H, I], doc H) error,
+	mutate func(ctx context.Context, tx Tx[H, I], doc H) error,
 	buildItems func(ctx context.Context, doc H) ([]I, error),
 ) error {
 	row, err := k.Find(ctx, id)
@@ -108,6 +134,11 @@ func (k *Kernel[H, I]) Update(
 		}
 	}
 	return k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		if beforeLock != nil {
+			if err := beforeLock(ctx, tx, row); err != nil {
+				return err
+			}
+		}
 		locked, err := tx.Lock(ctx, id)
 		if err != nil {
 			return k.mapNotFound(err)
@@ -116,7 +147,7 @@ func (k *Kernel[H, I]) Update(
 			return errApprovedUpdate()
 		}
 		if mutate != nil {
-			if err := mutate(ctx, locked); err != nil {
+			if err := mutate(ctx, tx, locked); err != nil {
 				return err
 			}
 		}
@@ -144,8 +175,17 @@ func (k *Kernel[H, I]) Delete(ctx context.Context, id int64) error {
 		return errApprovedDelete()
 	}
 	return k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		// 先锁自身行再跑下游引用检查：子单创建先锁父单，删除等锁后能看到已
+		// 提交的子单，避免「检查漏计 → 子单提交 → 父单删除」的 TOCTOU。
+		locked, err := tx.Lock(ctx, id)
+		if err != nil {
+			return k.mapNotFound(err)
+		}
+		if locked.Base().Status != model.DocStatusUnaudited {
+			return errApprovedDelete()
+		}
 		if k.spec.BeforeDelete != nil {
-			if err := k.spec.BeforeDelete(ctx, tx, row); err != nil {
+			if err := k.spec.BeforeDelete(ctx, tx, locked); err != nil {
 				return err
 			}
 		}
@@ -174,11 +214,20 @@ func (k *Kernel[H, I]) SetStatus(ctx context.Context, id int64, target int8) err
 	if idempotent {
 		return nil
 	}
+	isolation := k.spec.ApproveIsolation
+	if target == model.DocStatusUnaudited {
+		isolation = k.spec.UnapproveIsolation
+	}
 	run := k.store.Transaction
-	if k.spec.Isolation == IsolationReadCommitted {
+	if isolation == IsolationReadCommitted {
 		run = k.store.TransactionReadCommitted
 	}
 	return run(ctx, func(tx Tx[H, I]) error {
+		if k.spec.BeforeClaim != nil {
+			if err := k.spec.BeforeClaim(ctx, tx, row); err != nil {
+				return err
+			}
+		}
 		rows, err := tx.UpdateStatusIf(ctx, id, current, target)
 		if err != nil {
 			return err

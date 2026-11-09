@@ -36,23 +36,22 @@ const (
 // PurchaseOrder 是采购订单主表。
 type PurchaseOrder struct {
 	model.BaseEntity
-	TenantID int64 `gorm:"index;not null;default:1" json:"tenantId"`
+	DocBase `gorm:"embedded"`
 	// OrderNo 是订单号：CG + yyyyMMdd（业务时区）+ 至少 4 位序号，租户内唯一
 	//（spec §3.3 字面列名 order_no），erp_sequence 事务内原子发放。
 	OrderNo    string    `gorm:"column:order_no;size:32;not null" json:"orderNo"`
 	SupplierID int64     `gorm:"not null" json:"supplierId"`
 	OrderTime  time.Time `gorm:"not null" json:"orderTime"`
-	Status     int8      `gorm:"not null;default:10" json:"status"`
 	Remark     string    `gorm:"size:500" json:"remark"`
-
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
 
 	// Items 是明细（Get/Create/Update 路径装载，列表分页不装载）。
 	Items []PurchaseOrderItem `gorm:"foreignKey:PurchaseOrderID" json:"items,omitempty"`
 }
 
 func (PurchaseOrder) TableName() string { return "erp_purchase_order" }
+
+// SetNo 实现 doc.Header（业务时间列 order_time）。
+func (d *PurchaseOrder) SetNo(v string) { d.OrderNo = v }
 
 // PurchaseOrderItem 是采购订单明细。InCount/ReturnCount 为进度回写列
 // （服务端重算，创建/编辑入参不采纳）。
@@ -74,28 +73,27 @@ func (PurchaseOrderItem) TableName() string { return "erp_purchase_order_items" 
 // PurchaseIn 是采购入库单主表。
 type PurchaseIn struct {
 	model.BaseEntity
-	TenantID int64  `gorm:"index;not null;default:1" json:"tenantId"`
-	No       string `gorm:"size:32;not null" json:"no"`
+	DocBase `gorm:"embedded"`
+	No      string `gorm:"size:32;not null" json:"no"`
 	// SupplierID 必须与挂单订单的供应商一致（服务端校验）。
 	SupplierID int64 `gorm:"not null" json:"supplierId"`
 	// OrderID 必填且必须是已审核采购订单（spec §4.4）。
 	OrderID     int64     `gorm:"not null" json:"orderId"`
 	WarehouseID int64     `gorm:"not null" json:"warehouseId"`
 	InTime      time.Time `gorm:"not null" json:"inTime"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	// TotalPrice 单据金额 = 明细行金额合计（服务端计算冗余）。
 	TotalPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 	// PaymentPrice 已核销付款回写（本票只落列，核销在 #94）。
 	PaymentPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"paymentPrice"`
 	Remark       string      `gorm:"size:500" json:"remark"`
 
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
-
 	Items []PurchaseInItem `gorm:"foreignKey:PurchaseInID" json:"items,omitempty"`
 }
 
 func (PurchaseIn) TableName() string { return "erp_purchase_in" }
+
+// SetNo 实现 doc.Header（业务时间列 in_time）。
+func (d *PurchaseIn) SetNo(v string) { d.No = v }
 
 // PurchaseInItem 是采购入库单明细。
 type PurchaseInItem struct {
@@ -114,28 +112,27 @@ func (PurchaseInItem) TableName() string { return "erp_purchase_in_items" }
 // 入参不收，spec §3.3）。
 type PurchaseReturn struct {
 	model.BaseEntity
-	TenantID int64  `gorm:"index;not null;default:1" json:"tenantId"`
-	No       string `gorm:"size:32;not null" json:"no"`
+	DocBase `gorm:"embedded"`
+	No      string `gorm:"size:32;not null" json:"no"`
 	// SupplierID 必须与挂单入库单的供应商一致（服务端校验）。
 	SupplierID int64 `gorm:"not null" json:"supplierId"`
 	// InID 必填且必须是已审核采购入库单（spec §4.4）。
 	InID        int64     `gorm:"not null" json:"inId"`
 	WarehouseID int64     `gorm:"not null" json:"warehouseId"`
 	ReturnTime  time.Time `gorm:"not null" json:"returnTime"`
-	Status      int8      `gorm:"not null;default:10" json:"status"`
 	// TotalPrice 单据金额 = 明细行金额合计（服务端计算冗余）。
 	TotalPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"totalPrice"`
 	// RefundPrice 已核销退款回写（本票只落列，核销在 #94）。
 	RefundPrice money.Money `gorm:"type:decimal(12,2);not null;default:0.00" json:"refundPrice"`
 	Remark      string      `gorm:"size:500" json:"remark"`
 
-	OwnerUserID int64 `gorm:"index;not null;default:0" json:"ownerUserId"`
-	OwnerDeptID int64 `gorm:"index;not null;default:0" json:"ownerDeptId"`
-
 	Items []PurchaseReturnItem `gorm:"foreignKey:PurchaseReturnID" json:"items,omitempty"`
 }
 
 func (PurchaseReturn) TableName() string { return "erp_purchase_return" }
+
+// SetNo 实现 doc.Header（业务时间列 return_time）。
+func (d *PurchaseReturn) SetNo(v string) { d.No = v }
 
 // PurchaseReturnItem 是采购退货单明细。
 type PurchaseReturnItem struct {

@@ -9,7 +9,6 @@ package doc
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 )
@@ -24,15 +23,14 @@ var ErrNotFound = errors.New("doc: not found")
 type Header interface {
 	GetID() int64
 	Base() *model.DocBase
-	GetNo() string
 	SetNo(string)
-	GetBizTime() time.Time
-	SetBizTime(time.Time)
 }
 
 // Store 是内核的存储入口：事务外 finder + 两种隔离级别的事务。
 type Store[H Header, I any] interface {
 	Find(ctx context.Context, id int64) (H, error)
+	// FindWithItems 事务外读取主表并预载明细（详情页用，可见性由内核校验）。
+	FindWithItems(ctx context.Context, id int64) (H, error)
 	Transaction(ctx context.Context, fn func(Tx[H, I]) error) error
 	TransactionReadCommitted(ctx context.Context, fn func(Tx[H, I]) error) error
 }
@@ -62,8 +60,7 @@ type Env interface {
 
 // Labels 是内核标准文案的单据/明细名。
 type Labels struct {
-	Doc  string
-	Item string
+	Doc string
 }
 
 // Isolation 是审核/反审核事务的隔离级别。
@@ -78,16 +75,22 @@ const (
 
 // Spec 是一类单据对内核的声明。
 type Spec[H Header, I any] struct {
-	Labels     Labels
-	Isolation  Isolation
-	NoPrefix   string
-	SeqBizType string
+	Labels Labels
+	// ApproveIsolation/UnapproveIsolation 分别控制审核/反审核事务的隔离级别；
+	// 零值 IsolationDefault（仓储默认，REPEATABLE READ）。
+	ApproveIsolation   Isolation
+	UnapproveIsolation Isolation
+	NoPrefix           string
+	SeqBizType         string
 
 	// Approve/Unapprove 在事务内、状态认领成功后执行落账/回滚。
 	Approve   func(ctx context.Context, tx Tx[H, I], doc H) error
 	Unapprove func(ctx context.Context, tx Tx[H, I], doc H) error
 	// BeforeDelete 在事务内、条件软删前执行下游引用禁令（可为 nil）。
 	BeforeDelete func(ctx context.Context, tx Tx[H, I], doc H) error
+	// BeforeClaim 在 SetStatus 打开事务后、状态认领前执行（可为 nil）。
+	// 用于必须先锁父单（如退货的 in→order 锁序）再认领自身的单据。
+	BeforeClaim func(ctx context.Context, tx Tx[H, I], doc H) error
 }
 
 // Kernel 是一类单据的内核实例。

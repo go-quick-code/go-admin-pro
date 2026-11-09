@@ -26,32 +26,10 @@ type SaleReturnFilter struct {
 	SelfOwnerUserID int64
 }
 
-// CreateSaleReturn 创建销售退货单主表。
-func (r *Repository) CreateSaleReturn(ctx context.Context, row *model.SaleReturn) error {
-	return r.db.WithContext(ctx).Create(row).Error
-}
-
-// CreateSaleReturnItems 批量创建销售退货单明细。
-func (r *Repository) CreateSaleReturnItems(ctx context.Context, items []model.SaleReturnItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&items).Error
-}
-
 // FindSaleReturnByID 按 ID 查销售退货单主表（租户插件自动过滤），不存在返回 nil。
 func (r *Repository) FindSaleReturnByID(ctx context.Context, id int64) (*model.SaleReturn, error) {
 	var row model.SaleReturn
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
-		return nil, notFound(err)
-	}
-	return &row, nil
-}
-
-// FindSaleReturnWithItems 查询销售退货单带头 + 明细（详情/审核/反审核用）。
-func (r *Repository) FindSaleReturnWithItems(ctx context.Context, id int64) (*model.SaleReturn, error) {
-	var row model.SaleReturn
-	if err := r.db.WithContext(ctx).Preload("Items").First(&row, id).Error; err != nil {
 		return nil, notFound(err)
 	}
 	return &row, nil
@@ -103,31 +81,6 @@ func (r *Repository) saleReturnQuery(ctx context.Context, f SaleReturnFilter) *g
 	}
 	q = applyOwnerScope(q, f.OwnerDeptIDs, f.SelfOwnerUserID)
 	return q
-}
-
-// SaveSaleReturn 全量保存销售退货单主表（更新路径）。
-func (r *Repository) SaveSaleReturn(ctx context.Context, row *model.SaleReturn) error {
-	return r.db.WithContext(ctx).Save(row).Error
-}
-
-// DeleteSaleReturnIfUnaudited 条件软删除销售退货单（status 谓词 + 影响行数，安全 F1）。
-func (r *Repository) DeleteSaleReturnIfUnaudited(ctx context.Context, id int64) (int64, error) {
-	return r.deleteIfStatus(ctx, &model.SaleReturn{}, id, model.DocStatusUnaudited)
-}
-
-// DeleteSaleReturnItems 软删除销售退货单的全部明细（编辑替换/删除单据时）。
-func (r *Repository) DeleteSaleReturnItems(ctx context.Context, docID int64) error {
-	return r.db.WithContext(ctx).
-		Where("sale_return_id = ?", docID).
-		Delete(&model.SaleReturnItem{}).Error
-}
-
-// UpdateSaleReturnStatusIf 乐观认领审核状态（防并发双重审核/反审核双重入账）。
-func (r *Repository) UpdateSaleReturnStatusIf(ctx context.Context, id int64, fromStatus, toStatus int8) (int64, error) {
-	res := r.db.WithContext(ctx).Model(&model.SaleReturn{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	return res.RowsAffected, res.Error
 }
 
 // CountSaleReturnsByCustomer 引用计数：引用该客户的销售退货单数。

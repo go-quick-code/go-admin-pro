@@ -6,14 +6,39 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/erp/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/erp/service/doc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
+
+// financePaymentKernel 构造付款单内核：审核/反审核均用 READ COMMITTED
+// （核销上限的聚合必须是当前读）。
+func (s *Service) financePaymentKernel() *doc.Kernel[*model.FinancePayment, model.FinancePaymentItem] {
+	return doc.New(docEnv{s}, s.financePaymentStore(), doc.Spec[*model.FinancePayment, model.FinancePaymentItem]{
+		Labels:             doc.Labels{Doc: "付款单"},
+		NoPrefix:           FinancePaymentNoPrefix,
+		SeqBizType:         SeqBizTypeFinancePayment,
+		ApproveIsolation:   doc.IsolationReadCommitted,
+		UnapproveIsolation: doc.IsolationReadCommitted,
+		Approve:            s.approveFinancePaymentDoc,
+		Unapprove:          s.unapproveFinancePaymentDoc,
+	})
+}
+
+// financePaymentStore 装配付款单的泛型存储。
+func (s *Service) financePaymentStore() doc.Store[*model.FinancePayment, model.FinancePaymentItem] {
+	return newGenericDocStore(s.repo, s.businessNow, DocSchema[*model.FinancePayment, model.FinancePaymentItem]{
+		New:          func() *model.FinancePayment { return &model.FinancePayment{} },
+		ItemsFK:      "payment_id",
+		SetItemDocID: func(it *model.FinancePaymentItem, id int64) { it.PaymentID = id },
+	})
+}
 
 // ListFinancePayments 付款单分页（筛选 + owner 数据范围，spec §5）。
 func (s *Service) ListFinancePayments(ctx context.Context, req *dto.FinancePaymentPageReq) ([]dto.FinancePaymentRow, int64, error) {
@@ -100,11 +125,7 @@ func (s *Service) assembleFinancePaymentRows(ctx context.Context, list []model.F
 
 // GetFinancePayment 付款单详情（头 + 明细 + 被核销单据单号）。
 func (s *Service) GetFinancePayment(ctx context.Context, id int64) (*dto.FinancePaymentDetail, error) {
-	row, err := s.findFinancePayment(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	full, err := s.repo.FindFinancePaymentWithItems(ctx, row.ID)
+	full, err := s.financePaymentKernel().FindWithItems(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +176,7 @@ func (s *Service) GetFinancePayment(ctx context.Context, id int64) (*dto.Finance
 }
 
 // CreateFinancePayment 创建付款单（未审核）：明细校验 → 供应商/账户/经手人存在
-// → 明细引用只挂已审核采购入库/退货且供应商一致 → 事务内发放单号（FK）→ 落库。
+// → 明细引用只挂已审核采购入库/退货且供应商一致 → 内核事务内发号落主表与明细。
 func (s *Service) CreateFinancePayment(ctx context.Context, req *dto.FinancePaymentCreateReq) (*model.FinancePayment, error) {
 	drafts, err := buildFinancePaymentDrafts(req.Items)
 	if err != nil {
@@ -177,200 +198,103 @@ func (s *Service) CreateFinancePayment(ctx context.Context, req *dto.FinancePaym
 	if err := s.checkFinanceItemRefs(ctx, financeSidePayment, req.SupplierId, drafts); err != nil {
 		return nil, err
 	}
-	ownerID := CurrentUserID(ctx)
-	deptID, err := s.ownerDeptSnapshot(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	var doc *model.FinancePayment
-	err = s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		no, err := s.nextStockDocNo(ctx, tx, SeqBizTypeFinancePayment, FinancePaymentNoPrefix)
-		if err != nil {
-			return err
-		}
-		doc = &model.FinancePayment{
-			No:            no,
-			SupplierID:    req.SupplierId,
-			AccountID:     req.AccountId,
-			PaymentUserID: req.PaymentUserId,
-			PaymentTime:   paymentTime,
-			Status:        model.DocStatusUnaudited,
-			Remark:        req.Remark,
-			OwnerUserID:   ownerID,
-			OwnerDeptID:   deptID,
-		}
-		if err := tx.CreateFinancePayment(ctx, doc); err != nil {
-			return err
-		}
-		return tx.CreateFinancePaymentItems(ctx, financePaymentItemRows(doc.ID, drafts))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return s.financePaymentKernel().Create(ctx, nil,
+		func(ctx context.Context) (*model.FinancePayment, error) {
+			return &model.FinancePayment{
+				SupplierID:    req.SupplierId,
+				AccountID:     req.AccountId,
+				PaymentUserID: req.PaymentUserId,
+				PaymentTime:   paymentTime,
+				Remark:        req.Remark,
+			}, nil
+		},
+		func(ctx context.Context, d *model.FinancePayment) ([]model.FinancePaymentItem, error) {
+			return financePaymentItemRows(d.ID, drafts), nil
+		},
+	)
 }
 
 // UpdateFinancePayment 修改付款单（仅未审核，已审核 409）。
 func (s *Service) UpdateFinancePayment(ctx context.Context, req *dto.FinancePaymentUpdateReq) error {
-	row, err := s.findFinancePayment(ctx, req.ID)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可修改")
-	}
-	drafts, err := buildFinancePaymentDrafts(req.Items)
-	if err != nil {
-		return err
-	}
-	paymentTime, err := s.parseDocTime(req.PaymentTime, "付款时间")
-	if err != nil {
-		return err
-	}
-	if err := s.checkPurchaseSupplier(ctx, req.SupplierId); err != nil {
-		return err
-	}
-	if err := s.checkFinanceAccount(ctx, req.AccountId); err != nil {
-		return err
-	}
-	if err := s.checkFinanceHandlerUser(ctx, req.PaymentUserId); err != nil {
-		return err
-	}
-	if err := s.checkFinanceItemRefs(ctx, financeSidePayment, req.SupplierId, drafts); err != nil {
-		return err
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 状态不变量绑定到写入路径（安全 F1）：事务内锁自身行并复核 status=10，
-		// 与审核的 UPDATE ... WHERE status=10 认领在同一行锁上串行化。
-		locked, err := tx.FindFinancePaymentByIDForUpdate(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("付款单不存在")
-		}
-		if locked.Status != model.DocStatusUnaudited {
-			return xerr.Conflict("已审核单据不可修改")
-		}
-		locked.SupplierID = req.SupplierId
-		locked.AccountID = req.AccountId
-		locked.PaymentUserID = req.PaymentUserId
-		locked.PaymentTime = paymentTime
-		locked.Remark = req.Remark
-		if err := tx.SaveFinancePayment(ctx, locked); err != nil {
-			return err
-		}
-		if err := tx.DeleteFinancePaymentItems(ctx, row.ID); err != nil {
-			return err
-		}
-		return tx.CreateFinancePaymentItems(ctx, financePaymentItemRows(row.ID, drafts))
-	})
+	var drafts []financeItemDraft
+	var paymentTime time.Time
+	return s.financePaymentKernel().Update(ctx, req.ID,
+		func(ctx context.Context, d *model.FinancePayment) error {
+			var err error
+			drafts, err = buildFinancePaymentDrafts(req.Items)
+			if err != nil {
+				return err
+			}
+			paymentTime, err = s.parseDocTime(req.PaymentTime, "付款时间")
+			if err != nil {
+				return err
+			}
+			if err := s.checkPurchaseSupplier(ctx, req.SupplierId); err != nil {
+				return err
+			}
+			if err := s.checkFinanceAccount(ctx, req.AccountId); err != nil {
+				return err
+			}
+			if err := s.checkFinanceHandlerUser(ctx, req.PaymentUserId); err != nil {
+				return err
+			}
+			return s.checkFinanceItemRefs(ctx, financeSidePayment, req.SupplierId, drafts)
+		},
+		nil,
+		func(ctx context.Context, _ doc.Tx[*model.FinancePayment, model.FinancePaymentItem], d *model.FinancePayment) error {
+			d.SupplierID = req.SupplierId
+			d.AccountID = req.AccountId
+			d.PaymentUserID = req.PaymentUserId
+			d.PaymentTime = paymentTime
+			d.Remark = req.Remark
+			return nil
+		},
+		func(ctx context.Context, d *model.FinancePayment) ([]model.FinancePaymentItem, error) {
+			return financePaymentItemRows(d.ID, drafts), nil
+		},
+	)
 }
 
 // DeleteFinancePayment 删除付款单（仅未审核，已审核 409）。
 func (s *Service) DeleteFinancePayment(ctx context.Context, id int64) error {
-	row, err := s.findFinancePayment(ctx, id)
-	if err != nil {
-		return err
-	}
-	if row.Status != model.DocStatusUnaudited {
-		return xerr.Conflict("已审核单据不可删除")
-	}
-	return s.repo.Transaction(ctx, func(tx *repository.Repository) error {
-		// 条件软删 WHERE id=? AND status=10（安全 F1）：影响行数为 0 → 409。
-		deleted, err := tx.DeleteFinancePaymentIfUnaudited(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		if deleted == 0 {
-			return xerr.Conflict("已审核单据不可删除")
-		}
-		return tx.DeleteFinancePaymentItems(ctx, row.ID)
-	})
+	return s.financePaymentKernel().Delete(ctx, id)
 }
 
 // UpdateFinancePaymentStatus 审核（10→20）/反审核（20→10），幂等目标态。
 func (s *Service) UpdateFinancePaymentStatus(ctx context.Context, req *dto.FinanceDocUpdateStatusReq) error {
-	row, err := s.findFinancePayment(ctx, req.ID)
+	return s.financePaymentKernel().SetStatus(ctx, req.ID, req.Status)
+}
+
+// approveFinancePaymentDoc 审核落账（内核已认领并装载明细，READ COMMITTED）：
+// 锁定并复核采购单据（已审核 + 供应商一致）→ 核销上限 → 重算回写
+// payment_price/refund_price。
+func (s *Service) approveFinancePaymentDoc(ctx context.Context, tx doc.Tx[*model.FinancePayment, model.FinancePaymentItem], d *model.FinancePayment) error {
+	repo, err := docRepo(tx)
 	if err != nil {
 		return err
 	}
-	idempotent, err := checkDocStatusTransition(row.Status, req.Status)
+	own, err := groupFinanceDrafts(financePaymentDrafts(d.Items))
 	if err != nil {
 		return err
 	}
-	if idempotent {
-		return nil
+	if err := s.checkFinanceApproveRefs(ctx, repo, financeSidePayment, d.SupplierID, own, d.ID); err != nil {
+		return err
 	}
-	if req.Status == model.DocStatusApproved {
-		return s.approveFinancePayment(ctx, row)
-	}
-	return s.unapproveFinancePayment(ctx, row)
+	return s.lockAndRecomputeFinanceWritebacks(ctx, repo, financeSidePayment, own)
 }
 
-// approveFinancePayment 审核落账（spec §4.7）：认领状态 → 锁定并复核采购单据
-// （已审核 + 供应商一致）→ 核销上限 → 重算回写 payment_price/refund_price。
-func (s *Service) approveFinancePayment(ctx context.Context, row *model.FinancePayment) error {
-	// READ COMMITTED：持有目标单据行锁后的核销聚合必须是当前读（见 repository
-	// TransactionReadCommitted 注释），上限不变量才不受并发已提交核销影响。
-	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateFinancePaymentStatusIf(ctx, row.ID, model.DocStatusUnaudited, model.DocStatusApproved)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindFinancePaymentWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		own, err := groupFinanceDrafts(financePaymentDrafts(doc.Items))
-		if err != nil {
-			return err
-		}
-		if err := s.checkFinanceApproveRefs(ctx, tx, financeSidePayment, doc.SupplierID, own, doc.ID); err != nil {
-			return err
-		}
-		return s.lockAndRecomputeFinanceWritebacks(ctx, tx, financeSidePayment, own)
-	})
-}
-
-// unapproveFinancePayment 反审核：认领状态 → 重算回写（额度释放）。
-func (s *Service) unapproveFinancePayment(ctx context.Context, row *model.FinancePayment) error {
-	return s.repo.TransactionReadCommitted(ctx, func(tx *repository.Repository) error {
-		claimed, err := tx.UpdateFinancePaymentStatusIf(ctx, row.ID, model.DocStatusApproved, model.DocStatusUnaudited)
-		if err != nil {
-			return err
-		}
-		if claimed == 0 {
-			return xerr.Conflict("单据状态已变化，请刷新后重试")
-		}
-		doc, err := tx.FindFinancePaymentWithItems(ctx, row.ID)
-		if err != nil {
-			return err
-		}
-		own, err := groupFinanceDrafts(financePaymentDrafts(doc.Items))
-		if err != nil {
-			return err
-		}
-		return s.lockAndRecomputeFinanceWritebacks(ctx, tx, financeSidePayment, own)
-	})
-}
-
-// findFinancePayment 取付款单并做可见性校验（数据范围外一律 404）。
-func (s *Service) findFinancePayment(ctx context.Context, id int64) (*model.FinancePayment, error) {
-	row, err := s.repo.FindFinancePaymentByID(ctx, id)
+// unapproveFinancePaymentDoc 反审核（内核已认领并装载明细，READ COMMITTED）：
+// 重算回写（额度释放）。
+func (s *Service) unapproveFinancePaymentDoc(ctx context.Context, tx doc.Tx[*model.FinancePayment, model.FinancePaymentItem], d *model.FinancePayment) error {
+	repo, err := docRepo(tx)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if row == nil {
-		return nil, xerr.NotFound("付款单不存在")
+	own, err := groupFinanceDrafts(financePaymentDrafts(d.Items))
+	if err != nil {
+		return err
 	}
-	if err := s.checkRowVisible(ctx, "付款单", row.OwnerUserID, row.OwnerDeptID); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return s.lockAndRecomputeFinanceWritebacks(ctx, repo, financeSidePayment, own)
 }
 
 // financePaymentBizNos 批量解析付款明细指向的被核销单据单号。
