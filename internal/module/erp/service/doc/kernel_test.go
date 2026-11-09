@@ -153,6 +153,7 @@ func (t *fakeTx) DeleteItems(_ context.Context, docID int64) error {
 }
 
 func (t *fakeTx) DeleteIfStatus(_ context.Context, id int64, status int8) (int64, error) {
+	t.store.calls = append(t.store.calls, "delete")
 	if t.store.deleteHook != nil {
 		return t.store.deleteHook()
 	}
@@ -400,6 +401,29 @@ func TestKernelUpdateReplacesItems(t *testing.T) {
 	stored := storedHeader(store, 1)
 	if len(stored.Items) != 1 || stored.Items[0].ProductID != 1 {
 		t.Fatalf("明细 = %+v，期望整体替换为 [1]", stored.Items)
+	}
+}
+
+func TestKernelDeleteLocksBeforeHook(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{userID: 7, deptID: 8}
+	spec := doc.Spec[*fakeHeader, fakeItem]{
+		Labels:     doc.Labels{Doc: "测试单"},
+		NoPrefix:   "TS",
+		SeqBizType: "test",
+		BeforeDelete: func(context.Context, doc.Tx[*fakeHeader, fakeItem], *fakeHeader) error {
+			store.calls = append(store.calls, "beforeDelete")
+			return nil
+		},
+	}
+	k := doc.New[*fakeHeader, fakeItem](env, store, spec)
+	store.docs[1] = newUnaudited(1)
+	if err := k.Delete(context.Background(), 1); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	want := []string{"lock", "beforeDelete", "delete"}
+	if !slices.Equal(store.calls, want) {
+		t.Fatalf("calls = %v，期望 %v（删除必须先锁自身行再跑引用检查）", store.calls, want)
 	}
 }
 

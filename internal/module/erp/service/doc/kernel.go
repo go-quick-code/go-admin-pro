@@ -175,8 +175,17 @@ func (k *Kernel[H, I]) Delete(ctx context.Context, id int64) error {
 		return errApprovedDelete()
 	}
 	return k.store.Transaction(ctx, func(tx Tx[H, I]) error {
+		// 先锁自身行再跑下游引用检查：子单创建先锁父单，删除等锁后能看到已
+		// 提交的子单，避免「检查漏计 → 子单提交 → 父单删除」的 TOCTOU。
+		locked, err := tx.Lock(ctx, id)
+		if err != nil {
+			return k.mapNotFound(err)
+		}
+		if locked.Base().Status != model.DocStatusUnaudited {
+			return errApprovedDelete()
+		}
 		if k.spec.BeforeDelete != nil {
-			if err := k.spec.BeforeDelete(ctx, tx, row); err != nil {
+			if err := k.spec.BeforeDelete(ctx, tx, locked); err != nil {
 				return err
 			}
 		}
