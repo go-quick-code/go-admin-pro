@@ -156,267 +156,244 @@ func seedTenant(db *gorm.DB) error {
 }
 
 func seedMenus(db *gorm.DB) error {
-	btn := func(id, parent int64, name, perm string, sort int) sysmodel.Menu {
-		return sysmodel.Menu{
-			BaseEntity: sysmodel.BaseEntity{ID: id}, Name: name, Permission: perm,
-			Type: sysmodel.MenuTypeButton, ParentID: parent, Sort: sort,
-			Visible: true, Status: sysmodel.StatusEnable,
-		}
-	}
-	menu := func(id, parent int64, name, path, component, perm, icon string, sort int) sysmodel.Menu {
-		return sysmodel.Menu{
-			BaseEntity: sysmodel.BaseEntity{ID: id}, Name: name, Permission: perm,
-			Type: sysmodel.MenuTypeMenu, ParentID: parent, Path: path, Component: component,
-			ComponentName: name, Icon: icon, Sort: sort, Visible: true,
-			Status: sysmodel.StatusEnable, KeepAlive: true,
-		}
-	}
-	dir := func(id, parent int64, name, path, icon string, sort int) sysmodel.Menu {
-		return sysmodel.Menu{
-			BaseEntity: sysmodel.BaseEntity{ID: id}, Name: name,
-			Type: sysmodel.MenuTypeDir, ParentID: parent, Path: path, Icon: icon, Sort: sort,
-			Visible: true, Status: sysmodel.StatusEnable,
-		}
-	}
-
 	menus := []sysmodel.Menu{
-		menu(1, 0, "仪表盘", "/dashboard", "dashboard/index", "", "Odometer", 0),
+		menuRow(1, 0, "仪表盘", "/dashboard", "dashboard/index", "", "Odometer", 0),
 
-		dir(100, 0, "系统管理", "/system", "Setting", 10),
-		menu(101, 100, "用户管理", "user", "system/user/index", "system:user:query", "User", 1),
-		menu(102, 100, "角色管理", "role", "system/role/index", "system:role:query", "UserFilled", 2),
-		menu(103, 100, "菜单管理", "menu", "system/menu/index", "system:menu:query", "Menu", 3),
-		menu(104, 100, "部门管理", "dept", "system/dept/index", "system:dept:query", "OfficeBuilding", 4),
-		menu(105, 100, "岗位管理", "post", "system/post/index", "system:post:query", "Postcard", 5),
-		menu(106, 100, "字典管理", "dict", "system/dict/index", "system:dict:query", "Collection", 6),
-		menu(107, 100, "租户管理", "tenant", "system/tenant/index", "system:tenant:query", "Shop", 7),
-		menu(108, 100, "登录日志", "login-log", "system/login-log/index", "system:login-log:query", "Document", 8),
-		menu(109, 100, "操作日志", "operate-log", "system/operate-log/index", "system:operate-log:query", "Tickets", 9),
+		dirRow(100, 0, "系统管理", "/system", "Setting", 10),
+		menuRow(101, 100, "用户管理", "user", "system/user/index", "system:user:query", "User", 1),
+		menuRow(102, 100, "角色管理", "role", "system/role/index", "system:role:query", "UserFilled", 2),
+		menuRow(103, 100, "菜单管理", "menu", "system/menu/index", "system:menu:query", "Menu", 3),
+		menuRow(104, 100, "部门管理", "dept", "system/dept/index", "system:dept:query", "OfficeBuilding", 4),
+		menuRow(105, 100, "岗位管理", "post", "system/post/index", "system:post:query", "Postcard", 5),
+		menuRow(106, 100, "字典管理", "dict", "system/dict/index", "system:dict:query", "Collection", 6),
+		menuRow(107, 100, "租户管理", "tenant", "system/tenant/index", "system:tenant:query", "Shop", 7),
+		menuRow(108, 100, "登录日志", "login-log", "system/login-log/index", "system:login-log:query", "Document", 8),
+		menuRow(109, 100, "操作日志", "operate-log", "system/operate-log/index", "system:operate-log:query", "Tickets", 9),
 		// 租户套餐（issue #69）：110 段（109 操作日志已占用，110 起空闲）。
 		// 套餐是平台级资源，页面仅平台租户可操作；按钮码按菜单 ID×10+n。
-		menu(110, 100, "租户套餐", "tenant-package", "system/tenant-package/index", "system:tenant-package:query", "Box", 10),
-		btn(1101, 110, "套餐新增", "system:tenant-package:create", 1),
-		btn(1102, 110, "套餐修改", "system:tenant-package:update", 2),
-		btn(1103, 110, "套餐删除", "system:tenant-package:delete", 3),
+		menuRow(110, 100, "租户套餐", "tenant-package", "system/tenant-package/index", "system:tenant-package:query", "Box", 10),
+		btnRow(1101, 110, "套餐新增", "system:tenant-package:create", 1),
+		btnRow(1102, 110, "套餐修改", "system:tenant-package:update", 2),
+		btnRow(1103, 110, "套餐删除", "system:tenant-package:delete", 3),
 		// 社交登录（issue #76，spec §7.2）：111 段。客户端管理仅平台租户可操作；
 		// 绑定用户查询/解绑是租户内管理动作。按钮码 1111–1115（菜单 ID×10+n，
 		// grep 去重确认空闲）。provider 实现（微信/钉钉/企微）由 #77 承接。
-		menu(111, 100, "社交登录", "social", "system/social/index", "system:social:query", "Connection", 11),
-		btn(1111, 111, "客户端新增", "system:social:create", 1),
-		btn(1112, 111, "客户端修改", "system:social:update", 2),
-		btn(1113, 111, "客户端删除", "system:social:delete", 3),
-		btn(1114, 111, "绑定用户查询", "system:social-user:query", 4),
-		btn(1115, 111, "绑定用户解绑", "system:social-user:delete", 5),
+		menuRow(111, 100, "社交登录", "social", "system/social/index", "system:social:query", "Connection", 11),
+		btnRow(1111, 111, "客户端新增", "system:social:create", 1),
+		btnRow(1112, 111, "客户端修改", "system:social:update", 2),
+		btnRow(1113, 111, "客户端删除", "system:social:delete", 3),
+		btnRow(1114, 111, "绑定用户查询", "system:social-user:query", 4),
+		btnRow(1115, 111, "绑定用户解绑", "system:social-user:delete", 5),
 		// 敏感词（issue #81，spec §7.2）：112 段。租户级词库管理 + 检测文本框；
 		// 按钮码 1121–1123（菜单 ID×10+n，grep 去重确认空闲）。
-		menu(112, 100, "敏感词", "sensitive-word", "system/sensitive-word/index", "system:sensitive-word:query", "Key", 12),
-		btn(1121, 112, "敏感词新增", "system:sensitive-word:create", 1),
-		btn(1122, 112, "敏感词修改", "system:sensitive-word:update", 2),
-		btn(1123, 112, "敏感词删除", "system:sensitive-word:delete", 3),
+		menuRow(112, 100, "敏感词", "sensitive-word", "system/sensitive-word/index", "system:sensitive-word:query", "Key", 12),
+		btnRow(1121, 112, "敏感词新增", "system:sensitive-word:create", 1),
+		btnRow(1122, 112, "敏感词修改", "system:sensitive-word:update", 2),
+		btnRow(1123, 112, "敏感词删除", "system:sensitive-word:delete", 3),
 
-		btn(1011, 101, "用户新增", "system:user:create", 1),
-		btn(1012, 101, "用户修改", "system:user:update", 2),
-		btn(1013, 101, "用户删除", "system:user:delete", 3),
+		btnRow(1011, 101, "用户新增", "system:user:create", 1),
+		btnRow(1012, 101, "用户修改", "system:user:update", 2),
+		btnRow(1013, 101, "用户删除", "system:user:delete", 3),
 		// 简表权限（PR #39 残余风险 C）：simple-list 不再对任意登录用户开放。
 		// 用户简表同时供 CRM 负责人下拉使用，演示销售角色在 crm_demo.go 单独绑定。
-		btn(1014, 101, "用户简表", "system:user:simple-list", 4),
-		btn(1021, 102, "角色新增", "system:role:create", 1),
-		btn(1022, 102, "角色修改", "system:role:update", 2),
-		btn(1023, 102, "角色删除", "system:role:delete", 3),
-		btn(1024, 102, "角色简表", "system:role:simple-list", 4),
-		btn(1031, 103, "菜单新增", "system:menu:create", 1),
-		btn(1032, 103, "菜单修改", "system:menu:update", 2),
-		btn(1033, 103, "菜单删除", "system:menu:delete", 3),
-		btn(1041, 104, "部门新增", "system:dept:create", 1),
-		btn(1042, 104, "部门修改", "system:dept:update", 2),
-		btn(1043, 104, "部门删除", "system:dept:delete", 3),
-		btn(1051, 105, "岗位新增", "system:post:create", 1),
-		btn(1052, 105, "岗位修改", "system:post:update", 2),
-		btn(1053, 105, "岗位删除", "system:post:delete", 3),
-		btn(1054, 105, "岗位简表", "system:post:simple-list", 4),
-		btn(1061, 106, "字典新增", "system:dict:create", 1),
-		btn(1062, 106, "字典修改", "system:dict:update", 2),
-		btn(1063, 106, "字典删除", "system:dict:delete", 3),
-		btn(1071, 107, "租户新增", "system:tenant:create", 1),
-		btn(1072, 107, "租户修改", "system:tenant:update", 2),
-		btn(1073, 107, "租户删除", "system:tenant:delete", 3),
-		btn(1081, 108, "日志清空", "system:login-log:delete", 1),
-		btn(1091, 109, "日志清空", "system:operate-log:delete", 1),
+		btnRow(1014, 101, "用户简表", "system:user:simple-list", 4),
+		btnRow(1021, 102, "角色新增", "system:role:create", 1),
+		btnRow(1022, 102, "角色修改", "system:role:update", 2),
+		btnRow(1023, 102, "角色删除", "system:role:delete", 3),
+		btnRow(1024, 102, "角色简表", "system:role:simple-list", 4),
+		btnRow(1031, 103, "菜单新增", "system:menu:create", 1),
+		btnRow(1032, 103, "菜单修改", "system:menu:update", 2),
+		btnRow(1033, 103, "菜单删除", "system:menu:delete", 3),
+		btnRow(1041, 104, "部门新增", "system:dept:create", 1),
+		btnRow(1042, 104, "部门修改", "system:dept:update", 2),
+		btnRow(1043, 104, "部门删除", "system:dept:delete", 3),
+		btnRow(1051, 105, "岗位新增", "system:post:create", 1),
+		btnRow(1052, 105, "岗位修改", "system:post:update", 2),
+		btnRow(1053, 105, "岗位删除", "system:post:delete", 3),
+		btnRow(1054, 105, "岗位简表", "system:post:simple-list", 4),
+		btnRow(1061, 106, "字典新增", "system:dict:create", 1),
+		btnRow(1062, 106, "字典修改", "system:dict:update", 2),
+		btnRow(1063, 106, "字典删除", "system:dict:delete", 3),
+		btnRow(1071, 107, "租户新增", "system:tenant:create", 1),
+		btnRow(1072, 107, "租户修改", "system:tenant:update", 2),
+		btnRow(1073, 107, "租户删除", "system:tenant:delete", 3),
+		btnRow(1081, 108, "日志清空", "system:login-log:delete", 1),
+		btnRow(1091, 109, "日志清空", "system:operate-log:delete", 1),
 		// 地区管理（issue #82，spec §4.8/§5.7/§7.2）：113 段（grep 去重确认
 		// 113/1131 空闲）。行政区划是平台级参考数据，页面只读 + 平台导入；
 		// 查询码挂菜单（树/子级接口对所有登录用户开放，spec §4.8.1，
 		// 供 AreaCascader 在任意页面使用），导入是平台租户专属动作。
-		menu(113, 100, "地区管理", "area", "system/area/index", "system:area:query", "Location", 13),
-		btn(1131, 113, "地区导入", "system:area:import", 1),
+		menuRow(113, 100, "地区管理", "area", "system/area/index", "system:area:query", "Location", 13),
+		btnRow(1131, 113, "地区导入", "system:area:import", 1),
 
-		dir(200, 0, "基础设施", "/infra", "Tools", 20),
-		menu(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),
-		menu(202, 200, "参数配置", "config", "infra/config/index", "infra:config:query", "SetUp", 2),
-		menu(203, 200, "定时任务", "job", "infra/job/index", "infra:job:query", "Timer", 3),
+		dirRow(200, 0, "基础设施", "/infra", "Tools", 20),
+		menuRow(201, 200, "文件管理", "file", "infra/file/index", "infra:file:query", "FolderOpened", 1),
+		menuRow(202, 200, "参数配置", "config", "infra/config/index", "infra:config:query", "SetUp", 2),
+		menuRow(203, 200, "定时任务", "job", "infra/job/index", "infra:job:query", "Timer", 3),
 		// 访问日志（issue #80，spec §7.2）：204 段，按钮码 2041（菜单 ID×10+n，
 		// grep 去重确认 204/2041 未被占用）。
-		menu(204, 200, "访问日志", "api-log", "infra/api-log/index", "infra:api-log:query", "Document", 4),
+		menuRow(204, 200, "访问日志", "api-log", "infra/api-log/index", "infra:api-log:query", "Document", 4),
 		// 数据库文档（issue #83，spec §7.2）：205 段（grep 去重确认 205 空闲）。
 		// 表清单/详情/导出共用 infra:db-doc:query（spec §5.8 无其他权限码，
 		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
-		menu(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
+		menuRow(205, 200, "数据库文档", "db-doc", "infra/db-doc/index", "infra:db-doc:query", "Document", 5),
 		// 监控面板（issue #84，spec §7.2）：206 段（grep 去重确认 206/2060 空闲）。
 		// overview/requests 共用 infra:monitor:query（spec §5.8 无其他权限码，
 		// 不设按钮），「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
-		menu(206, 200, "监控面板", "monitor", "infra/monitor/index", "infra:monitor:query", "Monitor", 6),
+		menuRow(206, 200, "监控面板", "monitor", "infra/monitor/index", "infra:monitor:query", "Monitor", 6),
 
-		btn(2011, 201, "文件上传", "infra:file:upload", 1),
-		btn(2012, 201, "文件删除", "infra:file:delete", 2),
-		btn(2021, 202, "参数新增", "infra:config:create", 1),
-		btn(2022, 202, "参数修改", "infra:config:update", 2),
-		btn(2023, 202, "参数删除", "infra:config:delete", 3),
-		btn(2031, 203, "任务新增", "infra:job:create", 1),
-		btn(2032, 203, "任务修改", "infra:job:update", 2),
-		btn(2033, 203, "任务删除", "infra:job:delete", 3),
+		btnRow(2011, 201, "文件上传", "infra:file:upload", 1),
+		btnRow(2012, 201, "文件删除", "infra:file:delete", 2),
+		btnRow(2021, 202, "参数新增", "infra:config:create", 1),
+		btnRow(2022, 202, "参数修改", "infra:config:update", 2),
+		btnRow(2023, 202, "参数删除", "infra:config:delete", 3),
+		btnRow(2031, 203, "任务新增", "infra:job:create", 1),
+		btnRow(2032, 203, "任务修改", "infra:job:update", 2),
+		btnRow(2033, 203, "任务删除", "infra:job:delete", 3),
 		// 批量删除与清空共用删除码（spec §5.5：删除/清空均为 infra:api-log:delete）。
-		btn(2041, 204, "日志删除", "infra:api-log:delete", 1),
+		btnRow(2041, 204, "日志删除", "infra:api-log:delete", 1),
 
-		menu(300, 0, "代码生成", "/codegen", "infra/codegen/index", "infra:codegen:query", "MagicStick", 30),
-		btn(3001, 300, "生成代码", "infra:codegen:generate", 1),
+		menuRow(300, 0, "代码生成", "/codegen", "infra/codegen/index", "infra:codegen:query", "MagicStick", 30),
+		btnRow(3001, 300, "生成代码", "infra:codegen:generate", 1),
 
 		// CRM（issue #8 起逐步落地）：菜单挂在动态路由下，组件路径对应 web/src/views。
 		// 联系人（issue #9）：无独立页面，作为客户详情的 tab 呈现，
 		// 按钮权限码挂客户管理菜单下（可见性也跟随客户的数据范围）。
-		dir(400, 0, "CRM", "/crm", "Suitcase", 40),
-		menu(401, 400, "客户管理", "customer", "crm/customer/index", "crm:customer:query", "Avatar", 1),
-		btn(4011, 401, "客户新增", "crm:customer:create", 1),
-		btn(4012, 401, "客户修改", "crm:customer:update", 2),
-		btn(4013, 401, "客户删除", "crm:customer:delete", 3),
-		btn(4014, 401, "联系人查询", "crm:contact:query", 4),
-		btn(4015, 401, "联系人新增", "crm:contact:create", 5),
-		btn(4016, 401, "联系人修改", "crm:contact:update", 6),
-		btn(4017, 401, "联系人删除", "crm:contact:delete", 7),
+		dirRow(400, 0, "CRM", "/crm", "Suitcase", 40),
+		menuRow(401, 400, "客户管理", "customer", "crm/customer/index", "crm:customer:query", "Avatar", 1),
+		btnRow(4011, 401, "客户新增", "crm:customer:create", 1),
+		btnRow(4012, 401, "客户修改", "crm:customer:update", 2),
+		btnRow(4013, 401, "客户删除", "crm:customer:delete", 3),
+		btnRow(4014, 401, "联系人查询", "crm:contact:query", 4),
+		btnRow(4015, 401, "联系人新增", "crm:contact:create", 5),
+		btnRow(4016, 401, "联系人修改", "crm:contact:update", 6),
+		btnRow(4017, 401, "联系人删除", "crm:contact:delete", 7),
 		// 公海纵切（issue #13）：公海页面 + 认领按钮，客户管理下加释放/转移按钮。
 		// 按钮段让位 #9 的联系人 4014–4017，改用 4030 段（合并 #13 时重排）。
-		btn(4030, 401, "客户释放", "crm:customer:release", 8),
-		btn(4031, 401, "客户转移", "crm:customer:transfer", 9),
+		btnRow(4030, 401, "客户释放", "crm:customer:release", 8),
+		btnRow(4031, 401, "客户转移", "crm:customer:transfer", 9),
 		// 跟进记录（issue #12）：无独立页面，作为客户详情的 tab 呈现，
 		// 按钮权限码挂客户管理菜单下（可见性跟随客户的数据范围）；
 		// ID 从 4040 起（4014–4017 联系人、4030/4031 释放/转移、402/4021 公海已占用）。
-		btn(4040, 401, "跟进查询", "crm:follow-up:query", 10),
-		btn(4041, 401, "跟进新增", "crm:follow-up:create", 11),
-		btn(4042, 401, "跟进修改", "crm:follow-up:update", 12),
-		btn(4043, 401, "跟进删除", "crm:follow-up:delete", 13),
-		menu(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
-		btn(4021, 402, "客户认领", "crm:customer:claim", 1),
+		btnRow(4040, 401, "跟进查询", "crm:follow-up:query", 10),
+		btnRow(4041, 401, "跟进新增", "crm:follow-up:create", 11),
+		btnRow(4042, 401, "跟进修改", "crm:follow-up:update", 12),
+		btnRow(4043, 401, "跟进删除", "crm:follow-up:delete", 13),
+		menuRow(402, 400, "公海", "pool", "crm/pool/index", "crm:customer:pool:view", "Umbrella", 2),
+		btnRow(4021, 402, "客户认领", "crm:customer:claim", 1),
 		// 公海配置（issue #14）：租户级回收天数/认领上限的编辑入口，
 		// 按钮码接 4050（4014–4017/4030–4031/402/4021/4040–4043 已占用）。
-		btn(4050, 402, "公海配置", "crm:pool-config:update", 2),
+		btnRow(4050, 402, "公海配置", "crm:pool-config:update", 2),
 		// 产品与产品分类（issue #11）：产品管理目录（4060）+ 产品列表/产品分类两个菜单项。
 		// ID 从 4060 起：4014–4017 联系人、4030/4031 释放/转移、4040–4043 跟进、
 		// 402/4021/4050 公海已占用；每个菜单项带查询/新增/修改/删除四个按钮码（codegen menus 片段同款）。
-		dir(4060, 400, "产品管理", "product", "Goods", 3),
-		menu(4061, 4060, "产品列表", "list", "crm/product/index", "crm:product:query", "Goods", 1),
-		btn(4063, 4061, "产品查询", "crm:product:query", 1),
-		btn(4064, 4061, "产品新增", "crm:product:create", 2),
-		btn(4065, 4061, "产品修改", "crm:product:update", 3),
-		btn(4066, 4061, "产品删除", "crm:product:delete", 4),
-		menu(4062, 4060, "产品分类", "category", "crm/product-category/index", "crm:product-category:query", "FolderOpened", 2),
-		btn(4067, 4062, "分类查询", "crm:product-category:query", 1),
-		btn(4068, 4062, "分类新增", "crm:product-category:create", 2),
-		btn(4069, 4062, "分类修改", "crm:product-category:update", 3),
-		btn(4070, 4062, "分类删除", "crm:product-category:delete", 4),
+		dirRow(4060, 400, "产品管理", "product", "Goods", 3),
+		menuRow(4061, 4060, "产品列表", "list", "crm/product/index", "crm:product:query", "Goods", 1),
+		btnRow(4063, 4061, "产品查询", "crm:product:query", 1),
+		btnRow(4064, 4061, "产品新增", "crm:product:create", 2),
+		btnRow(4065, 4061, "产品修改", "crm:product:update", 3),
+		btnRow(4066, 4061, "产品删除", "crm:product:delete", 4),
+		menuRow(4062, 4060, "产品分类", "category", "crm/product-category/index", "crm:product-category:query", "FolderOpened", 2),
+		btnRow(4067, 4062, "分类查询", "crm:product-category:query", 1),
+		btnRow(4068, 4062, "分类新增", "crm:product-category:create", 2),
+		btnRow(4069, 4062, "分类修改", "crm:product-category:update", 3),
+		btnRow(4070, 4062, "分类删除", "crm:product-category:delete", 4),
 		// 商机（issue #15）：菜单 ID 从 4080 起（4060–4070 产品已占用，grep 去重确认）。
 		// 阶段推进是独立动作，挂独立按钮码 crm:opportunity:stage（终态推进 service 拒绝）。
-		menu(4080, 400, "商机管理", "opportunity", "crm/opportunity/index", "crm:opportunity:query", "Coin", 4),
-		btn(4081, 4080, "商机查询", "crm:opportunity:query", 1),
-		btn(4082, 4080, "商机新增", "crm:opportunity:create", 2),
-		btn(4083, 4080, "商机修改", "crm:opportunity:update", 3),
-		btn(4084, 4080, "商机删除", "crm:opportunity:delete", 4),
-		btn(4085, 4080, "商机阶段推进", "crm:opportunity:stage", 5),
+		menuRow(4080, 400, "商机管理", "opportunity", "crm/opportunity/index", "crm:opportunity:query", "Coin", 4),
+		btnRow(4081, 4080, "商机查询", "crm:opportunity:query", 1),
+		btnRow(4082, 4080, "商机新增", "crm:opportunity:create", 2),
+		btnRow(4083, 4080, "商机修改", "crm:opportunity:update", 3),
+		btnRow(4084, 4080, "商机删除", "crm:opportunity:delete", 4),
+		btnRow(4085, 4080, "商机阶段推进", "crm:opportunity:stage", 5),
 		// 合同（issue #16）：菜单 ID 从 4100 起（4060–4070 产品、4080–4085 商机已占用，
 		// grep 去重确认）。crm:contract:approve 自 issue #47 起是默认流程
 		// crm_contract_approval 的审批人规则权限码（候选池由 bpm 物化待办）。
-		menu(4100, 400, "合同管理", "contract", "crm/contract/index", "crm:contract:query", "Tickets", 5),
-		btn(4101, 4100, "合同查询", "crm:contract:query", 1),
-		btn(4102, 4100, "合同新增", "crm:contract:create", 2),
-		btn(4103, 4100, "合同修改", "crm:contract:update", 3),
-		btn(4104, 4100, "合同删除", "crm:contract:delete", 4),
-		btn(4105, 4100, "合同审批", "crm:contract:approve", 5),
+		menuRow(4100, 400, "合同管理", "contract", "crm/contract/index", "crm:contract:query", "Tickets", 5),
+		btnRow(4101, 4100, "合同查询", "crm:contract:query", 1),
+		btnRow(4102, 4100, "合同新增", "crm:contract:create", 2),
+		btnRow(4103, 4100, "合同修改", "crm:contract:update", 3),
+		btnRow(4104, 4100, "合同删除", "crm:contract:delete", 4),
+		btnRow(4105, 4100, "合同审批", "crm:contract:approve", 5),
 		// 回款计划 + 回款记录（issue #18）：菜单 ID 从 4120 起（4060–4070 产品、
 		// 4080–4085 商机、4100–4105 合同已占用，grep 去重确认）。
 		// 计划与记录共用一个页面（记录以每行「记录」抽屉录入），按钮码共用
 		// crm:receivable:query/create/update/delete。
-		menu(4120, 400, "回款管理", "receivable", "crm/receivable/index", "crm:receivable:query", "Money", 6),
-		btn(4121, 4120, "回款查询", "crm:receivable:query", 1),
-		btn(4122, 4120, "回款新增", "crm:receivable:create", 2),
-		btn(4123, 4120, "回款修改", "crm:receivable:update", 3),
-		btn(4124, 4120, "回款删除", "crm:receivable:delete", 4),
+		menuRow(4120, 400, "回款管理", "receivable", "crm/receivable/index", "crm:receivable:query", "Money", 6),
+		btnRow(4121, 4120, "回款查询", "crm:receivable:query", 1),
+		btnRow(4122, 4120, "回款新增", "crm:receivable:create", 2),
+		btnRow(4123, 4120, "回款修改", "crm:receivable:update", 3),
+		btnRow(4124, 4120, "回款删除", "crm:receivable:delete", 4),
 		// Excel 导入导出（issue #20）：按钮码 4160–4166（#19 用 4140–4141，
 		// 4080–4085/4100–4105/4120–4124 已占用，grep 去重确认）。
 		// 导入/模板挂 :import，导出挂 :export；按钮挂在各实体所属菜单下，
 		// 权限判定只看权限码，菜单层级只影响角色分配时的可见性。
-		btn(4160, 401, "客户导入", "crm:customer:import", 14),
-		btn(4161, 401, "客户导出", "crm:customer:export", 15),
-		btn(4162, 401, "联系人导入", "crm:contact:import", 16),
-		btn(4163, 4061, "产品导入", "crm:product:import", 5),
-		btn(4164, 4061, "产品导出", "crm:product:export", 6),
-		btn(4165, 4100, "合同导出", "crm:contract:export", 6),
-		btn(4166, 4120, "回款导出", "crm:receivable:export", 5),
+		btnRow(4160, 401, "客户导入", "crm:customer:import", 14),
+		btnRow(4161, 401, "客户导出", "crm:customer:export", 15),
+		btnRow(4162, 401, "联系人导入", "crm:contact:import", 16),
+		btnRow(4163, 4061, "产品导入", "crm:product:import", 5),
+		btnRow(4164, 4061, "产品导出", "crm:product:export", 6),
+		btnRow(4165, 4100, "合同导出", "crm:contract:export", 6),
+		btnRow(4166, 4120, "回款导出", "crm:receivable:export", 5),
 
 		// OA（issue #43）：业务套件根目录（spec §7.2 菜单段 500，权限码为空——
 		// 目录不可授权动作）。子菜单与按钮码由各域工单按 500 段号段落地
 		//（501 公告、503 请假、504 报销、505 考勤、506 日程、507 会议室、
 		// 508 文档），开工前先 grep 本文件去重再取号。
 		// OA 业务记录的共享可见范围见 oa/service.VisibilityScopeOf（spec §4.6）。
-		dir(500, 0, "OA", "/oa", "Calendar", 50),
+		dirRow(500, 0, "OA", "/oa", "Calendar", 50),
 
 		// 公告（issue #48）：521 段（协调台账分配；grep 去重确认 521/5211–5215
 		// 未被占用）。查询码挂菜单（管理列表与草稿预览入口），创建/编辑/删除/
 		// 发布撤回逐码；5215 已读统计由 #49 承载（码先登记，接口由 #49 落地）。
-		menu(521, 500, "公告", "announcement", "oa/announcement/index", "oa:announcement:query", "Notification", 3),
-		btn(5211, 521, "公告新增", "oa:announcement:create", 1),
-		btn(5212, 521, "公告修改", "oa:announcement:update", 2),
-		btn(5213, 521, "公告删除", "oa:announcement:delete", 3),
-		btn(5214, 521, "公告发布", "oa:announcement:publish", 4),
-		btn(5215, 521, "已读统计", "oa:announcement:read-stats", 5),
+		menuRow(521, 500, "公告", "announcement", "oa/announcement/index", "oa:announcement:query", "Notification", 3),
+		btnRow(5211, 521, "公告新增", "oa:announcement:create", 1),
+		btnRow(5212, 521, "公告修改", "oa:announcement:update", 2),
+		btnRow(5213, 521, "公告删除", "oa:announcement:delete", 3),
+		btnRow(5214, 521, "公告发布", "oa:announcement:publish", 4),
+		btnRow(5215, 521, "已读统计", "oa:announcement:read-stats", 5),
 		// 我的公告（issue #48）：员工侧页面，权限码为空——登录即可（分配了
 		// 菜单的角色可见；后端 GET /oa/announcement/my/page 与已发布详情同为
 		// 登录即可，可见性由受众判定收口）。532 在 500–549 空位自取（#52 占
 		// 529 我的请假、#60 占 530 考勤组管理/531 我的考勤），grep 去重确认
 		// 532 未被占用。
-		menu(532, 500, "我的公告", "announcement-mine", "oa/announcement/mine", "", "Bell", 10),
+		menuRow(532, 500, "我的公告", "announcement-mine", "oa/announcement/mine", "", "Bell", 10),
 
 		// 工作日历（issue #50）：520 段（协调台账分配），按钮段 5201+（菜单ID×10+n，
 		// grep 去重确认 520/5201–5203 未被占用）。查询码挂菜单（月视图入口），
 		// 单日/批量/恢复默认三个维护动作各挂独立按钮码。
-		menu(520, 500, "工作日历", "workday", "oa/workday/index", "oa:workday:query", "AlarmClock", 1),
-		btn(5201, 520, "单日设置", "oa:workday:set", 1),
-		btn(5202, 520, "批量设置", "oa:workday:batch", 2),
-		btn(5203, 520, "恢复默认", "oa:workday:delete", 3),
+		menuRow(520, 500, "工作日历", "workday", "oa/workday/index", "oa:workday:query", "AlarmClock", 1),
+		btnRow(5201, 520, "单日设置", "oa:workday:set", 1),
+		btnRow(5202, 520, "批量设置", "oa:workday:batch", 2),
+		btnRow(5203, 520, "恢复默认", "oa:workday:delete", 3),
 
 		// 请假类型与额度（issue #51）：522 段（协调台账分配，grep 去重确认
 		// 522/528 未被占用）。本工单所有管理动作（类型 CRUD/启停/删除、额度
 		// 初始化/调整/分页）共用单一管理码 oa:leave:manage（#43 helper 登记、
 		// 默认审批流 oa_leave_approval 节点 2 的 HR/管理员码，spec §7.3），
 		// 挂菜单本身，无独立按钮码；类型列表与本人余额登录即可（不经权限码）。
-		menu(522, 500, "请假类型与额度", "leave", "oa/leave/index", "oa:leave:manage", "List", 2),
+		menuRow(522, 500, "请假类型与额度", "leave", "oa/leave/index", "oa:leave:manage", "List", 2),
 		// 我的额度（issue #51）：员工侧页面，权限码为空——登录即可（分配了
 		// 菜单的角色可见；后端 GET /oa/leave/balance/mine 同为登录即可）。
 		// 我的请假页（含额度入口）由 #52 建立（下方菜单 529）；撤回/取消与
 		// 部门可见范围由 #53 扩展。
-		menu(528, 500, "我的额度", "leave-mine", "oa/leave/mine", "", "User", 8),
+		menuRow(528, 500, "我的额度", "leave-mine", "oa/leave/mine", "", "User", 8),
 
 		// 我的请假（issue #52/#53）：529 段（500–549 员工侧空位自取，grep 去重
 		// 确认 529/5291–5296 未被占用；522 管类型与额度、528 管本人额度，勿重复建）。
 		// 页面本身登录即可（后端列表/详情按 §4.6 可见范围收口），写动作逐码：
 		// 创建/编辑/删除/提交/撤回/取消（按钮码 = 菜单 ID×10+n）。审批动作走
 		// 通用待办 512 段；#53 的撤回/取消仅发起人可见（前端按 userId + 状态显隐）。
-		menu(529, 500, "我的请假", "leave-request", "oa/leave/request/index", "", "Calendar", 9),
-		btn(5291, 529, "请假申请", "oa:leave:create", 1),
-		btn(5292, 529, "请假编辑", "oa:leave:update", 2),
-		btn(5293, 529, "请假删除", "oa:leave:delete", 3),
-		btn(5294, 529, "请假提交", "oa:leave:submit", 4),
-		btn(5295, 529, "请假撤回", "oa:leave:withdraw", 5),
-		btn(5296, 529, "请假取消", "oa:leave:cancel", 6),
+		menuRow(529, 500, "我的请假", "leave-request", "oa/leave/request/index", "", "Calendar", 9),
+		btnRow(5291, 529, "请假申请", "oa:leave:create", 1),
+		btnRow(5292, 529, "请假编辑", "oa:leave:update", 2),
+		btnRow(5293, 529, "请假删除", "oa:leave:delete", 3),
+		btnRow(5294, 529, "请假提交", "oa:leave:submit", 4),
+		btnRow(5295, 529, "请假撤回", "oa:leave:withdraw", 5),
+		btnRow(5296, 529, "请假取消", "oa:leave:cancel", 6),
 		// 请假查询码（issue #64 review，spec §5）：列表/详情接口的查询门槛；
 		// 菜单本身无权限码，员工侧页面必须显式授予本按钮才可读列表/详情。
-		btn(5297, 529, "请假查询", "oa:leave:query", 7),
+		btnRow(5297, 529, "请假查询", "oa:leave:query", 7),
 
 		// 报销（issue #54）：523 报销（管理/财务入口，查询码挂菜单；spec §7.2 的
 		// 504 段在本仓库协调台账改为 523 段）+ 535 我的报销（员工侧空位自取：
@@ -426,17 +403,17 @@ func seedMenus(db *gorm.DB) error {
 		// 按钮码 = 菜单 ID×10+n：5231 创建/5232 编辑/5233 删除/5234 提交
 		//（提交逻辑属 #55，码先登记，路由由 #55 落地）/5235 管理（财务/管理
 		// 可见范围，spec §4.6/§4.9 默认审批流节点 2）。
-		menu(523, 500, "报销", "expense", "oa/expense/index", "oa:expense:query", "Money", 4),
-		btn(5231, 523, "报销申请", "oa:expense:create", 1),
-		btn(5232, 523, "报销编辑", "oa:expense:update", 2),
-		btn(5233, 523, "报销删除", "oa:expense:delete", 3),
-		btn(5234, 523, "报销提交", "oa:expense:submit", 4),
-		btn(5235, 523, "报销管理", "oa:expense:manage", 5),
+		menuRow(523, 500, "报销", "expense", "oa/expense/index", "oa:expense:query", "Money", 4),
+		btnRow(5231, 523, "报销申请", "oa:expense:create", 1),
+		btnRow(5232, 523, "报销编辑", "oa:expense:update", 2),
+		btnRow(5233, 523, "报销删除", "oa:expense:delete", 3),
+		btnRow(5234, 523, "报销提交", "oa:expense:submit", 4),
+		btnRow(5235, 523, "报销管理", "oa:expense:manage", 5),
 		// 报销查询码（issue #64 review，spec §5）：员工侧 535 菜单无权限码，
 		// 列表/详情接口挂 oa:expense:query，需显式授予本按钮（管理菜单 523
 		// 本身也携带该码，供财务/管理员使用）。
-		btn(5236, 523, "报销查询", "oa:expense:query", 6),
-		menu(535, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 13),
+		btnRow(5236, 523, "报销查询", "oa:expense:query", 6),
+		menuRow(535, 500, "我的报销", "expense-mine", "oa/expense/index", "", "Money", 13),
 
 		// 考勤（issue #60）：527 班次、530 考勤组、531 我的考勤（协调台账分配
 		// 527 段；528/529 已被 #51/#52 的请假员工侧页面占用，grep 去重后改取
@@ -444,9 +421,9 @@ func seedMenus(db *gorm.DB) error {
 		// 班次 oa:attendance:shift:manage、考勤组 oa:attendance:group:manage
 		//（码挂在菜单上，授予菜单即授予该域全部维护动作）；我的考勤为员工自助页，
 		// 登录即可用（权限码为空，与仪表盘同款；打卡动作以登录身份收口）。
-		menu(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 5),
-		menu(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 6),
-		menu(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 7),
+		menuRow(527, 500, "班次管理", "attendance-shift", "oa/attendance/shift", "oa:attendance:shift:manage", "Timer", 5),
+		menuRow(530, 500, "考勤组管理", "attendance-group", "oa/attendance/group", "oa:attendance:group:manage", "UserFilled", 6),
+		menuRow(531, 500, "我的考勤", "attendance-punch", "oa/attendance/punch", "", "Clock", 7),
 
 		// 考勤结果与校正（issue #61）：533 段（500–549 空位自取，grep 去重确认
 		// 533/5331–5332 未被占用）。533 查询码挂菜单（结果查询页入口）；5331
@@ -454,16 +431,16 @@ func seedMenus(db *gorm.DB) error {
 		// helper 登记的全租户可见范围码 oa:attendance:manage（super_admin "*" 直接
 		// 命中，HR 角色授予本按钮即获得全租户结果可见）。员工侧结果列表追加在
 		// 「我的考勤」531 页面，登录即可，不新增菜单。
-		menu(533, 500, "考勤结果", "attendance-result", "oa/attendance/result", "oa:attendance:result:query", "DataAnalysis", 11),
-		btn(5331, 533, "考勤校正", "oa:attendance:result:correct", 1),
-		btn(5332, 533, "全租户可见", "oa:attendance:manage", 2),
+		menuRow(533, 500, "考勤结果", "attendance-result", "oa/attendance/result", "oa:attendance:result:query", "DataAnalysis", 11),
+		btnRow(5331, 533, "考勤校正", "oa:attendance:result:correct", 1),
+		btnRow(5332, 533, "全租户可见", "oa:attendance:manage", 2),
 
 		// 考勤月度汇总（issue #62）：534 段（500–549 空位自取，grep 去重确认
 		// 534 未被占用）。查询码挂菜单（汇总页入口）；可见范围复用 #43 helper——
 		// oa:attendance:manage（5332 按钮承载）看全租户、部门负责人看子树、
 		// 否则仅本人。员工「本月汇总」卡片在「我的考勤」531 页面内登录即可，
 		// 不新增菜单。
-		menu(534, 500, "考勤汇总", "attendance-summary", "oa/attendance/summary", "oa:attendance:summary:query", "TrendCharts", 12),
+		menuRow(534, 500, "考勤汇总", "attendance-summary", "oa/attendance/summary", "oa:attendance:summary:query", "TrendCharts", 12),
 
 		// 日程（issue #56）：524 段（协调台账分配；grep 去重确认 524/5241–5244
 		// 未被占用）。查询码挂菜单（月/周/列表三视图入口）；创建/编辑/取消逐码，
@@ -473,12 +450,12 @@ func seedMenus(db *gorm.DB) error {
 		// 529 我的请假/530 考勤组/531 我的考勤/532 我的公告/533 考勤结果/
 		// 534 考勤汇总/535 我的报销已占用，grep 去重取 536），查询码挂菜单本身，
 		// 普通角色授予 536 + 5241–5243 即可自建私有/部门日程。
-		menu(524, 500, "日程", "calendar", "oa/calendar/index", "oa:calendar:query", "Calendar", 14),
-		btn(5241, 524, "日程创建", "oa:calendar:create", 1),
-		btn(5242, 524, "日程编辑", "oa:calendar:update", 2),
-		btn(5243, 524, "日程取消", "oa:calendar:delete", 3),
-		btn(5244, 524, "公开日程", "oa:calendar:public", 4),
-		menu(536, 500, "我的日程", "calendar-mine", "oa/calendar/index", "oa:calendar:query", "Calendar", 15),
+		menuRow(524, 500, "日程", "calendar", "oa/calendar/index", "oa:calendar:query", "Calendar", 14),
+		btnRow(5241, 524, "日程创建", "oa:calendar:create", 1),
+		btnRow(5242, 524, "日程编辑", "oa:calendar:update", 2),
+		btnRow(5243, 524, "日程取消", "oa:calendar:delete", 3),
+		btnRow(5244, 524, "公开日程", "oa:calendar:public", 4),
+		menuRow(536, 500, "我的日程", "calendar-mine", "oa/calendar/index", "oa:calendar:query", "Calendar", 15),
 
 		// 会议室与预约（issue #57）：525 段（协调台账分配；grep 去重确认
 		// 525/5251–5252 未被占用）。会议室查询/详情与预约列表挂
@@ -489,11 +466,11 @@ func seedMenus(db *gorm.DB) error {
 		// 其中 537 是 #58 我的文档；grep 去重取 538/539）；两页复用同一
 		// oa/room/booking 组件——无 oa:room:manage 的查看者由后端强制只看
 		// 本人预约。普通角色授予 539 + 5252 即可预约并查看自己的会议。
-		menu(525, 500, "会议室管理", "room", "oa/room/index", "oa:room:query", "OfficeBuilding", 18),
-		btn(5251, 525, "会议室维护", "oa:room:manage", 1),
-		btn(5252, 525, "预约会议", "oa:room:booking", 2),
-		menu(538, 500, "会议室预约", "room-booking", "oa/room/booking", "oa:room:query", "Calendar", 19),
-		menu(539, 500, "我的会议", "room-mine", "oa/room/booking", "oa:room:query", "Clock", 20),
+		menuRow(525, 500, "会议室管理", "room", "oa/room/index", "oa:room:query", "OfficeBuilding", 18),
+		btnRow(5251, 525, "会议室维护", "oa:room:manage", 1),
+		btnRow(5252, 525, "预约会议", "oa:room:booking", 2),
+		menuRow(538, 500, "会议室预约", "room-booking", "oa/room/booking", "oa:room:query", "Calendar", 19),
+		menuRow(539, 500, "我的会议", "room-mine", "oa/room/booking", "oa:room:query", "Clock", 20),
 
 		// 文档目录与 ACL（issue #58，spec §3.8/§4.12）：526 段（协调台账分配；
 		// grep 去重确认 525/526/5261–5263/537 未被占用）。查询码挂菜单（目录树
@@ -505,21 +482,21 @@ func seedMenus(db *gorm.DB) error {
 		// 531 我的考勤/532 我的公告/533 考勤结果/534 考勤汇总/535 我的报销/
 		// 536 我的日程/538 会议室预约/539 我的会议已占用，grep 去重取 537），
 		// 只挂查询码，可见目录按 ACL 过滤。
-		menu(526, 500, "文档", "document", "oa/document/index", "oa:document:query", "FolderOpened", 16),
-		btn(5261, 526, "目录创建", "oa:document:create", 1),
-		btn(5262, 526, "目录管理", "oa:document:manage", 2),
-		btn(5263, 526, "文件上传", "oa:document:upload", 3),
-		menu(537, 500, "我的文档", "document-mine", "oa/document/index", "oa:document:query", "FolderOpened", 17),
+		menuRow(526, 500, "文档", "document", "oa/document/index", "oa:document:query", "FolderOpened", 16),
+		btnRow(5261, 526, "目录创建", "oa:document:create", 1),
+		btnRow(5262, 526, "目录管理", "oa:document:manage", 2),
+		btnRow(5263, 526, "文件上传", "oa:document:upload", 3),
+		menuRow(537, 500, "我的文档", "document-mine", "oa/document/index", "oa:document:query", "FolderOpened", 17),
 
 		// bpm（issue #44）：bpm 根目录 510 + 流程定义 511，按钮段 5111+（spec §7.2，
 		// grep 去重确认 510/511/5111–5114 未被占用；512 待办任务菜单属 #46）。
 		// 发布与停用共用 bpm:definition:publish。
-		dir(510, 0, "流程中心", "/bpm", "SetLike", 51),
-		menu(511, 510, "流程定义", "definition", "bpm/definition/index", "bpm:definition:query", "List", 1),
-		btn(5111, 511, "流程新增", "bpm:definition:create", 1),
-		btn(5112, 511, "流程修改", "bpm:definition:update", 2),
-		btn(5113, 511, "流程删除", "bpm:definition:delete", 3),
-		btn(5114, 511, "流程发布", "bpm:definition:publish", 4),
+		dirRow(510, 0, "流程中心", "/bpm", "SetLike", 51),
+		menuRow(511, 510, "流程定义", "definition", "bpm/definition/index", "bpm:definition:query", "List", 1),
+		btnRow(5111, 511, "流程新增", "bpm:definition:create", 1),
+		btnRow(5112, 511, "流程修改", "bpm:definition:update", 2),
+		btnRow(5113, 511, "流程删除", "bpm:definition:delete", 3),
+		btnRow(5114, 511, "流程发布", "bpm:definition:publish", 4),
 
 		// 通用待办（issue #46，spec §7.2：512 待办任务，按钮段 5121+，grep 去重
 		// 确认 512/5121–5123 未被占用）：页面三 tab（待办/已办/我发起），页面与
@@ -528,10 +505,10 @@ func seedMenus(db *gorm.DB) error {
 		// bpm:instance:query 挂管理视图与实例详情的第三类访问者；通知查询
 		// notify:message:query 补挂在 512 段——普通用户经角色授权即可用顶栏
 		// 铃铛与通知列表（notify 无独立菜单，#45 遗留接点）。
-		menu(512, 510, "待办任务", "task", "bpm/task/index", "bpm:task:query", "Ticket", 2),
-		btn(5121, 512, "任务办理", "bpm:task:handle", 1),
-		btn(5122, 512, "实例查询", "bpm:instance:query", 2),
-		btn(5123, 512, "通知查询", "notify:message:query", 3),
+		menuRow(512, 510, "待办任务", "task", "bpm/task/index", "bpm:task:query", "Ticket", 2),
+		btnRow(5121, 512, "任务办理", "bpm:task:handle", 1),
+		btnRow(5122, 512, "实例查询", "bpm:instance:query", 2),
+		btnRow(5123, 512, "通知查询", "notify:message:query", 3),
 
 		// 消息中心（issue #72，spec §7.2）：600 目录 + 601 短信管理 + 602 邮件管理
 		// + 603 发送日志。菜单查询码按 spec：601 挂 message:channel:query、
@@ -539,30 +516,30 @@ func seedMenus(db *gorm.DB) error {
 		// 模板查询/增删改按钮码挂 601/602 段（ID = 菜单ID*10+n，grep 去重确认
 		// 600/601/602/603 与 6011–6019/6021–6029/6031–6032 未被占用）。
 		// 渠道/模板的「仅平台租户」由 service 层校验，非平台租户即使持码也 403。
-		dir(600, 0, "消息中心", "/message", "ChatDotRound", 60),
-		menu(601, 600, "短信管理", "sms", "message/sms/index", "message:channel:query", "Iphone", 1),
-		btn(6011, 601, "渠道查询", "message:channel:query", 1),
-		btn(6012, 601, "渠道新增", "message:channel:create", 2),
-		btn(6013, 601, "渠道修改", "message:channel:update", 3),
-		btn(6014, 601, "渠道删除", "message:channel:delete", 4),
-		btn(6015, 601, "模板查询", "message:template:query", 5),
-		btn(6016, 601, "模板新增", "message:template:create", 6),
-		btn(6017, 601, "模板修改", "message:template:update", 7),
-		btn(6018, 601, "模板删除", "message:template:delete", 8),
-		btn(6019, 601, "短信发送", "message:sms:send", 9),
-		menu(602, 600, "邮件管理", "mail", "message/mail/index", "message:mail:query", "Message", 2),
-		btn(6021, 602, "渠道查询", "message:channel:query", 1),
-		btn(6022, 602, "渠道新增", "message:channel:create", 2),
-		btn(6023, 602, "渠道修改", "message:channel:update", 3),
-		btn(6024, 602, "渠道删除", "message:channel:delete", 4),
-		btn(6025, 602, "模板查询", "message:template:query", 5),
-		btn(6026, 602, "模板新增", "message:template:create", 6),
-		btn(6027, 602, "模板修改", "message:template:update", 7),
-		btn(6028, 602, "模板删除", "message:template:delete", 8),
-		btn(6029, 602, "邮件发送", "message:mail:send", 9),
-		menu(603, 600, "发送日志", "log", "message/log/index", "message:log:query", "Tickets", 3),
-		btn(6031, 603, "日志重发", "message:log:resend", 1),
-		btn(6032, 603, "日志删除", "message:log:delete", 2),
+		dirRow(600, 0, "消息中心", "/message", "ChatDotRound", 60),
+		menuRow(601, 600, "短信管理", "sms", "message/sms/index", "message:channel:query", "Iphone", 1),
+		btnRow(6011, 601, "渠道查询", "message:channel:query", 1),
+		btnRow(6012, 601, "渠道新增", "message:channel:create", 2),
+		btnRow(6013, 601, "渠道修改", "message:channel:update", 3),
+		btnRow(6014, 601, "渠道删除", "message:channel:delete", 4),
+		btnRow(6015, 601, "模板查询", "message:template:query", 5),
+		btnRow(6016, 601, "模板新增", "message:template:create", 6),
+		btnRow(6017, 601, "模板修改", "message:template:update", 7),
+		btnRow(6018, 601, "模板删除", "message:template:delete", 8),
+		btnRow(6019, 601, "短信发送", "message:sms:send", 9),
+		menuRow(602, 600, "邮件管理", "mail", "message/mail/index", "message:mail:query", "Message", 2),
+		btnRow(6021, 602, "渠道查询", "message:channel:query", 1),
+		btnRow(6022, 602, "渠道新增", "message:channel:create", 2),
+		btnRow(6023, 602, "渠道修改", "message:channel:update", 3),
+		btnRow(6024, 602, "渠道删除", "message:channel:delete", 4),
+		btnRow(6025, 602, "模板查询", "message:template:query", 5),
+		btnRow(6026, 602, "模板新增", "message:template:create", 6),
+		btnRow(6027, 602, "模板修改", "message:template:update", 7),
+		btnRow(6028, 602, "模板删除", "message:template:delete", 8),
+		btnRow(6029, 602, "邮件发送", "message:mail:send", 9),
+		menuRow(603, 600, "发送日志", "log", "message/log/index", "message:log:query", "Tickets", 3),
+		btnRow(6031, 603, "日志重发", "message:log:resend", 1),
+		btnRow(6032, 603, "日志删除", "message:log:delete", 2),
 
 		// ERP（issue #88/#89，docs/erp-mvp-spec.md §6/§7）：700 段（协调台账分配）。
 		// #88：700 dir、710–712（分类/单位/产品）+ 按钮 7101–7124；
@@ -573,160 +550,72 @@ func seedMenus(db *gorm.DB) error {
 		//（query/create/update/delete/export）。
 		// 财务与库存敏感：内置普通角色（role id=2）默认不授予任何 ERP 菜单
 		//（spec §7，见 seedRoles 的 roleMenus——刻意无 700 段条目）。
-		dir(700, 0, "ERP 进销存", "/erp", "ShoppingCart", 70),
+		dirRow(700, 0, "ERP 进销存", "/erp", "ShoppingCart", 70),
 		// 首页统计（issue #95，spec §6/§7）：701 挂 erp:statistics:query；按钮
 		// 7011 与菜单同码（对齐 CRM 仪表盘 4140/4141 的形态，grep 去重确认未占用）。
-		menu(701, 700, "首页统计", "statistics", "erp/statistics/index", "erp:statistics:query", "DataLine", 22),
-		btn(7011, 701, "统计查询", "erp:statistics:query", 1),
-		menu(710, 700, "产品分类", "product-category", "erp/product-category/index", "erp:product-category:query", "Files", 1),
-		btn(7101, 710, "分类新增", "erp:product-category:create", 1),
-		btn(7102, 710, "分类修改", "erp:product-category:update", 2),
-		btn(7103, 710, "分类删除", "erp:product-category:delete", 3),
-		btn(7104, 710, "分类导出", "erp:product-category:export", 4),
-		menu(711, 700, "产品单位", "product-unit", "erp/product-unit/index", "erp:product-unit:query", "CollectionTag", 2),
-		btn(7111, 711, "单位新增", "erp:product-unit:create", 1),
-		btn(7112, 711, "单位修改", "erp:product-unit:update", 2),
-		btn(7113, 711, "单位删除", "erp:product-unit:delete", 3),
-		btn(7114, 711, "单位导出", "erp:product-unit:export", 4),
-		menu(712, 700, "产品管理", "product", "erp/product/index", "erp:product:query", "Goods", 3),
-		btn(7121, 712, "产品新增", "erp:product:create", 1),
-		btn(7122, 712, "产品修改", "erp:product:update", 2),
-		btn(7123, 712, "产品删除", "erp:product:delete", 3),
-		btn(7124, 712, "产品导出", "erp:product:export", 4),
+		menuRow(701, 700, "首页统计", "statistics", "erp/statistics/index", "erp:statistics:query", "DataLine", 22),
+		btnRow(7011, 701, "统计查询", "erp:statistics:query", 1),
+		menuRow(710, 700, "产品分类", "product-category", "erp/product-category/index", "erp:product-category:query", "Files", 1),
+		btnRow(7101, 710, "分类新增", "erp:product-category:create", 1),
+		btnRow(7102, 710, "分类修改", "erp:product-category:update", 2),
+		btnRow(7103, 710, "分类删除", "erp:product-category:delete", 3),
+		btnRow(7104, 710, "分类导出", "erp:product-category:export", 4),
+		menuRow(711, 700, "产品单位", "product-unit", "erp/product-unit/index", "erp:product-unit:query", "CollectionTag", 2),
+		btnRow(7111, 711, "单位新增", "erp:product-unit:create", 1),
+		btnRow(7112, 711, "单位修改", "erp:product-unit:update", 2),
+		btnRow(7113, 711, "单位删除", "erp:product-unit:delete", 3),
+		btnRow(7114, 711, "单位导出", "erp:product-unit:export", 4),
+		menuRow(712, 700, "产品管理", "product", "erp/product/index", "erp:product:query", "Goods", 3),
+		btnRow(7121, 712, "产品新增", "erp:product:create", 1),
+		btnRow(7122, 712, "产品修改", "erp:product:update", 2),
+		btnRow(7123, 712, "产品删除", "erp:product:delete", 3),
+		btnRow(7124, 712, "产品导出", "erp:product:export", 4),
 		// 仓库/供应商/客户主数据（issue #89，spec §3.1/§7）：仓库管理员/采购员/
 		// 销售员维护；权限码 erp:warehouse:* / erp:supplier:* / erp:customer:*。
-		menu(720, 700, "仓库管理", "warehouse", "erp/warehouse/index", "erp:warehouse:query", "House", 4),
-		btn(7201, 720, "仓库新增", "erp:warehouse:create", 1),
-		btn(7202, 720, "仓库修改", "erp:warehouse:update", 2),
-		btn(7203, 720, "仓库删除", "erp:warehouse:delete", 3),
-		btn(7204, 720, "仓库导出", "erp:warehouse:export", 4),
-		menu(730, 700, "供应商管理", "supplier", "erp/supplier/index", "erp:supplier:query", "Shop", 11),
-		btn(7301, 730, "供应商新增", "erp:supplier:create", 1),
-		btn(7302, 730, "供应商修改", "erp:supplier:update", 2),
-		btn(7303, 730, "供应商删除", "erp:supplier:delete", 3),
-		btn(7304, 730, "供应商导出", "erp:supplier:export", 4),
-		menu(740, 700, "客户管理", "customer", "erp/customer/index", "erp:customer:query", "User", 15),
-		btn(7401, 740, "客户新增", "erp:customer:create", 1),
-		btn(7402, 740, "客户修改", "erp:customer:update", 2),
-		btn(7403, 740, "客户删除", "erp:customer:delete", 3),
-		btn(7404, 740, "客户导出", "erp:customer:export", 4),
+		menuRow(720, 700, "仓库管理", "warehouse", "erp/warehouse/index", "erp:warehouse:query", "House", 4),
+		btnRow(7201, 720, "仓库新增", "erp:warehouse:create", 1),
+		btnRow(7202, 720, "仓库修改", "erp:warehouse:update", 2),
+		btnRow(7203, 720, "仓库删除", "erp:warehouse:delete", 3),
+		btnRow(7204, 720, "仓库导出", "erp:warehouse:export", 4),
+		menuRow(730, 700, "供应商管理", "supplier", "erp/supplier/index", "erp:supplier:query", "Shop", 11),
+		btnRow(7301, 730, "供应商新增", "erp:supplier:create", 1),
+		btnRow(7302, 730, "供应商修改", "erp:supplier:update", 2),
+		btnRow(7303, 730, "供应商删除", "erp:supplier:delete", 3),
+		btnRow(7304, 730, "供应商导出", "erp:supplier:export", 4),
+		menuRow(740, 700, "客户管理", "customer", "erp/customer/index", "erp:customer:query", "User", 15),
+		btnRow(7401, 740, "客户新增", "erp:customer:create", 1),
+		btnRow(7402, 740, "客户修改", "erp:customer:update", 2),
+		btnRow(7403, 740, "客户删除", "erp:customer:delete", 3),
+		btnRow(7404, 740, "客户导出", "erp:customer:export", 4),
 
-		// 库存核心与其它入库/出库单（issue #90，spec §6/§7）：721 产品库存、
-		// 722 出入库明细、723 其它入库、724 其它出库（spec §7 号段；721/722 是
-		// 查询页——库存行无 owner 语义，只有 query/export 按钮，无增删改）；
-		// 723/724 单据页按 query/create/update/delete/approve/export 全套按钮
-		//（approve 为独立审核权限码，spec §4.1）。按钮 = 菜单ID×10+n，
-		// 7211–7214/7221–7224/7231–7235/7241–7245 grep 去重确认未占用。
-		menu(721, 700, "产品库存", "stock", "erp/stock/index", "erp:stock:query", "Box", 5),
-		btn(7211, 721, "库存导出", "erp:stock:export", 1),
-		menu(722, 700, "出入库明细", "stock-record", "erp/stock-record/index", "erp:stock-record:query", "List", 6),
-		btn(7221, 722, "流水导出", "erp:stock-record:export", 1),
-		menu(723, 700, "其它入库", "stock-in", "erp/stock-in/index", "erp:stock-in:query", "Download", 7),
-		btn(7231, 723, "入库新增", "erp:stock-in:create", 1),
-		btn(7232, 723, "入库修改", "erp:stock-in:update", 2),
-		btn(7233, 723, "入库删除", "erp:stock-in:delete", 3),
-		btn(7234, 723, "入库审核", "erp:stock-in:approve", 4),
-		btn(7235, 723, "入库导出", "erp:stock-in:export", 5),
-		menu(724, 700, "其它出库", "stock-out", "erp/stock-out/index", "erp:stock-out:query", "Upload", 8),
-		btn(7241, 724, "出库新增", "erp:stock-out:create", 1),
-		btn(7242, 724, "出库修改", "erp:stock-out:update", 2),
-		btn(7243, 724, "出库删除", "erp:stock-out:delete", 3),
-		btn(7244, 724, "出库审核", "erp:stock-out:approve", 4),
-		btn(7245, 724, "出库导出", "erp:stock-out:export", 5),
-
-		// 采购三单（issue #91，spec §6/§7）：731 采购订单、732 采购入库、733
-		// 采购退货（spec §7 号段；单据页按 query/create/update/delete/approve/
-		// export 全套按钮，query 挂菜单自身）；按钮 7311–7315/7321–7325/
-		// 7331–7335（菜单ID×10+n，grep 去重确认未占用）。
-		menu(731, 700, "采购订单", "purchase-order", "erp/purchase-order/index", "erp:purchase-order:query", "Tickets", 12),
-		btn(7311, 731, "订单新增", "erp:purchase-order:create", 1),
-		btn(7312, 731, "订单修改", "erp:purchase-order:update", 2),
-		btn(7313, 731, "订单删除", "erp:purchase-order:delete", 3),
-		btn(7314, 731, "订单审核", "erp:purchase-order:approve", 4),
-		btn(7315, 731, "订单导出", "erp:purchase-order:export", 5),
-		menu(732, 700, "采购入库", "purchase-in", "erp/purchase-in/index", "erp:purchase-in:query", "GoodsFilled", 13),
-		btn(7321, 732, "入库新增", "erp:purchase-in:create", 1),
-		btn(7322, 732, "入库修改", "erp:purchase-in:update", 2),
-		btn(7323, 732, "入库删除", "erp:purchase-in:delete", 3),
-		btn(7324, 732, "入库审核", "erp:purchase-in:approve", 4),
-		btn(7325, 732, "入库导出", "erp:purchase-in:export", 5),
-		menu(733, 700, "采购退货", "purchase-return", "erp/purchase-return/index", "erp:purchase-return:query", "RefreshLeft", 14),
-		btn(7331, 733, "退货新增", "erp:purchase-return:create", 1),
-		btn(7332, 733, "退货修改", "erp:purchase-return:update", 2),
-		btn(7333, 733, "退货删除", "erp:purchase-return:delete", 3),
-		btn(7334, 733, "退货审核", "erp:purchase-return:approve", 4),
-		btn(7335, 733, "退货导出", "erp:purchase-return:export", 5),
-		// 销售三单（issue #92，spec §6/§7）：741 销售订单、742 销售出库、743 销售
-		// 退货（spec §7 号段；#91 采购 731–733 同构）。单据页按 query 菜单 +
-		// create/update/delete/approve/export 全套按钮（approve 为独立审核权限码，
-		// spec §4.1）。按钮 = 菜单ID×10+n，7411–7415/7421–7425/7431–7435 grep
-		// 去重确认未占用。
-		menu(741, 700, "销售订单", "sale-order", "erp/sale-order/index", "erp:sale-order:query", "Ticket", 16),
-		btn(7411, 741, "订单新增", "erp:sale-order:create", 1),
-		btn(7412, 741, "订单修改", "erp:sale-order:update", 2),
-		btn(7413, 741, "订单删除", "erp:sale-order:delete", 3),
-		btn(7414, 741, "订单审核", "erp:sale-order:approve", 4),
-		btn(7415, 741, "订单导出", "erp:sale-order:export", 5),
-		menu(742, 700, "销售出库", "sale-out", "erp/sale-out/index", "erp:sale-out:query", "Position", 17),
-		btn(7421, 742, "出库新增", "erp:sale-out:create", 1),
-		btn(7422, 742, "出库修改", "erp:sale-out:update", 2),
-		btn(7423, 742, "出库删除", "erp:sale-out:delete", 3),
-		btn(7424, 742, "出库审核", "erp:sale-out:approve", 4),
-		btn(7425, 742, "出库导出", "erp:sale-out:export", 5),
-		menu(743, 700, "销售退货", "sale-return", "erp/sale-return/index", "erp:sale-return:query", "RefreshLeft", 18),
-		btn(7431, 743, "退货新增", "erp:sale-return:create", 1),
-		btn(7432, 743, "退货修改", "erp:sale-return:update", 2),
-		btn(7433, 743, "退货删除", "erp:sale-return:delete", 3),
-		btn(7434, 743, "退货审核", "erp:sale-return:approve", 4),
-		btn(7435, 743, "退货导出", "erp:sale-return:export", 5),
-		// 财务（issue #94，spec §3.6/§6/§7）：750 结算账户、751 付款单、752
-		// 收款单。收付款页按单据页 query 菜单 + create/update/delete/approve/
-		// export 全套按钮（approve 为独立审核权限码，spec §4.1）；账户页
-		// query 菜单 + create/update/delete（无导出，spec §6 未列）。按钮 =
-		// 菜单ID×10+n，7501–7503/7511–7515/7521–7525 grep 去重确认未占用。
-		menu(750, 700, "结算账户", "finance-account", "erp/finance-account/index", "erp:finance-account:query", "Wallet", 19),
-		btn(7501, 750, "账户新增", "erp:finance-account:create", 1),
-		btn(7502, 750, "账户修改", "erp:finance-account:update", 2),
-		btn(7503, 750, "账户删除", "erp:finance-account:delete", 3),
-		menu(751, 700, "付款单", "finance-payment", "erp/finance-payment/index", "erp:finance-payment:query", "Money", 20),
-		btn(7511, 751, "付款新增", "erp:finance-payment:create", 1),
-		btn(7512, 751, "付款修改", "erp:finance-payment:update", 2),
-		btn(7513, 751, "付款删除", "erp:finance-payment:delete", 3),
-		btn(7514, 751, "付款审核", "erp:finance-payment:approve", 4),
-		btn(7515, 751, "付款导出", "erp:finance-payment:export", 5),
-		menu(752, 700, "收款单", "finance-receipt", "erp/finance-receipt/index", "erp:finance-receipt:query", "Coin", 21),
-		btn(7521, 752, "收款新增", "erp:finance-receipt:create", 1),
-		btn(7522, 752, "收款修改", "erp:finance-receipt:update", 2),
-		btn(7523, 752, "收款删除", "erp:finance-receipt:delete", 3),
-		btn(7524, 752, "收款审核", "erp:finance-receipt:approve", 4),
-		btn(7525, 752, "收款导出", "erp:finance-receipt:export", 5),
-		// 库存调拨/盘点（issue #93，spec §6/§7）：725 库存调拨（DB）、726 库存
-		// 盘点（PD）（spec §7 号段）。单据页按 query 菜单 + create/update/delete/
-		// approve/export 全套按钮（approve 为独立审核权限码，spec §4.1）。
-		// 按钮 = 菜单ID×10+n，7251–7255/7261–7265 grep 去重确认未占用。
-		menu(725, 700, "库存调拨", "stock-move", "erp/stock-move/index", "erp:stock-move:query", "Switch", 9),
-		btn(7251, 725, "调拨新增", "erp:stock-move:create", 1),
-		btn(7252, 725, "调拨修改", "erp:stock-move:update", 2),
-		btn(7253, 725, "调拨删除", "erp:stock-move:delete", 3),
-		btn(7254, 725, "调拨审核", "erp:stock-move:approve", 4),
-		btn(7255, 725, "调拨导出", "erp:stock-move:export", 5),
-		menu(726, 700, "库存盘点", "stock-check", "erp/stock-check/index", "erp:stock-check:query", "Finished", 10),
-		btn(7261, 726, "盘点新增", "erp:stock-check:create", 1),
-		btn(7262, 726, "盘点修改", "erp:stock-check:update", 2),
-		btn(7263, 726, "盘点删除", "erp:stock-check:delete", 3),
-		btn(7264, 726, "盘点审核", "erp:stock-check:approve", 4),
-		btn(7265, 726, "盘点导出", "erp:stock-check:export", 5),
+		// 库存只读页（issue #90，spec §6/§7）：721 产品库存、722 出入库明细
+		//（spec §7 号段；查询页——库存行无 owner 语义，只有 query/export 按钮，
+		// 无增删改）。按钮 = 菜单ID×10+n，7211–7214/7221–7224 grep 去重确认未占用。
+		menuRow(721, 700, "产品库存", "stock", "erp/stock/index", "erp:stock:query", "Box", 5),
+		btnRow(7211, 721, "库存导出", "erp:stock:export", 1),
+		menuRow(722, 700, "出入库明细", "stock-record", "erp/stock-record/index", "erp:stock-record:query", "List", 6),
+		btnRow(7221, 722, "流水导出", "erp:stock-record:export", 1),
+		// 财务（issue #94，spec §3.6/§6/§7）：750 结算账户。账户页 query 菜单 +
+		// create/update/delete（无导出，spec §6 未列）。按钮 = 菜单ID×10+n，
+		// 7501–7503 grep 去重确认未占用。
+		menuRow(750, 700, "结算账户", "finance-account", "erp/finance-account/index", "erp:finance-account:query", "Wallet", 19),
+		btnRow(7501, 750, "账户新增", "erp:finance-account:create", 1),
+		btnRow(7502, 750, "账户修改", "erp:finance-account:update", 2),
+		btnRow(7503, 750, "账户删除", "erp:finance-account:delete", 3),
 	}
+	// 12 类单据的菜单与按钮段（723/724/725/726/731–733/741–743/751/752 共
+	// 72 行）：构造在 erpDocMenus（纯函数，不碰 DB），seedMenus 只负责并入。
+	menus = append(menus, erpDocMenus()...)
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
 	// 页面与查询按钮共用权限码 crm:dashboard:view（API 路由同码）。
 	// 菜单名与系统首页同为「仪表盘」，组件名单独设为 CrmDashboard：
 	// 前端动态路由以 componentName 作 route name，重名会让 Vue Router 告警并互相覆盖。
-	crmDashboard := menu(4140, 400, "仪表盘", "dashboard", "crm/dashboard/index", "crm:dashboard:view", "DataLine", 0)
+	crmDashboard := menuRow(4140, 400, "仪表盘", "dashboard", "crm/dashboard/index", "crm:dashboard:view", "DataLine", 0)
 	crmDashboard.ComponentName = "CrmDashboard"
 	menus = append(menus,
 		crmDashboard,
-		btn(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
+		btnRow(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
 	)
 	// 菜单补齐（issue #69）：按 ID 只插入缺失项，不更新、不复活已软删菜单。
 	// 旧实现「有菜单就整体跳过」会让存量库永远看不到新版本追加的菜单；
