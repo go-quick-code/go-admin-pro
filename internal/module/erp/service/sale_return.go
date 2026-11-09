@@ -359,6 +359,9 @@ func (s *Service) approveSaleReturnDoc(ctx context.Context, tx doc.Tx[*model.Sal
 	if err != nil {
 		return err
 	}
+	// 已知窄窗口（P3，非本次引入）：编辑换父单时 beforeLock 锁新父单、审核
+	// BeforeClaim 锁旧父单；若二者在「新父单 == 对方旧父单」上交叉，InnoDB 可能
+	// 返回 1213。旧代码同样是父单→自身，语义未变；事务回滚，无数据丢失。
 	out, err := repo.FindSaleOutByIDForUpdate(ctx, d.OutID)
 	if err != nil {
 		return err
