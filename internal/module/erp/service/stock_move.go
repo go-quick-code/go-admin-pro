@@ -220,7 +220,7 @@ func (s *Service) DeleteStockMove(ctx context.Context, id int64) error {
 }
 
 // UpdateStockMoveStatus 审核（10→20）/反审核（20→10），幂等目标态。
-func (s *Service) UpdateStockMoveStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
+func (s *Service) UpdateStockMoveStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.stockMoveKernel().SetStatus(ctx, req.ID, req.Status)
 }
 

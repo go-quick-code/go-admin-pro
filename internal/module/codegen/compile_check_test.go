@@ -142,11 +142,25 @@ func TestGeneratedFreshModuleCompiles(t *testing.T) {
 // issue #97：ERP 演示种子（internal/seed/erp_demo.go）import 真实 erp
 // model/service，必须随模块一并剪除（seed.Run 通过函数变量调用，缺失时
 // 自动跳过 ERP 演示数据）。
+//
+// issue #125：internal/module/erp/doctype（单据类型注册表，ADR 0020）是
+// 只依赖标准库的纯元数据包，internal/seed 的单据菜单投影 import 它——
+// 与生成骨架无任何同名文件，剪除时保留，注册表因此成为跨模块装配的
+// 可信依赖（与其余 erp 实现一起被骨架替换的语义不变）。
 func pruneRealErpModule(t *testing.T, tmp string) {
 	t.Helper()
-	dir := filepath.Join(tmp, "internal", "module", "erp")
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("剪除真实 erp 模块: %v", err)
+	erpDir := filepath.Join(tmp, "internal", "module", "erp")
+	entries, err := os.ReadDir(erpDir)
+	if err != nil {
+		t.Fatalf("读取真实 erp 模块目录: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "doctype" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(erpDir, entry.Name())); err != nil {
+			t.Fatalf("剪除真实 erp 模块 %s: %v", entry.Name(), err)
+		}
 	}
 	demoSeed := filepath.Join(tmp, "internal", "seed", "erp_demo.go")
 	if err := os.Remove(demoSeed); err != nil && !os.IsNotExist(err) {

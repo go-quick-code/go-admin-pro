@@ -348,7 +348,7 @@ func (s *Service) beforeDeleteSaleOut(ctx context.Context, tx doc.Tx[*model.Sale
 }
 
 // UpdateSaleOutStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
-func (s *Service) UpdateSaleOutStatus(ctx context.Context, req *dto.SaleDocUpdateStatusReq) error {
+func (s *Service) UpdateSaleOutStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.saleOutKernel().SetStatus(ctx, req.ID, req.Status)
 }
 

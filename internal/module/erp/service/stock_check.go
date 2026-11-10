@@ -210,7 +210,7 @@ func (s *Service) DeleteStockCheck(ctx context.Context, id int64) error {
 }
 
 // UpdateStockCheckStatus 审核（10→20）/反审核（20→10），幂等目标态。
-func (s *Service) UpdateStockCheckStatus(ctx context.Context, req *dto.StockDocUpdateStatusReq) error {
+func (s *Service) UpdateStockCheckStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.stockCheckKernel().SetStatus(ctx, req.ID, req.Status)
 }
 

@@ -25,9 +25,6 @@ import (
 // 行金额服务端计算）。
 type SaleItemPayload = StockDocItemPayload
 
-// SaleDocUpdateStatusReq 销售/采购单据审核状态目标态（与杂项单据同构）。
-type SaleDocUpdateStatusReq = StockDocUpdateStatusReq
-
 // ---------- 销售订单（XS） ----------
 
 // SaleOrderCreateReq 新建销售订单。

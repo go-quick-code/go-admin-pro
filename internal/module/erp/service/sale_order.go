@@ -256,7 +256,7 @@ func (s *Service) beforeDeleteSaleOrder(ctx context.Context, tx doc.Tx[*model.Sa
 
 // UpdateSaleOrderStatus 审核（10→20）/反审核（20→10），幂等目标态（spec §4.1/§5）。
 // 订单本身不动库存；反审核禁令：存在已审核出库/退货 409（spec §4.1）。
-func (s *Service) UpdateSaleOrderStatus(ctx context.Context, req *dto.SaleDocUpdateStatusReq) error {
+func (s *Service) UpdateSaleOrderStatus(ctx context.Context, req *dto.DocUpdateStatusReq) error {
 	return s.saleOrderKernel().SetStatus(ctx, req.ID, req.Status)
 }
 
