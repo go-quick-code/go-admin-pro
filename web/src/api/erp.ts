@@ -155,53 +155,45 @@ export function exportStockRecords(params?: Record<string, any>) {
   return downloadExcel('/erp/stock-record/export-excel', params)
 }
 
+// ---------- ERP 单据客户端工厂（issue #125，ADR 0020 单据类型注册表的前端侧） ----------
+// 12 类单据（其它出入库/调拨/盘点、采购三单、销售三单、收付款单）的 7 个端点
+// 完全同构，仅 URL 段不同：本工厂是这 12 类单据 API 的唯一实现，行为与重构前的
+// 手写函数逐字一致。下方每类单据先在模块级建一个 client 单例（resource 字面量
+// 全文件仅出现 12 次，编译器可拦住单组拼错），再从单例上解构出 84 个具名导出；
+// 这 84 个具名导出是本段唯一对外面，导出名与参数形态不变，视图零改动。
+function createDocClient(resource: string) {
+  return {
+    page: (params: any) => request.get(`/erp/${resource}/page`, { params }) as Promise<any>,
+    get: (id: number) => request.get(`/erp/${resource}/${id}`) as Promise<any>,
+    create: (data: any) => request.post(`/erp/${resource}`, data) as Promise<any>,
+    update: (data: any) => request.put(`/erp/${resource}`, data) as Promise<any>,
+    delete: (id: number) => request.delete(`/erp/${resource}/${id}`) as Promise<any>,
+    updateStatus: (data: { id: number; status: number }) => request.put(`/erp/${resource}/update-status`, data) as Promise<any>,
+    export: (params?: Record<string, any>) => downloadExcel(`/erp/${resource}/export-excel`, params),
+  }
+}
+
 // ---------- ERP 其它入库单（QR）/其它出库单（QC，issue #90，spec §3.5/§4.1） ----------
 // 单号由服务端经 erp_sequence 发放（入参无单号字段，伪造不可采纳）；行金额
 // 服务端按 单价×数量 计算（入参无 totalPrice 字段）。审核/反审核走
 // update-status（幂等目标态：20 审核 / 10 反审核），approve 为独立权限码。
-export function pageStockIns(params: any) {
-  return request.get('/erp/stock-in/page', { params }) as Promise<any>
-}
-export function getStockIn(id: number) {
-  return request.get(`/erp/stock-in/${id}`) as Promise<any>
-}
-export function createStockIn(data: any) {
-  return request.post('/erp/stock-in', data) as Promise<any>
-}
-export function updateStockIn(data: any) {
-  return request.put('/erp/stock-in', data) as Promise<any>
-}
-export function deleteStockIn(id: number) {
-  return request.delete(`/erp/stock-in/${id}`) as Promise<any>
-}
-export function updateStockInStatus(data: { id: number; status: number }) {
-  return request.put('/erp/stock-in/update-status', data) as Promise<any>
-}
-export function exportStockIns(params?: Record<string, any>) {
-  return downloadExcel('/erp/stock-in/export-excel', params)
-}
+const stockIn = createDocClient('stock-in')
+export const pageStockIns = stockIn.page
+export const getStockIn = stockIn.get
+export const createStockIn = stockIn.create
+export const updateStockIn = stockIn.update
+export const deleteStockIn = stockIn.delete
+export const updateStockInStatus = stockIn.updateStatus
+export const exportStockIns = stockIn.export
 
-export function pageStockOuts(params: any) {
-  return request.get('/erp/stock-out/page', { params }) as Promise<any>
-}
-export function getStockOut(id: number) {
-  return request.get(`/erp/stock-out/${id}`) as Promise<any>
-}
-export function createStockOut(data: any) {
-  return request.post('/erp/stock-out', data) as Promise<any>
-}
-export function updateStockOut(data: any) {
-  return request.put('/erp/stock-out', data) as Promise<any>
-}
-export function deleteStockOut(id: number) {
-  return request.delete(`/erp/stock-out/${id}`) as Promise<any>
-}
-export function updateStockOutStatus(data: { id: number; status: number }) {
-  return request.put('/erp/stock-out/update-status', data) as Promise<any>
-}
-export function exportStockOuts(params?: Record<string, any>) {
-  return downloadExcel('/erp/stock-out/export-excel', params)
-}
+const stockOut = createDocClient('stock-out')
+export const pageStockOuts = stockOut.page
+export const getStockOut = stockOut.get
+export const createStockOut = stockOut.create
+export const updateStockOut = stockOut.update
+export const deleteStockOut = stockOut.delete
+export const updateStockOutStatus = stockOut.updateStatus
+export const exportStockOuts = stockOut.export
 
 // ---------- ERP 销售三单（issue #92，spec §3.4/§4.1/§4.5） ----------
 // 销售订单（XS）/ 销售出库（CK）/ 销售退货（ST）：单号由服务端经 erp_sequence
@@ -209,150 +201,72 @@ export function exportStockOuts(params?: Record<string, any>) {
 // 退货必挂已审核销售出库（outId，仓库服务端取自出库单，入参不传）；审核/反审核
 // 走 update-status（幂等目标态：20 审核 / 10 反审核），approve 为独立权限码；
 // 进度（outCount/returnCount）与核销金额（receiptPrice/refundPrice）服务端回写。
-export function pageSaleOrders(params: any) {
-  return request.get('/erp/sale-order/page', { params }) as Promise<any>
-}
-export function getSaleOrder(id: number) {
-  return request.get(`/erp/sale-order/${id}`) as Promise<any>
-}
-export function createSaleOrder(data: any) {
-  return request.post('/erp/sale-order', data) as Promise<any>
-}
-export function updateSaleOrder(data: any) {
-  return request.put('/erp/sale-order', data) as Promise<any>
-}
-export function deleteSaleOrder(id: number) {
-  return request.delete(`/erp/sale-order/${id}`) as Promise<any>
-}
-export function updateSaleOrderStatus(data: { id: number; status: number }) {
-  return request.put('/erp/sale-order/update-status', data) as Promise<any>
-}
-export function exportSaleOrders(params?: Record<string, any>) {
-  return downloadExcel('/erp/sale-order/export-excel', params)
-}
+const saleOrder = createDocClient('sale-order')
+export const pageSaleOrders = saleOrder.page
+export const getSaleOrder = saleOrder.get
+export const createSaleOrder = saleOrder.create
+export const updateSaleOrder = saleOrder.update
+export const deleteSaleOrder = saleOrder.delete
+export const updateSaleOrderStatus = saleOrder.updateStatus
+export const exportSaleOrders = saleOrder.export
 
-export function pageSaleOuts(params: any) {
-  return request.get('/erp/sale-out/page', { params }) as Promise<any>
-}
-export function getSaleOut(id: number) {
-  return request.get(`/erp/sale-out/${id}`) as Promise<any>
-}
-export function createSaleOut(data: any) {
-  return request.post('/erp/sale-out', data) as Promise<any>
-}
-export function updateSaleOut(data: any) {
-  return request.put('/erp/sale-out', data) as Promise<any>
-}
-export function deleteSaleOut(id: number) {
-  return request.delete(`/erp/sale-out/${id}`) as Promise<any>
-}
-export function updateSaleOutStatus(data: { id: number; status: number }) {
-  return request.put('/erp/sale-out/update-status', data) as Promise<any>
-}
-export function exportSaleOuts(params?: Record<string, any>) {
-  return downloadExcel('/erp/sale-out/export-excel', params)
-}
+const saleOut = createDocClient('sale-out')
+export const pageSaleOuts = saleOut.page
+export const getSaleOut = saleOut.get
+export const createSaleOut = saleOut.create
+export const updateSaleOut = saleOut.update
+export const deleteSaleOut = saleOut.delete
+export const updateSaleOutStatus = saleOut.updateStatus
+export const exportSaleOuts = saleOut.export
 
-export function pageSaleReturns(params: any) {
-  return request.get('/erp/sale-return/page', { params }) as Promise<any>
-}
-export function getSaleReturn(id: number) {
-  return request.get(`/erp/sale-return/${id}`) as Promise<any>
-}
-export function createSaleReturn(data: any) {
-  return request.post('/erp/sale-return', data) as Promise<any>
-}
-export function updateSaleReturn(data: any) {
-  return request.put('/erp/sale-return', data) as Promise<any>
-}
-export function deleteSaleReturn(id: number) {
-  return request.delete(`/erp/sale-return/${id}`) as Promise<any>
-}
-export function updateSaleReturnStatus(data: { id: number; status: number }) {
-  return request.put('/erp/sale-return/update-status', data) as Promise<any>
-}
-export function exportSaleReturns(params?: Record<string, any>) {
-  return downloadExcel('/erp/sale-return/export-excel', params)
-}
+const saleReturn = createDocClient('sale-return')
+export const pageSaleReturns = saleReturn.page
+export const getSaleReturn = saleReturn.get
+export const createSaleReturn = saleReturn.create
+export const updateSaleReturn = saleReturn.update
+export const deleteSaleReturn = saleReturn.delete
+export const updateSaleReturnStatus = saleReturn.updateStatus
+export const exportSaleReturns = saleReturn.export
 
 // ---------- ERP 采购订单（CG，issue #91，spec §3.3/§4.4） ----------
 // 单号由服务端经 erp_sequence 发放（入参无单号字段，伪造不可采纳）；行金额服务端
 // 按 单价×数量 计算（入参无 totalPrice 字段）；明细 inCount/returnCount 为服务端
 // 重算的进度回写（只计已审核单）。审核/反审核走 update-status（幂等目标态：
 // 20 审核 / 10 反审核），approve 为独立权限码；存在已审核入库/退货时订单不可反审核（409）。
-export function pagePurchaseOrders(params: any) {
-  return request.get('/erp/purchase-order/page', { params }) as Promise<any>
-}
-export function getPurchaseOrder(id: number) {
-  return request.get(`/erp/purchase-order/${id}`) as Promise<any>
-}
-export function createPurchaseOrder(data: any) {
-  return request.post('/erp/purchase-order', data) as Promise<any>
-}
-export function updatePurchaseOrder(data: any) {
-  return request.put('/erp/purchase-order', data) as Promise<any>
-}
-export function deletePurchaseOrder(id: number) {
-  return request.delete(`/erp/purchase-order/${id}`) as Promise<any>
-}
-export function updatePurchaseOrderStatus(data: { id: number; status: number }) {
-  return request.put('/erp/purchase-order/update-status', data) as Promise<any>
-}
-export function exportPurchaseOrders(params?: Record<string, any>) {
-  return downloadExcel('/erp/purchase-order/export-excel', params)
-}
+const purchaseOrder = createDocClient('purchase-order')
+export const pagePurchaseOrders = purchaseOrder.page
+export const getPurchaseOrder = purchaseOrder.get
+export const createPurchaseOrder = purchaseOrder.create
+export const updatePurchaseOrder = purchaseOrder.update
+export const deletePurchaseOrder = purchaseOrder.delete
+export const updatePurchaseOrderStatus = purchaseOrder.updateStatus
+export const exportPurchaseOrders = purchaseOrder.export
 
 // ---------- ERP 采购入库单（RK，issue #91，spec §3.3/§4.4） ----------
 // 必挂已审核采购订单（orderId 必填，前端挂单选择只出已审核单 status=20）；审核后
 // 增库存并回写订单 in_count；反审核生成反向流水回滚（存在已审核退货时 409）。
 // paymentPrice 为核销回写列（#94），只读展示。
-export function pagePurchaseIns(params: any) {
-  return request.get('/erp/purchase-in/page', { params }) as Promise<any>
-}
-export function getPurchaseIn(id: number) {
-  return request.get(`/erp/purchase-in/${id}`) as Promise<any>
-}
-export function createPurchaseIn(data: any) {
-  return request.post('/erp/purchase-in', data) as Promise<any>
-}
-export function updatePurchaseIn(data: any) {
-  return request.put('/erp/purchase-in', data) as Promise<any>
-}
-export function deletePurchaseIn(id: number) {
-  return request.delete(`/erp/purchase-in/${id}`) as Promise<any>
-}
-export function updatePurchaseInStatus(data: { id: number; status: number }) {
-  return request.put('/erp/purchase-in/update-status', data) as Promise<any>
-}
-export function exportPurchaseIns(params?: Record<string, any>) {
-  return downloadExcel('/erp/purchase-in/export-excel', params)
-}
+const purchaseIn = createDocClient('purchase-in')
+export const pagePurchaseIns = purchaseIn.page
+export const getPurchaseIn = purchaseIn.get
+export const createPurchaseIn = purchaseIn.create
+export const updatePurchaseIn = purchaseIn.update
+export const deletePurchaseIn = purchaseIn.delete
+export const updatePurchaseInStatus = purchaseIn.updateStatus
+export const exportPurchaseIns = purchaseIn.export
 
 // ---------- ERP 采购退货单（RT，issue #91，spec §3.3/§4.4） ----------
 // 必挂已审核采购入库单（inId 必填，前端挂单选择只出已审核单 status=20）；仓库取自
 // 入库单（入参无仓库字段）；审核后减库存并回写订单 return_count（经入库单关联）。
 // refundPrice 为核销回写列（#94），只读展示。
-export function pagePurchaseReturns(params: any) {
-  return request.get('/erp/purchase-return/page', { params }) as Promise<any>
-}
-export function getPurchaseReturn(id: number) {
-  return request.get(`/erp/purchase-return/${id}`) as Promise<any>
-}
-export function createPurchaseReturn(data: any) {
-  return request.post('/erp/purchase-return', data) as Promise<any>
-}
-export function updatePurchaseReturn(data: any) {
-  return request.put('/erp/purchase-return', data) as Promise<any>
-}
-export function deletePurchaseReturn(id: number) {
-  return request.delete(`/erp/purchase-return/${id}`) as Promise<any>
-}
-export function updatePurchaseReturnStatus(data: { id: number; status: number }) {
-  return request.put('/erp/purchase-return/update-status', data) as Promise<any>
-}
-export function exportPurchaseReturns(params?: Record<string, any>) {
-  return downloadExcel('/erp/purchase-return/export-excel', params)
-}
+const purchaseReturn = createDocClient('purchase-return')
+export const pagePurchaseReturns = purchaseReturn.page
+export const getPurchaseReturn = purchaseReturn.get
+export const createPurchaseReturn = purchaseReturn.create
+export const updatePurchaseReturn = purchaseReturn.update
+export const deletePurchaseReturn = purchaseReturn.delete
+export const updatePurchaseReturnStatus = purchaseReturn.updateStatus
+export const exportPurchaseReturns = purchaseReturn.export
 
 // ---------- ERP 结算账户（issue #94，spec §3.6/§4.7） ----------
 // 无余额入参：列表/详情返回「已审核收付款净额」实时余额列（不落库）；默认账户
@@ -378,53 +292,27 @@ export function deleteFinanceAccount(id: number) {
 // 本次核销金额（审核时校验「本单合计 + 其它已审核核销 ≤ 单据总额」，超限 409）；
 // 审核回写 sale_out.receiptPrice / sale_return.refundPrice，反审核重算释放额度；
 // 单号服务端发放（入参无单号字段）。
-export function pageFinanceReceipts(params: any) {
-  return request.get('/erp/finance-receipt/page', { params }) as Promise<any>
-}
-export function getFinanceReceipt(id: number) {
-  return request.get(`/erp/finance-receipt/${id}`) as Promise<any>
-}
-export function createFinanceReceipt(data: any) {
-  return request.post('/erp/finance-receipt', data) as Promise<any>
-}
-export function updateFinanceReceipt(data: any) {
-  return request.put('/erp/finance-receipt', data) as Promise<any>
-}
-export function deleteFinanceReceipt(id: number) {
-  return request.delete(`/erp/finance-receipt/${id}`) as Promise<any>
-}
-export function updateFinanceReceiptStatus(data: { id: number; status: number }) {
-  return request.put('/erp/finance-receipt/update-status', data) as Promise<any>
-}
-export function exportFinanceReceipts(params?: Record<string, any>) {
-  return downloadExcel('/erp/finance-receipt/export-excel', params)
-}
+const financeReceipt = createDocClient('finance-receipt')
+export const pageFinanceReceipts = financeReceipt.page
+export const getFinanceReceipt = financeReceipt.get
+export const createFinanceReceipt = financeReceipt.create
+export const updateFinanceReceipt = financeReceipt.update
+export const deleteFinanceReceipt = financeReceipt.delete
+export const updateFinanceReceiptStatus = financeReceipt.updateStatus
+export const exportFinanceReceipts = financeReceipt.export
 
 // ---------- ERP 付款单（FK，issue #94，spec §3.6/§4.7） ----------
 // 收款单镜像：明细只挂已审核采购入库（bizType=purchase_in）/采购退货
 // （purchase_return）；审核回写 purchase_in.paymentPrice /
 // purchase_return.refundPrice，反审核重算释放额度。
-export function pageFinancePayments(params: any) {
-  return request.get('/erp/finance-payment/page', { params }) as Promise<any>
-}
-export function getFinancePayment(id: number) {
-  return request.get(`/erp/finance-payment/${id}`) as Promise<any>
-}
-export function createFinancePayment(data: any) {
-  return request.post('/erp/finance-payment', data) as Promise<any>
-}
-export function updateFinancePayment(data: any) {
-  return request.put('/erp/finance-payment', data) as Promise<any>
-}
-export function deleteFinancePayment(id: number) {
-  return request.delete(`/erp/finance-payment/${id}`) as Promise<any>
-}
-export function updateFinancePaymentStatus(data: { id: number; status: number }) {
-  return request.put('/erp/finance-payment/update-status', data) as Promise<any>
-}
-export function exportFinancePayments(params?: Record<string, any>) {
-  return downloadExcel('/erp/finance-payment/export-excel', params)
-}
+const financePayment = createDocClient('finance-payment')
+export const pageFinancePayments = financePayment.page
+export const getFinancePayment = financePayment.get
+export const createFinancePayment = financePayment.create
+export const updateFinancePayment = financePayment.update
+export const deleteFinancePayment = financePayment.delete
+export const updateFinancePaymentStatus = financePayment.updateStatus
+export const exportFinancePayments = financePayment.export
 
 // ---------- ERP 首页统计（issue #95，spec §5/§6：菜单 701，权限码 erp:statistics:query） ----------
 // 口径：销售额 = Σ已审核销售出库 totalPrice（按 outTime 落区间）− Σ已审核销售退货
@@ -449,51 +337,25 @@ export function getPurchaseStatisticsTimeSummary(params?: { months?: number }) {
 // 负、入仓正两笔流水同额成对（两仓必须不同、源仓不足 409）；反审核各生成
 // 反向流水。审核/反审核走 update-status（幂等目标态：20 审核 / 10 反审核），
 // approve 为独立权限码。
-export function pageStockMoves(params: any) {
-  return request.get('/erp/stock-move/page', { params }) as Promise<any>
-}
-export function getStockMove(id: number) {
-  return request.get(`/erp/stock-move/${id}`) as Promise<any>
-}
-export function createStockMove(data: any) {
-  return request.post('/erp/stock-move', data) as Promise<any>
-}
-export function updateStockMove(data: any) {
-  return request.put('/erp/stock-move', data) as Promise<any>
-}
-export function deleteStockMove(id: number) {
-  return request.delete(`/erp/stock-move/${id}`) as Promise<any>
-}
-export function updateStockMoveStatus(data: { id: number; status: number }) {
-  return request.put('/erp/stock-move/update-status', data) as Promise<any>
-}
-export function exportStockMoves(params?: Record<string, any>) {
-  return downloadExcel('/erp/stock-move/export-excel', params)
-}
+const stockMove = createDocClient('stock-move')
+export const pageStockMoves = stockMove.page
+export const getStockMove = stockMove.get
+export const createStockMove = stockMove.create
+export const updateStockMove = stockMove.update
+export const deleteStockMove = stockMove.delete
+export const updateStockMoveStatus = stockMove.updateStatus
+export const exportStockMoves = stockMove.export
 
 // ---------- ERP 库存盘点单（PD，issue #93，spec §3.5/§4.6） ----------
 // 明细 actualCount 为实际清点数（≥ 0，十进制字符串）；baseCount 为创建时账面
 // 数快照（服务端写入、只读展示，审核以当时账面为准，入参无该字段）。审核按
 // 「差异 = actualCount − 当时账面数」调整库存（差正盘盈、差负盘亏），审核后
 // 账面 = 实际数；反审核按已入账流水净额反向。
-export function pageStockChecks(params: any) {
-  return request.get('/erp/stock-check/page', { params }) as Promise<any>
-}
-export function getStockCheck(id: number) {
-  return request.get(`/erp/stock-check/${id}`) as Promise<any>
-}
-export function createStockCheck(data: any) {
-  return request.post('/erp/stock-check', data) as Promise<any>
-}
-export function updateStockCheck(data: any) {
-  return request.put('/erp/stock-check', data) as Promise<any>
-}
-export function deleteStockCheck(id: number) {
-  return request.delete(`/erp/stock-check/${id}`) as Promise<any>
-}
-export function updateStockCheckStatus(data: { id: number; status: number }) {
-  return request.put('/erp/stock-check/update-status', data) as Promise<any>
-}
-export function exportStockChecks(params?: Record<string, any>) {
-  return downloadExcel('/erp/stock-check/export-excel', params)
-}
+const stockCheck = createDocClient('stock-check')
+export const pageStockChecks = stockCheck.page
+export const getStockCheck = stockCheck.get
+export const createStockCheck = stockCheck.create
+export const updateStockCheck = stockCheck.update
+export const deleteStockCheck = stockCheck.delete
+export const updateStockCheckStatus = stockCheck.updateStatus
+export const exportStockChecks = stockCheck.export
