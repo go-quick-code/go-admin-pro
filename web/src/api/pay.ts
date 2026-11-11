@@ -24,6 +24,23 @@ export function updateAppChannels(id: number, channelCodes: string[]) {
   return request.put(`/pay/app/${id}/channels`, { channelCodes }) as Promise<any>
 }
 
+// ---------- 钱包（租户级，issue #132） ----------
+// 只读：余额变动只走后端唯一入账入口（spec §4.3），本组无新增/编辑/删除接口。
+export function pageWallets(params: any) {
+  return request.get('/pay/wallet/page', { params }) as Promise<any>
+}
+// 自助端点（登录即可）：本人钱包（懒创建）与本人流水（服务层强制归属过滤）。
+// 收银台/示例订单等后续票的前端页面经这两个接口取本人钱包数据。
+export function getMyWallet() {
+  return request.get('/pay/wallet/my') as Promise<any>
+}
+export function pageWalletTransactions(params: any) {
+  return request.get('/pay/wallet-transaction/page', { params }) as Promise<any>
+}
+export function listMyWalletTransactions(params: any) {
+  return request.get('/pay/wallet-transaction/my', { params }) as Promise<any>
+}
+
 // ---------- 支付渠道（平台级，仅平台租户可管理） ----------
 export function pageChannels(params: any) {
   return request.get('/pay/channel/page', { params }) as Promise<any>
