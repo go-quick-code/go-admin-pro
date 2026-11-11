@@ -145,9 +145,8 @@ func (s *Service) ListAppChannels(ctx context.Context, appID int64) ([]string, e
 }
 
 // ReplaceAppChannels 全量替换应用的渠道绑定（spec §5：PUT /pay/app/:id/channels）。
-// 校验（spec §4.1）：码 ∈ 14 渠道码常量（未知码 409）∧ 平台渠道启用（停用 409）。
-// 「渠道未实现 → 409」在 #133 的 submit 链路生效：届时在此追加
-// s.registry.Known(code) 检查（注册表空实现渠道一律拒绝绑定）。
+// 校验（spec §4.1）：码 ∈ 14 渠道码常量（未知码 409）∧ 平台渠道启用（停用 409）
+// ∧ 渠道已实现（注册表无 Client 409 渠道未实现，#133）。
 func (s *Service) ReplaceAppChannels(ctx context.Context, appID int64, codes []string) ([]string, error) {
 	row, err := s.findApp(ctx, appID)
 	if err != nil {
@@ -201,6 +200,11 @@ func (s *Service) validateBindingCodes(ctx context.Context, codes []string) ([]s
 		if status != model.StatusEnable {
 			return nil, xerr.Conflict("支付渠道已停用：" + channel.Name(code) + "（" + code + "）")
 		}
+		if !s.channelRegistry().Known(code) {
+			// 平台启用但未实现（注册表无 Client）：绑定即拒绝（spec §4.1，
+			// #133——渠道码常量仍是唯一码源，实现与否由注册表判定）。
+			return nil, xerr.Conflict("渠道未实现：" + channel.Name(code) + "（" + code + "）")
+		}
 	}
 	return normalized, nil
 }
@@ -208,6 +212,19 @@ func (s *Service) validateBindingCodes(ctx context.Context, codes []string) ([]s
 // findApp 取应用并做存在性校验（不存在/跨租户统一 404，不泄露存在性）。
 func (s *Service) findApp(ctx context.Context, id int64) (*model.App, error) {
 	row, err := s.repo.FindAppByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, xerr.NotFound("支付应用不存在")
+	}
+	return row, nil
+}
+
+// findAppByKey 按 app_key 取应用（下单/收银台的消费方凭据，spec §4.2）；
+// 不存在/跨租户统一 404。
+func (s *Service) findAppByKey(ctx context.Context, appKey string) (*model.App, error) {
+	row, err := s.repo.FindAppByKey(ctx, appKey)
 	if err != nil {
 		return nil, err
 	}

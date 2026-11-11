@@ -1,16 +1,18 @@
-// Package service 是 pay 模块的业务层（issue #131 起步：应用与渠道域）。
+// Package service 是 pay 模块的业务层（issue #131 起步：应用与渠道域；
+// #132 钱包域；#133 订单与收银台）。
 //
-// 规则来源：docs/pay-mvp-spec.md §3.1/§4.1/§4.9/§4.10/§7。
+// 规则来源：docs/pay-mvp-spec.md §3.1/§3.2/§4.1/§4.2/§4.3/§4.9/§4.10/§7。
 //   - 渠道（pay_channel）是平台级资源，只有平台租户（ID=1）可读写；租户侧
 //     只读渠道清单（无凭证）。凭证走三段式：明文落库、查询脱敏 ******、
 //     更新占位符合并（照 message_channel 先例）。
 //   - 应用是租户级资源；绑定全量替换，校验「码 ∈ 14 渠道码常量 ∧ 平台渠道
-//     启用」。「渠道未实现 → 409」规则在 #133 的 submit 链路生效（见
-//     service/channel 包注释），本票绑定只查常量与启停。
-//   - 应用删除：有渠道绑定须先解绑；订单/退款/转账引用禁删的检查由后续票
-//     经 AppRefChecker 扩展点注册（本票先立骨架）。
+//     启用 ∧ 渠道已实现」（#133：注册表无 Client 的渠道绑定即 409 渠道未实现）。
+//   - 应用删除：有渠道绑定须先解绑；订单/退款/转账引用禁删的检查经
+//     AppRefChecker 扩展点注册（#133 注册订单引用检查）。
 //   - 单号发放（spec §4.9）：pay_sequence 事务内发放，前缀 + 业务时区日期
 //   - 至少 4 位序号；客户端提交的 no 一律不采纳。
+//   - 订单（#133，spec §4.2）：下单幂等（撞幂等键返回原单）、金额服务端定、
+//     支付成功入账函数三条路径共用（状态认领 0 行幂等返回）。
 package service
 
 import (
@@ -20,6 +22,7 @@ import (
 	"time"
 
 	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
+	"github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
@@ -31,13 +34,29 @@ var ErrPlatformOnly = errors.New("支付渠道仅平台租户可管理")
 // Service 汇聚 pay 模块的业务能力。
 type Service struct {
 	repo *payrepo.Repository
+	// registry 是渠道实现注册表（spec §4.1）：绑定校验与 submit 用 Known/Get
+	// 判定渠道是否已实现（未注册 → 409 渠道未实现）。装配期 SetRegistry 注入。
+	registry *channel.Registry
 	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入：
 	// 单号日期键一律按它划分。nil 时退回 time.Local。
 	location *time.Location
-	// appRefCheckers 是应用删除引用检查链（spec §4.10 扩展点）：#133+ 的
-	// 订单/退款/转账引用检查实现后经 SetAppRefChecker 注册；未注册时只查
+	// appRefCheckers 是应用删除引用检查链（spec §4.10 扩展点）：#133 注册
+	// 订单引用检查；#135/#136 的退款/转账检查经同一扩展点追加；未注册时只查
 	// 渠道绑定（纯绑定关系须先解绑）。
 	appRefCheckers AppRefChecker
+}
+
+// SetRegistry 注入渠道实现注册表（装配期；未注入视为空表——所有渠道未实现）。
+func (s *Service) SetRegistry(registry *channel.Registry) {
+	s.registry = registry
+}
+
+// channelRegistry 返回注册表（nil 安全：空注册表语义）。
+func (s *Service) channelRegistry() *channel.Registry {
+	if s.registry == nil {
+		return channel.NewRegistry()
+	}
+	return s.registry
 }
 
 // New 创建 pay Service。
