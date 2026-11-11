@@ -129,6 +129,11 @@ func (s *Service) CreateRefund(ctx context.Context, req *dto.RefundCreateReq, us
 		if locked.Status != model.OrderStatusSuccess {
 			return xerr.Conflict(refundOrderStatusMessage(locked.Status))
 		}
+		// #136 充值退款守卫（spec §4.7/§8.2）：挂充值单的订单仅全额退款且
+		// 余额充足才可发起（先校验后退款——余额不足 409 不发起、不落退款单）。
+		if err := s.guardRechargeRefundCreateTx(ctx, tx, tenantID, locked, req.RefundPrice); err != nil {
+			return err
+		}
 		if locked.ChannelCode == "" {
 			// 10 成功订单必有渠道回执；DB 造数据绕过时明确拒绝（防御）。
 			return xerr.Conflict("订单缺少支付渠道，无法原路退回")
@@ -296,19 +301,39 @@ func refundFlowTitle(refund *model.Refund) string {
 
 // refundSuccessTx 退款成功入账（wallet 发起 / mock 模拟成功 / 未来真实渠道
 // 退款回调共用；spec §4.4）：
-//  1. 退款单状态认领 UPDATE ... WHERE id=? AND status=0——0 行 = 已被并发方
-//     处理，幂等成功返回（不重复累计/不重复建任务）；
-//  2. success_time + 渠道回执（channel_refund_no/末次回调原文）；
-//  3. 订单 refund_price 累计（订单行锁内重读裁决：累计 = price 置 20 已退款，
+//  1. 充值联动预检（#136，spec §4.7 先校验后退款）：挂充值单的退款先在钱包
+//     行锁内校验余额——扣回总额（pay + bonus 全额）不足以扣时退款单认领
+//     0→20 失败（幂等门槛同认领）+ 充值单记失败态：不入账、不累计、不建任务；
+//  2. 退款单状态认领 UPDATE ... WHERE id=? AND status=0——0 行 = 已被并发方
+//     处理，幂等成功返回（不重复累计/不重复建任务/不重复扣回）；
+//  3. success_time + 渠道回执（channel_refund_no/末次回调原文）；
+//  4. 订单 refund_price 累计（订单行锁内重读裁决：累计 = price 置 20 已退款，
 //     部分退款保持 10，spec §4.4）；
-//  4. 建商户回调任务（type=2，data_id=退款单 ID，merchant_refund_id，notify_url
+//  5. 充值联动（挂充值单时）：扣回钱包 refund_total_price（biz=2，出向 SQL
+//     双保险）+ refund_* 三列回写 + total_recharge 调减（spec §4.7）；
+//  6. 建商户回调任务（type=2，data_id=退款单 ID，merchant_refund_id，notify_url
 //     发起快照，max_notify_times=9，next_notify_time=now；job 消费是 #134）。
 //
-// 函数内不做任何余额变动：wallet 回加发生在渠道 Refund 内（先回加后认领，
-// 认领失败整体回滚），mock/真实渠道资金为外部退回。订单行锁由本函数自取
-// （同步路径调用方已持有同一锁——同事务重入无等待；异步回调路径由此获得
-// 锁保护，先锁后写同钱包口径）。
+// 函数内的余额变动：wallet 渠道回加发生在渠道 Refund 内（先回加后认领）；
+// 充值退款扣回（biz=2）在本函数第 5 步（先校验后认领后扣回，扣回失败整体
+// 回滚）。订单行锁由本函数自取（同步路径调用方已持有同一锁——同事务重入
+// 无等待；异步回调路径由此获得锁保护，先锁后写同钱包口径）。
 func (s *Service) refundSuccessTx(ctx context.Context, tx *payrepo.Repository, tenantID int64, refund *model.Refund, channelRefundNo, notifyData string) (bool, error) {
+	// #136 充值联动预检：钱包行锁内读余额（与发起路径同锁序：订单锁已由
+	// 调用方/同步发起事务先取，此处取钱包锁），先校验后退款（spec §4.7）。
+	recharge, err := tx.FindRechargeByOrderID(ctx, refund.OrderID)
+	if err != nil {
+		return false, err
+	}
+	if recharge != nil {
+		current, err := tx.LockWallet(ctx, tenantID, recharge.WalletID)
+		if err != nil {
+			return false, err
+		}
+		if current.Balance.Cents() < recharge.TotalPrice.Cents() {
+			return s.failRechargeRefundTx(ctx, tx, tenantID, recharge, refund, notifyData)
+		}
+	}
 	successTime := s.businessNow()
 	rows, err := tx.ClaimRefundSuccess(ctx, tenantID, refund.ID, channelRefundNo, notifyData, successTime)
 	if err != nil {
@@ -337,6 +362,13 @@ func (s *Service) refundSuccessTx(ctx context.Context, tx *payrepo.Repository, t
 	}
 	if err := tx.ApplyOrderRefund(ctx, tenantID, order.ID, refund.RefundPrice, newStatus); err != nil {
 		return false, err
+	}
+	// #136 充值联动：扣回钱包（pay + bonus 全额）+ refund_* 三列回写
+	//（spec §4.7；mock/wallet 同步路径与未来异步回调路径共用）。
+	if recharge != nil {
+		if err := s.applyRechargeRefundSuccessTx(ctx, tx, tenantID, recharge, refund); err != nil {
+			return false, err
+		}
 	}
 	task := &model.NotifyTask{
 		AppID:            refund.AppID,

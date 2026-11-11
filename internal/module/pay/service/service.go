@@ -1,10 +1,11 @@
 // Package service 是 pay 模块的业务层（issue #131 起步：应用与渠道域；
-// #132 钱包域；#133 订单与收银台；#135 退款域）。
+// #132 钱包域；#133 订单与收银台；#135 退款域；#136 充值与套餐）。
 //
-// 规则来源：docs/pay-mvp-spec.md §3.1/§3.2/§4.1/§4.2/§4.3/§4.4/§4.9/§4.10/§7。
+// 规则来源：docs/pay-mvp-spec.md §3.1/§3.2/§4.1/§4.2/§4.3/§4.4/§4.7/§4.9/
+// §4.10/§7。
 //   - 渠道（pay_channel）是平台级资源，只有平台租户（ID=1）可读写；租户侧
 //     只读渠道清单（无凭证）。凭证走三段式：明文落库、查询脱敏 ******、
-//     更新占位符合并（照 message_channel 先例）。
+//     更新占位符合并（照 message_channel 三段式）。
 //   - 应用是租户级资源；绑定全量替换，校验「码 ∈ 14 渠道码常量 ∧ 平台渠道
 //     启用 ∧ 渠道已实现」（#133：注册表无 Client 的渠道绑定即 409 渠道未实现）。
 //   - 应用删除：有渠道绑定须先解绑；订单/退款/转账引用禁删的检查经
@@ -12,10 +13,15 @@
 //   - 单号发放（spec §4.9）：pay_sequence 事务内发放，前缀 + 业务时区日期
 //   - 至少 4 位序号；客户端提交的 no 一律不采纳。
 //   - 订单（#133，spec §4.2）：下单幂等（撞幂等键返回原单）、金额服务端定、
-//     支付成功入账函数三条路径共用（状态认领 0 行幂等返回）。
+//     支付成功入账函数三条路径共用（状态认领 0 行幂等返回）；充值订单禁用
+//     钱包渠道（#136 submit 反查防自引用套利）。
 //   - 退款（#135，spec §4.4）：原路退回、部分退款累计 ≤ 实付（订单行锁内
 //     裁决，全额置 20）、wallet 回加走唯一入账入口（biz=4，与支付扣减同锁
-//     路径）、退款成功入账函数三条路径共用。
+//     路径）、退款成功入账函数三条路径共用；充值单退款仅全额且先校验余额
+//     （#136，spec §4.7）。
+//   - 充值与套餐（#136，spec §4.7）：套餐快照进充值单、同事务挂支付订单、
+//     支付成功联动钱包入账（biz=1，OrderSuccessHandler 扩展点注册）、充值
+//     退款成功联动扣回（biz=2，扣后 ≥ 0 否则退款单 20 失败）。
 package service
 
 import (
@@ -61,9 +67,28 @@ type Service struct {
 	// payloadEnrichers 是回调报文详情扩展（按任务类型；#134 内置 type=1，
 	// #135/#136 经 SetNotifyPayloadEnricher 追加）。
 	payloadEnrichers map[int8]NotifyPayloadEnricher
+	// orderSuccessHandlers 是支付成功入账后的业务联动扩展点（spec §4.7/#136
+	// 充值入账注册于 New；后续票经 SetOrderSuccessHandler 追加）：在
+	// paymentSuccessTx 订单认领后同事务执行，任一失败整体回滚。
+	orderSuccessHandlers []OrderSuccessHandler
+	// rechargeAppKey 是充值单挂单应用标识（#136，configs pay.recharge-app-key，
+	// 装配期 SetRechargeAppKey 注入；空 = 缺省 demo，见 recharge.go 头注释）。
+	rechargeAppKey string
 	// demoHandler 是 demo 商户回调业务联动扩展点（#137 注册；未注册时
 	// demo 端点验签通过即回 code=0）。
 	demoHandler DemoNotifyHandler
+}
+
+// OrderSuccessHandler 是支付成功入账后的业务联动扩展点（spec §4.7 充值入账
+// 注册于 service.New；后续票经 SetOrderSuccessHandler 追加）：paymentSuccessTx
+// 订单认领成功后同事务调用（tx 为发起事务，联动与认领原子；order 已置 10，
+// ext 为本次成功的支付发起）。返回 error 时整体回滚（回调可安全重试）。
+type OrderSuccessHandler func(ctx context.Context, tx *payrepo.Repository, tenantID int64, order *paymodel.Order, ext *paymodel.OrderExtension) error
+
+// SetOrderSuccessHandler 追加支付成功业务联动（后追加者后执行；与订单认领
+// 同事务，任一失败整体回滚）。
+func (s *Service) SetOrderSuccessHandler(fn OrderSuccessHandler) {
+	s.orderSuccessHandlers = append(s.orderSuccessHandlers, fn)
 }
 
 // SetRegistry 注入渠道实现注册表（装配期；未注入视为空表——所有渠道未实现）。
@@ -80,13 +105,15 @@ func (s *Service) channelRegistry() *channel.Registry {
 }
 
 // New 创建 pay Service：内置 type=1（支付）与 type=2（退款，#135）的回调
-// 报文详情 enricher；#136 转账经 SetNotifyPayloadEnricher 追加各自的详情。
+// 报文详情 enricher；充值支付成功联动（#136，spec §4.7 经 OrderSuccessHandler
+// 扩展点注册）；#136 转账经 SetNotifyPayloadEnricher 追加各自的详情。
 func New(repo *payrepo.Repository) *Service {
 	s := &Service{repo: repo, notifyHTTPClient: newNotifyHTTP()}
 	s.payloadEnrichers = map[int8]NotifyPayloadEnricher{
 		paymodel.NotifyTypePayment: s.enrichPaymentPayload,
 		paymodel.NotifyTypeRefund:  s.enrichRefundPayload,
 	}
+	s.orderSuccessHandlers = []OrderSuccessHandler{s.creditRechargeOnOrderSuccess}
 	return s
 }
 

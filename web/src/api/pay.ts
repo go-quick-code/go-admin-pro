@@ -100,3 +100,43 @@ export function updateChannel(id: number, data: { status?: number; config?: stri
 export function listTenantChannels() {
   return request.get('/pay/channel/list') as Promise<any>
 }
+
+// ---------- 充值套餐（issue #136） ----------
+// 管理端 CRUD（pay:wallet-recharge-package:*）；金额一律十进制字符串
+//（后端 money.Money 只接受 JSON 字符串字面量，精度不经 float）。
+export function pageRechargePackages(params: any) {
+  return request.get('/pay/wallet-recharge-package/page', { params }) as Promise<any>
+}
+export function getRechargePackage(id: number) {
+  return request.get(`/pay/wallet-recharge-package/${id}`) as Promise<any>
+}
+export function createRechargePackage(data: { name: string; payPrice: string; bonusPrice?: string; status?: number }) {
+  return request.post('/pay/wallet-recharge-package', data) as Promise<any>
+}
+export function updateRechargePackage(data: { id: number; name: string; payPrice: string; bonusPrice?: string; status?: number }) {
+  return request.put('/pay/wallet-recharge-package', data) as Promise<any>
+}
+// 被充值单引用时后端 409（spec §4.10 引用禁删）。
+export function deleteRechargePackage(id: number) {
+  return request.delete(`/pay/wallet-recharge-package/${id}`) as Promise<any>
+}
+// 自助清单（登录即可）：我的充值页「发起充值」的套餐选择数据源（仅启用档位）。
+export function listRechargePackageOptions() {
+  return request.get('/pay/wallet-recharge-package/list') as Promise<any>
+}
+
+// ---------- 充值单（issue #136） ----------
+// 发起充值（登录 + 本人钱包）：packageId（套餐档位快照）与 payPrice（自定义，
+// bonus 恒 0）二选一；同事务挂支付订单，返回 appKey/merchantOrderId 供收银台
+// 跳转（钱包渠道被禁，spec §4.7）。
+export function createRecharge(data: { packageId?: number; payPrice?: string }) {
+  return request.post('/pay/wallet-recharge/create', data) as Promise<any>
+}
+// 我的充值（登录即可，服务层强制本人钱包归属，spec §4.11）。
+export function pageMyRecharges(params: any) {
+  return request.get('/pay/wallet-recharge/my', { params }) as Promise<any>
+}
+// 充值单管理分页（pay:wallet-recharge:query）：只读（资金事实 append-only）。
+export function pageRecharges(params: any) {
+  return request.get('/pay/wallet-recharge/page', { params }) as Promise<any>
+}

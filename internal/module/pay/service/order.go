@@ -278,6 +278,18 @@ func (s *Service) SubmitOrder(ctx context.Context, req *dto.OrderSubmitReq, user
 		if order.ExpireTime != nil && s.businessNow().After(*order.ExpireTime) {
 			return xerr.Conflict("订单已过期，请重新下单")
 		}
+		// 充值禁用钱包渠道（#136，spec §4.7）：反查 pay_wallet_recharge.pay_order_id
+		// ——充值订单走钱包渠道支付属「扣款 → 充值入账」自引用套利（净零绕圈
+		// 刷赠送），一律 409。
+		if code == channel.CodeWallet {
+			recharge, err := tx.FindRechargeByOrderID(ctx, locked.ID)
+			if err != nil {
+				return err
+			}
+			if recharge != nil {
+				return xerr.Conflict("充值订单禁用钱包渠道支付：钱包余额支付充值属自引用套利")
+			}
+		}
 		// 校验二：应用已绑定该渠道。
 		bound, err := tx.ListAppChannels(ctx, order.AppID)
 		if err != nil {
@@ -396,10 +408,13 @@ func (s *Service) PayByWallet(ctx context.Context, req channel.OrderReq) error {
 //  2. success_time + 渠道回执（channel_code/order_no/user_id/extension_id）；
 //  3. extension 置成功（末次回调原文落 channel_notify_data）；
 //  4. 建商户回调任务（type=1，data_id=订单 ID，notify_url 下单快照，
-//     max_notify_times=9，next_notify_time=now；job 消费是 #134）。
+//     max_notify_times=9，next_notify_time=now；job 消费是 #134）；
+//  5. 业务联动扩展点（#136 充值入账注册于 New；后续票经
+//     SetOrderSuccessHandler 追加）——认领后同事务执行，任一失败整体回滚。
 //
 // 函数内不做任何余额变动：wallet 扣减发生在渠道 Order 内（先扣后认领，认领
-// 失败整体回滚），mock/真实渠道资金为外部到账。
+// 失败整体回滚），mock/真实渠道资金为外部到账；业务联动里的余额变动（充值
+// 入账 biz=1）在扩展点内经唯一入账入口完成。
 func (s *Service) paymentSuccessTx(ctx context.Context, tx *payrepo.Repository, tenantID int64, order *model.Order, ext *model.OrderExtension, channelOrderNo, channelUserID, notifyData string) (bool, error) {
 	successTime := s.businessNow()
 	rows, err := tx.ClaimOrderSuccess(ctx, tenantID, order.ID, ext.ID, ext.ChannelCode, channelOrderNo, channelUserID, successTime)
@@ -423,7 +438,17 @@ func (s *Service) paymentSuccessTx(ctx context.Context, tx *payrepo.Repository, 
 		NotifyTimes:     0,
 		MaxNotifyTimes:  model.NotifyTaskMaxTimes,
 	}
-	return true, tx.InsertNotifyTask(ctx, task)
+	if err := tx.InsertNotifyTask(ctx, task); err != nil {
+		return false, err
+	}
+	// 业务联动扩展点（#136 充值入账等）：认领成功后同事务执行，任一失败
+	// 整体回滚（订单认领/extension/任务一并回滚，回调可安全重试）。
+	for _, hook := range s.orderSuccessHandlers {
+		if err := hook(ctx, tx, tenantID, order, ext); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // ---------- mock 模拟回调（POST /pay/mock/notify，登录 + 本人 + mock 渠道） ----------

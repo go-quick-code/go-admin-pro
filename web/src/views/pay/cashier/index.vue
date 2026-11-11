@@ -102,7 +102,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { formatTime } from '@/utils/format'
 import { getCashierOrder, submitPayOrder, mockPayNotify } from '@/api/pay'
@@ -111,6 +112,8 @@ import { getCashierOrder, submitPayOrder, mockPayNotify } from '@/api/pay'
 // 本人订单校验在服务层强制（非本人 403、跨租户 404）。
 // 流程：查询订单 → 选渠道 → 发起支付（wallet 同步成功 / mock 停待支付）→
 // mock 渠道出现「模拟回调」按钮 → 支付成功入账（建商户回调任务，#134 消费）。
+// #136：支持路由 query 预填（我的充值页发起充值后携带 appKey +
+// merchantOrderId 跳入，直接定位订单）。
 
 const statusLabels: Record<number, string> = { 0: '待支付', 10: '成功', 20: '已退款', 30: '已关闭' }
 function statusLabel(status: number) {
@@ -194,6 +197,18 @@ async function doMockNotify(result: 'success' | 'failure') {
     mocking.value = ''
   }
 }
+
+// 路由 query 预填（#136 我的充值跳入）：appKey + merchantOrderId 齐备时直接定位。
+const route = useRoute()
+onMounted(() => {
+  const appKey = (route.query.appKey as string) || ''
+  const merchantOrderId = (route.query.merchantOrderId as string) || ''
+  if (appKey && merchantOrderId) {
+    query.value.appKey = appKey
+    query.value.merchantOrderId = merchantOrderId
+    loadOrder()
+  }
+})
 </script>
 
 <style scoped>
