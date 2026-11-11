@@ -11,7 +11,11 @@
 // 与 submit 校验中追加 registry.Known(code) 检查（409「渠道未实现」）。
 package channel
 
-import "context"
+import (
+	"context"
+
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+)
 
 // 渠道码常量（对齐芋道 pay 渠道枚举 14 个，spec §3.1/§4.1）。
 const (
@@ -76,16 +80,16 @@ const (
 	DisplayModeURL    = "url"
 )
 
-// OrderReq 统一下单请求（金额一律 Money 定点，由消费方服务端定）。
+// OrderReq 统一下单请求（金额一律 money.Money 分定点，spec §2，由消费方服务端定）。
 type OrderReq struct {
 	OutTradeNo  string // 业务支付单号（ZF 前缀）
 	Subject     string
 	Body        string
-	PriceCents  int64  // 实付金额（分定点，避免浮点）
-	NotifyURL   string // 渠道回调地址（平台级公开端点）
-	ReturnURL   string // 支付后跳转地址（预留）
-	ExpireTime  string // 订单过期时间（RFC3339，预留）
-	ChannelUser string // 渠道用户标识（条码类支付预留）
+	Price       money.Money // 实付金额（服务端定，客户端不可覆盖业务价）
+	NotifyURL   string      // 渠道回调地址（平台级公开端点）
+	ReturnURL   string      // 支付后跳转地址（预留）
+	ExpireTime  string      // 订单过期时间（RFC3339，预留）
+	ChannelUser string      // 渠道用户标识（条码类支付预留）
 }
 
 // OrderResp 统一下单响应：displayMode=none 等回调，qrcode/url 携带 content。
@@ -100,15 +104,15 @@ type OrderNotify struct {
 	Success        bool
 	ChannelOrderNo string
 	ChannelUserID  string
-	PriceCents     int64
-	Raw            string // 回调原文（落 extension.channel_notify_data）
+	Price          money.Money // 回调金额（渠道对账用）
+	Raw            string      // 回调原文（落 extension.channel_notify_data）
 }
 
 // RefundReq 退款请求（原路退回）。
 type RefundReq struct {
 	OutRefundNo    string // 业务退款单号（TK 前缀）
 	ChannelOrderNo string
-	RefundCents    int64 // 本次退款金额（分定点）
+	RefundPrice    money.Money // 本次退款金额
 	Reason         string
 }
 
