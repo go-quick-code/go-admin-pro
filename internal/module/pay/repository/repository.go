@@ -23,6 +23,18 @@ type Repository struct {
 // New 创建 pay Repository。
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
+// DB 返回底层 gorm 句柄（跨模块/事务内传递同一事务时使用）。
+func (r *Repository) DB() *gorm.DB { return r.db }
+
+// Transaction 在一个数据库事务里执行 fn，fn 收到绑定同一事务的 Repository
+// （与 erp 同构）：唯一入账入口的「锁钱包行 → 条件 UPDATE → 发号 → 插流水」
+// 与后续票的单据落库都依赖同一事务。
+func (r *Repository) Transaction(ctx context.Context, fn func(tx *Repository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(&Repository{db: tx})
+	})
+}
+
 func notFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil

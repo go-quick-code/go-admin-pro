@@ -51,10 +51,15 @@ func seedPayChannels(db *gorm.DB) error {
 	return nil
 }
 
-// payMenus 构造支付中心 800 段菜单（issue #131，spec §7）：dir 800 +
-// 810 支付应用 + 820 渠道配置；按钮 = 菜单ID×10+n（8101–8103、8201，
-// 开工前 grep seed 去重确认未占用）。811–814/821–822/830/831/840 留给
-// 后续票（订单/退款/转账/回调/钱包/套餐/示例/收银台）。
+// payMenus 构造支付中心 800 段菜单（issue #131/#132，spec §7）：dir 800 +
+// 810 支付应用 + 820 渠道配置 + 821 钱包管理；按钮 = 菜单ID×10+n（8101–8103、
+// 8201，开工前 grep seed 去重确认未占用）。811–814/822/830/831/840 留给
+// 后续票（订单/退款/转账/回调/套餐/示例/收银台）。
+//
+// 钱包管理（821）无按钮行：钱包页唯一动作是查询（query 码挂菜单自身），
+// 余额调整无管理端入口（spec §4.3 差异清单）、钱包不可删（§4.10）；
+// 导出按钮（pay:wallet:export）随 #138 的 export-excel 端点按「按页面实际
+// 授予」纪律一并补种。
 //
 // 渠道配置是平台级页面：「仅平台租户」由 service 层 requirePlatform 收口，
 // 非平台租户即使持 pay:channel:* 也 403（照 message 渠道先例）。
@@ -69,5 +74,6 @@ func payMenus() []sysmodel.Menu {
 		btnRow(8103, 810, "应用删除", "pay:app:delete", 3),
 		menuRow(820, 800, "渠道配置", "channel", "pay/channel/index", "pay:channel:query", "Connection", 2),
 		btnRow(8201, 820, "渠道修改", "pay:channel:update", 1),
+		menuRow(821, 800, "钱包管理", "wallet", "pay/wallet/index", "pay:wallet:query", "Wallet", 3),
 	}
 }

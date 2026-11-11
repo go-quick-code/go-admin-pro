@@ -26,4 +26,16 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 租户侧只读清单（无凭证）：应用详情绑定 tab 的数据源，挂 pay:app:query
 	//（持有支付应用菜单即可读；渠道凭证不在返回里）。
 	channel.GET("/list", h.perm("pay:app:query"), h.ListChannelOptions)
+
+	// 钱包（issue #132，spec §5/§4.11）：只读查询。自助端点只挂登录（无权限
+	// 码），user_id 归属过滤在 service 层强制；管理端分页挂 pay:wallet:query
+	//（钱包/流水共用一个查询码，spec §7）。无写入端点：余额变动只走 service
+	// 层唯一入账入口（spec §4.3），余额调整 v1 无管理端入口。
+	wallet := rg.Group("/pay/wallet")
+	wallet.GET("/my", h.GetMyWallet)
+	wallet.GET("/page", h.perm("pay:wallet:query"), h.PageWallets)
+
+	walletTx := rg.Group("/pay/wallet-transaction")
+	walletTx.GET("/my", h.PageMyWalletTransactions)
+	walletTx.GET("/page", h.perm("pay:wallet:query"), h.PageWalletTransactions)
 }
