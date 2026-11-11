@@ -194,6 +194,13 @@ var TenantTables = []string{
 	"pay_app",
 	"pay_app_channel",
 	"pay_sequence",
+
+	// 钱包域（issue #132，迁移 00036，docs/pay-mvp-spec.md §3.4/§4.3）：余额账
+	// 与流水账全量租户隔离（跨租户业务 ID 一律 404）；UNIQUE(tenant_id, user_id,
+	// user_type) 兜底钱包懒创建并发。余额变动只走唯一入账入口（入账原语走
+	// 显式租户参数的裸 SQL，同 erp_stock 口径）。
+	"pay_wallet",
+	"pay_wallet_transaction",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。
