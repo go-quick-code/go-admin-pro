@@ -35,6 +35,7 @@ import (
 	payapi "github.com/go-quick-code/go-admin-pro/internal/module/pay/api"
 	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
 	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
+	paychannel "github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
 	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
@@ -431,11 +432,19 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
 	// pay 模块（issue #131，docs/pay-mvp-spec.md §2）：repo→service→api 顺序
-	// 装配；业务时区（ADR 0006）是单号日期键的唯一口径。渠道 SPI 注册表在
-	// #132 注册 mock/wallet 实现；应用删除引用检查在 #133+ 以 RefCheckerChain
-	// 追加（本票骨架见 pay/service/app_ref.go）。
-	paySvc := payservice.New(payrepo.New(db))
+	// 装配；业务时区（ADR 0006）是单号日期键的唯一口径。渠道 SPI 注册表
+	//（#133 定形）：mock/wallet 两实现注册进 Registry，未注册渠道在绑定与
+	// submit 处 409「渠道未实现」；应用删除引用检查以 RefCheckerChain 注册
+	//（#133 订单引用，#135/#136 追加退款/转账）。
+	payRepo := payrepo.New(db)
+	paySvc := payservice.New(payRepo)
 	paySvc.SetLocation(cfg.Location())
+	payRegistry, payRegistryErr := payChannelRegistry(db, paySvc)
+	if payRegistryErr != nil {
+		return nil, payRegistryErr
+	}
+	paySvc.SetRegistry(payRegistry)
+	paySvc.SetAppRefChecker(payservice.RefCheckerChain{payservice.OrderRefChecker{Repo: payRepo}})
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission)
 
 	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI, payAPI)
@@ -443,6 +452,35 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	scheduler.Start(context.Background())
 
 	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, Pay: paySvc, APILog: apiLogWriter}, nil
+}
+
+// payChannelRegistry 装配渠道 SPI 注册表（issue #133，docs/pay-mvp-spec.md
+// §4.1）：v1 注册 mock/wallet 两实现；渠道 config 取 pay_channel 种子行原文
+// （空对象 {}，由渠道实现自行反序列化校验）。注册表是「渠道未实现」的唯一
+// 判定源：未注册渠道在应用绑定与 submit 处 409（service 层 Known 检查）。
+// 补渠道实现不改 SPI：实现 Client 后在此 Register 即可。
+func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer) (*paychannel.Registry, error) {
+	rows, err := payrepo.New(db).ListChannelsByCodes(
+		context.Background(), []string{paychannel.CodeMock, paychannel.CodeWallet})
+	if err != nil {
+		return nil, fmt.Errorf("load pay channel configs: %w", err)
+	}
+	configByCode := make(map[string]string, len(rows))
+	for _, row := range rows {
+		configByCode[row.Code] = row.Config
+	}
+	mockClient, err := paychannel.NewMockClient(configByCode[paychannel.CodeMock])
+	if err != nil {
+		return nil, fmt.Errorf("init mock pay client: %w", err)
+	}
+	walletClient, err := paychannel.NewWalletClient(configByCode[paychannel.CodeWallet], payer)
+	if err != nil {
+		return nil, fmt.Errorf("init wallet pay client: %w", err)
+	}
+	registry := paychannel.NewRegistry()
+	registry.Register(mockClient)
+	registry.Register(walletClient)
+	return registry, nil
 }
 
 // Close 释放资源。

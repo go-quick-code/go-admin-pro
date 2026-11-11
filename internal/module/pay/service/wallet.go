@@ -105,61 +105,70 @@ func (s *Service) ApplyWalletChange(ctx context.Context, ch WalletChange) (*mode
 
 	var out *model.WalletTransaction
 	err := s.repo.Transaction(ctx, func(tx *payrepo.Repository) error {
-		// 1) 懒创建（幂等；UNIQUE 兜底并发首触）。
-		walletID, err := tx.EnsureWallet(ctx, tenantID, ch.UserID, ch.UserType)
-		if err != nil {
-			return err
-		}
-		// 2) 行锁 + 当前余额/累计（先锁后写）。
-		current, err := tx.LockWallet(ctx, tenantID, walletID)
-		if err != nil {
-			return err
-		}
-		// 3) 校验。余额上限在锁内预判（decimal(12,2) 范围，同 ERP 累计越界 400）；
-		//    余额下限交给第 4 步的 SQL 条件做最终裁决。
-		after, err := current.Balance.Add(ch.Price)
-		if err != nil {
-			return xerr.BadRequest(fmt.Sprintf("钱包余额累计超出范围：当前 %s + 变动 %s", current.Balance, ch.Price))
-		}
-		rechargeDelta, expenseDelta := walletCounterDeltas(ch)
-		if msg := checkWalletCounter(current.TotalRecharge, rechargeDelta, "累计充值"); msg != "" {
-			return xerr.Conflict(msg)
-		}
-		if msg := checkWalletCounter(current.TotalExpense, expenseDelta, "累计支出"); msg != "" {
-			return xerr.Conflict(msg)
-		}
-		// 4) 更新余额。SQL 条件是负余额禁令的最终裁决：出向影响 0 行 → 409。
-		rows, err := tx.UpdateWalletBalance(ctx, tenantID, walletID, ch.Price, rechargeDelta, expenseDelta, ch.Price.Cents() < 0)
-		if err != nil {
-			return err
-		}
-		if rows == 0 {
-			return xerr.Conflict(walletShortMessage(ch, current.Balance))
-		}
-		// 5) LS 流水号：pay_sequence 事务内发放（tx 为绑定事务的 Repository，
-		//    发放与流水落库同事务）。日期键取一次口径，避免跨日翻转错位。
-		key := dateKey(s.businessNow())
-		no, err := tx.NextSequenceValue(ctx, tenantID, SeqWalletTransaction, key)
-		if err != nil {
-			return err
-		}
-		// 6) 流水（append-only）：正入负出 + 变动后结存快照。
-		out = &model.WalletTransaction{
-			TenantID: tenantID,
-			No:       formatNo(NoPrefixWalletTransaction, key, no),
-			WalletID: walletID,
-			BizType:  ch.BizType,
-			BizID:    ch.BizID,
-			Title:    trimString(ch.Title),
-			Price:    ch.Price,
-			Balance:  after,
-		}
-		return tx.InsertWalletTransaction(ctx, out)
+		var err error
+		out, err = s.applyWalletChangeTx(ctx, tx, tenantID, ch)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// applyWalletChangeTx 是入账入口的事务内核（调用方已持有事务，钱包发起点
+// ——wallet 渠道支付扣减——在同一事务内复用；spec §4.2 wallet 渠道同事务
+// 扣减）。校验已由 ApplyWalletChange 前置完成（内部调用方自行保证）。
+func (s *Service) applyWalletChangeTx(ctx context.Context, tx *payrepo.Repository, tenantID int64, ch WalletChange) (*model.WalletTransaction, error) {
+	// 1) 懒创建（幂等；UNIQUE 兜底并发首触）。
+	walletID, err := tx.EnsureWallet(ctx, tenantID, ch.UserID, ch.UserType)
+	if err != nil {
+		return nil, err
+	}
+	// 2) 行锁 + 当前余额/累计（先锁后写）。
+	current, err := tx.LockWallet(ctx, tenantID, walletID)
+	if err != nil {
+		return nil, err
+	}
+	// 3) 校验。余额上限在锁内预判（decimal(12,2) 范围，同 ERP 累计越界 400）；
+	//    余额下限交给第 4 步的 SQL 条件做最终裁决。
+	after, err := current.Balance.Add(ch.Price)
+	if err != nil {
+		return nil, xerr.BadRequest(fmt.Sprintf("钱包余额累计超出范围：当前 %s + 变动 %s", current.Balance, ch.Price))
+	}
+	rechargeDelta, expenseDelta := walletCounterDeltas(ch)
+	if msg := checkWalletCounter(current.TotalRecharge, rechargeDelta, "累计充值"); msg != "" {
+		return nil, xerr.Conflict(msg)
+	}
+	if msg := checkWalletCounter(current.TotalExpense, expenseDelta, "累计支出"); msg != "" {
+		return nil, xerr.Conflict(msg)
+	}
+	// 4) 更新余额。SQL 条件是负余额禁令的最终裁决：出向影响 0 行 → 409。
+	rows, err := tx.UpdateWalletBalance(ctx, tenantID, walletID, ch.Price, rechargeDelta, expenseDelta, ch.Price.Cents() < 0)
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, xerr.Conflict(walletShortMessage(ch, current.Balance))
+	}
+	// 5) LS 流水号：pay_sequence 事务内发放（tx 为绑定事务的 Repository，
+	//    发放与流水落库同事务）。日期键取一次口径，避免跨日翻转错位。
+	key := dateKey(s.businessNow())
+	no, err := tx.NextSequenceValue(ctx, tenantID, SeqWalletTransaction, key)
+	if err != nil {
+		return nil, err
+	}
+	// 6) 流水（append-only）：正入负出 + 变动后结存快照。
+	out := &model.WalletTransaction{
+		TenantID: tenantID,
+		No:       formatNo(NoPrefixWalletTransaction, key, no),
+		WalletID: walletID,
+		BizType:  ch.BizType,
+		BizID:    ch.BizID,
+		Title:    trimString(ch.Title),
+		Price:    ch.Price,
+		Balance:  after,
+	}
+	return out, tx.InsertWalletTransaction(ctx, out)
 }
 
 // checkWalletCounter 校验非负累计列锁内越减（纯函数）：delta < 0 且累加后为负
