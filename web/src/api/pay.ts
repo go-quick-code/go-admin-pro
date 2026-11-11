@@ -41,6 +41,29 @@ export function listMyWalletTransactions(params: any) {
   return request.get('/pay/wallet-transaction/my', { params }) as Promise<any>
 }
 
+// ---------- 支付订单与收银台（issue #133） ----------
+// 交易单据只读（append-only，spec §4.10）：无新增/编辑/删除接口；下单由
+// 消费方业务服务端调用（金额服务端定，spec §4.2），浏览器侧无金额入口。
+export function createPayOrder(data: any) {
+  return request.post('/pay/order/create', data) as Promise<any>
+}
+export function getCashierOrder(params: { appKey: string; merchantOrderId: string }) {
+  return request.get('/pay/cashier/order', { params }) as Promise<any>
+}
+export function submitPayOrder(data: { orderId: number; channelCode: string }) {
+  return request.post('/pay/order/submit', data) as Promise<any>
+}
+// mock 模拟回调（登录 + 本人订单 + 渠道为 mock）：收银台「模拟回调」按钮。
+export function mockPayNotify(data: { orderId: number; result: 'success' | 'failure' }) {
+  return request.post('/pay/mock/notify', data) as Promise<any>
+}
+export function pagePayOrders(params: any) {
+  return request.get('/pay/order/page', { params }) as Promise<any>
+}
+export function getPayOrder(id: number) {
+  return request.get(`/pay/order/${id}`) as Promise<any>
+}
+
 // ---------- 支付渠道（平台级，仅平台租户可管理） ----------
 export function pageChannels(params: any) {
   return request.get('/pay/channel/page', { params }) as Promise<any>
