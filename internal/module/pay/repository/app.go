@@ -100,8 +100,11 @@ func (r *Repository) CountAppChannels(ctx context.Context, appID int64) (int64, 
 
 // ReplaceAppChannels 全量替换应用的绑定码：先删后插，调用方保证事务包裹
 // （校验通过后一次提交，避免半替换状态）。撞唯一键返回 IsDuplicateEntry 可识别的错误。
+//
+// 删除是硬删（Unscoped）：绑定是纯关系行，唯一键 (tenant_id, app_id,
+// channel_code) 不含 deleted_at——软删行会占住唯一键，重绑同码必撞 1062。
 func (r *Repository) ReplaceAppChannels(ctx context.Context, appID int64, codes []string) error {
-	if err := r.db.WithContext(ctx).Where("app_id = ?", appID).Delete(&model.AppChannel{}).Error; err != nil {
+	if err := r.db.WithContext(ctx).Unscoped().Where("app_id = ?", appID).Delete(&model.AppChannel{}).Error; err != nil {
 		return err
 	}
 	if len(codes) == 0 {
