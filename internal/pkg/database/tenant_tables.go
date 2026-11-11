@@ -201,6 +201,19 @@ var TenantTables = []string{
 	// 显式租户参数的裸 SQL，同 erp_stock 口径）。
 	"pay_wallet",
 	"pay_wallet_transaction",
+
+	// 交易与回调域（issue #133，迁移 00037，docs/pay-mvp-spec.md §3.2/§3.3）：
+	// 订单/extension/退款/转账/回调任务/回调日志六表全量租户隔离（跨租户业务
+	// ID 一律 404）。幂等键入唯一键：订单 (tenant_id, app_id, merchant_order_id)、
+	// 退款 (tenant_id, app_id, merchant_refund_id)、转账 (tenant_id, app_id,
+	// merchant_transfer_id)。pay_refund/pay_transfer/pay_notify_log 先建后用
+	//（#134/#135/#136 只补代码不补表）。
+	"pay_order",
+	"pay_order_extension",
+	"pay_refund",
+	"pay_transfer",
+	"pay_notify_task",
+	"pay_notify_log",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。
