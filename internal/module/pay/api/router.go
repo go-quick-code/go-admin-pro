@@ -38,4 +38,20 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	walletTx := rg.Group("/pay/wallet-transaction")
 	walletTx.GET("/my", h.PageMyWalletTransactions)
 	walletTx.GET("/page", h.perm("pay:wallet:query"), h.PageWalletTransactions)
+
+	// 订单与收银台（issue #133，spec §5/§4.2/§4.11）：下单/收银台/submit/mock
+	// 触发只挂登录（自助端点，user_id 归属过滤在 service 层强制）；mock 触发
+	// 不公开（登录 + 本人 + 渠道为 mock，防代他人确认支付，spec §4.6）。
+	// 管理端分页/详情挂 pay:order:query（无写入端点：交易单据 append-only，
+	// spec §4.10；导出随 #138 export-excel 补 pay:order:export）。
+	order := rg.Group("/pay/order")
+	order.POST("/create", h.CreateOrder)
+	order.POST("/submit", h.SubmitOrder)
+	order.GET("/page", h.perm("pay:order:query"), h.PageOrders)
+	order.GET("/:id", h.perm("pay:order:query"), h.GetOrder)
+
+	cashier := rg.Group("/pay/cashier")
+	cashier.GET("/order", h.GetCashierOrder)
+
+	rg.POST("/pay/mock/notify", h.MockNotifyOrder)
 }

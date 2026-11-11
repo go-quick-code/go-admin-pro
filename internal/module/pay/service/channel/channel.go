@@ -1,14 +1,13 @@
 // Package channel 是 pay 的渠道 SPI 与注册表（docs/pay-mvp-spec.md §4.1），
 // 概念等价芋道 PayClient：统一下单、支付回调解析、退款、退款回调解析四个动作。
 //
-// v1 只实现 mock 与 wallet 两个渠道（#132）；14 个渠道码常量全部保留为概念
-// （对齐芋道枚举），微信/支付宝实现待商户资源另立工单（ADR 0021）。
+// v1 实现 mock 与 wallet 两个渠道（#133 定形）；14 个渠道码常量全部保留为
+// 概念（对齐芋道枚举），微信/支付宝实现待商户资源另立工单（ADR 0021）。
 // 补渠道实现不改本 SPI：实现 Client 后在装配处 Register 即可。
 //
-// #133 边界（submit 时生效，本票不触发）：「渠道未实现」在应用绑定渠道与
-// submit 处报 409——本票的绑定校验只查「码 ∈ 14 常量 ∧ 平台渠道启用」，
-// 未实现渠道（wx_*/alipay_*）在注册表中无 Client，#132/#133 落地时在绑定
-// 与 submit 校验中追加 registry.Known(code) 检查（409「渠道未实现」）。
+// 「渠道未实现」（#133 生效）：注册表中无 Client 的渠道（wx_*/alipay_*）
+// 在应用绑定渠道与 submit 处一律 409——渠道码常量仍是唯一合法码源
+// （IsKnownCode），实现与否由 Registry.Known 判定，两查相与。
 package channel
 
 import (
@@ -80,16 +79,23 @@ const (
 	DisplayModeURL    = "url"
 )
 
+// OrderResp.Status 取值（字符串形态对齐芋道；wallet 同步成功用 10）。
+const (
+	OrderStatusPending = "0"  // 处理中（订单停在待支付，等回调）
+	OrderStatusSuccess = "10" // 成功（wallet 同步扣减成功；mock 不返回）
+)
+
 // OrderReq 统一下单请求（金额一律 money.Money 分定点，spec §2，由消费方服务端定）。
 type OrderReq struct {
 	OutTradeNo  string // 业务支付单号（ZF 前缀）
 	Subject     string
 	Body        string
 	Price       money.Money // 实付金额（服务端定，客户端不可覆盖业务价）
+	BizID       int64       // 业务单据 ID（pay_order.id；wallet 渠道流水 biz_id 用）
 	NotifyURL   string      // 渠道回调地址（平台级公开端点）
 	ReturnURL   string      // 支付后跳转地址（预留）
 	ExpireTime  string      // 订单过期时间（RFC3339，预留）
-	ChannelUser string      // 渠道用户标识（条码类支付预留）
+	ChannelUser string      // 渠道用户标识（wallet 渠道为下单用户 ID；条码类预留）
 }
 
 // OrderResp 统一下单响应：displayMode=none 等回调，qrcode/url 携带 content。
