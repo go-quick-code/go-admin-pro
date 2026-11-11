@@ -435,16 +435,21 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 装配；业务时区（ADR 0006）是单号日期键的唯一口径。渠道 SPI 注册表
 	//（#133 定形）：mock/wallet 两实现注册进 Registry，未注册渠道在绑定与
 	// submit 处 409「渠道未实现」；应用删除引用检查以 RefCheckerChain 注册
-	//（#133 订单引用，#135/#136 追加退款/转账）。
+	//（#133 订单引用 + #135 退款引用，#136 追加转账）。
 	payRepo := payrepo.New(db)
 	paySvc := payservice.New(payRepo)
 	paySvc.SetLocation(cfg.Location())
-	payRegistry, payRegistryErr := payChannelRegistry(db, paySvc)
+	payRegistry, payRegistryErr := payChannelRegistry(db, paySvc, paySvc)
 	if payRegistryErr != nil {
 		return nil, payRegistryErr
 	}
 	paySvc.SetRegistry(payRegistry)
-	paySvc.SetAppRefChecker(payservice.RefCheckerChain{payservice.OrderRefChecker{Repo: payRepo}})
+	// 应用删除引用检查链（spec §4.10）：订单引用（#133）+ 退款引用（#135）
+	// 依次检查，首个命中即拒绝；转账引用随 #136 以同形态追加。
+	paySvc.SetAppRefChecker(payservice.RefCheckerChain{
+		payservice.OrderRefChecker{Repo: payRepo},
+		payservice.RefundRefChecker{Repo: payRepo},
+	})
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission)
 
 	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI, payAPI)
@@ -454,12 +459,14 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, Pay: paySvc, APILog: apiLogWriter}, nil
 }
 
-// payChannelRegistry 装配渠道 SPI 注册表（issue #133，docs/pay-mvp-spec.md
-// §4.1）：v1 注册 mock/wallet 两实现；渠道 config 取 pay_channel 种子行原文
-// （空对象 {}，由渠道实现自行反序列化校验）。注册表是「渠道未实现」的唯一
-// 判定源：未注册渠道在应用绑定与 submit 处 409（service 层 Known 检查）。
-// 补渠道实现不改 SPI：实现 Client 后在此 Register 即可。
-func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer) (*paychannel.Registry, error) {
+// payChannelRegistry 装配渠道 SPI 注册表（issue #133 支付 / #135 退款，
+// docs/pay-mvp-spec.md §4.1）：v1 注册 mock/wallet 两实现；渠道 config 取
+// pay_channel 种子行原文（空对象 {}，由渠道实现自行反序列化校验）。注册表是
+// 「渠道未实现」的唯一判定源：未注册渠道在应用绑定与 submit 处 409（service
+// 层 Known 检查）。wallet 渠道的扣减/回加后端均为 pay service 层（同一实例，
+// 事务经 payrepo.WithTx 传递）。补渠道实现不改 SPI：实现 Client 后在此
+// Register 即可。
+func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer, refunder paychannel.WalletRefunder) (*paychannel.Registry, error) {
 	rows, err := payrepo.New(db).ListChannelsByCodes(
 		context.Background(), []string{paychannel.CodeMock, paychannel.CodeWallet})
 	if err != nil {
@@ -473,7 +480,7 @@ func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer) (*paychannel.
 	if err != nil {
 		return nil, fmt.Errorf("init mock pay client: %w", err)
 	}
-	walletClient, err := paychannel.NewWalletClient(configByCode[paychannel.CodeWallet], payer)
+	walletClient, err := paychannel.NewWalletClient(configByCode[paychannel.CodeWallet], payer, refunder)
 	if err != nil {
 		return nil, fmt.Errorf("init wallet pay client: %w", err)
 	}

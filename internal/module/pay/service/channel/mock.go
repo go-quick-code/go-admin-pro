@@ -11,19 +11,27 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
-// mock.go 是 mock 渠道实现（issue #133，docs/pay-mvp-spec.md §4.1/§4.2）：
-// 本地演练渠道——Order 不动资金，返回 displayMode=none、订单停在待支付；
-// 收银台展示「模拟回调」按钮，触发 POST /pay/mock/notify 走与真实渠道回调
-// 完全相同的解析 → 入账 → 建任务链路（ParseOrderNotify 验「签」+ 解析）。
+// mock.go 是 mock 渠道实现（issue #133 支付 / #135 退款，
+// docs/pay-mvp-spec.md §4.1/§4.2/§4.4）：本地演练渠道——Order 不动资金，返回
+// displayMode=none、订单停在待支付；收银台展示「模拟回调」按钮，触发
+// POST /pay/mock/notify 走与真实渠道回调完全相同的解析 → 入账 → 建任务链路
+//（ParseOrderNotify 验「签」+ 解析）。退款（#135）：Refund 按 mock 渠道
+// config 模拟成功/失败两分支（失败分支供测试，demo 退款默认走成功；
+// spec §4.4），内部构造回调原文并经 ParseRefundNotify 解析——mock 退款路径
+// 与真实渠道回调共用同一解析入口。
 //
 // mockConfig 是渠道配置多态结构（spec §4.1）：mock 渠道无需凭证，config 为
-// 空对象 {}（占位结构，后续演练参数如「自动失败率」可在此扩展）。
+// 空对象 {}（演练参数在此扩展，如 refundResult）。
 
-// mockConfig 是 mock 渠道配置（pay_channel.config JSON 反序列化目标）。
-type mockConfig struct{}
+// mockConfig 是 mock 渠道配置（pay_channel.config JSON 反序列化目标）：
+// refundResult 决定 Refund 模拟结果（success 成功 / failure 失败，缺省 success）。
+type mockConfig struct {
+	RefundResult string `json:"refundResult,omitempty"`
+}
 
-// parseMockConfig 解析 mock 渠道配置：空串/空对象合法，其他键一律拒绝
-// （配置打错字宁可拒绝也不静默忽略）。未实现渠道的种子 config={} 直接可用。
+// parseMockConfig 解析 mock 渠道配置：空串/空对象/仅 refundResult 键合法
+// （值 success/failure），其他键一律拒绝（配置打错字宁可拒绝也不静默忽略）。
+// 未实现渠道的种子 config={} 直接可用（退款缺省走成功分支）。
 func parseMockConfig(raw string) (mockConfig, error) {
 	var cfg mockConfig
 	raw = strings.TrimSpace(raw)
@@ -34,23 +42,41 @@ func parseMockConfig(raw string) (mockConfig, error) {
 	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
 		return cfg, fmt.Errorf("mock 渠道配置必须是 JSON 对象: %w", err)
 	}
-	if len(obj) > 0 {
-		return cfg, errors.New("mock 渠道无需配置，config 应为空对象 {}")
+	for key, value := range obj {
+		if key != "refundResult" {
+			return cfg, errors.New("mock 渠道仅支持 refundResult 配置键（success/failure）")
+		}
+		var result string
+		if err := json.Unmarshal(value, &result); err != nil {
+			return cfg, fmt.Errorf("mock 渠道 refundResult 必须是字符串: %w", err)
+		}
+		switch strings.TrimSpace(result) {
+		case "success", "failure":
+			cfg.RefundResult = strings.TrimSpace(result)
+		default:
+			return cfg, fmt.Errorf("mock 渠道 refundResult 不合法：%q（期望 success/failure）", result)
+		}
 	}
 	return cfg, nil
 }
 
 // MockClient 是 mock 渠道（注册表主键 CodeMock）。
 type MockClient struct {
-	code string
+	code         string
+	refundResult string // Refund 模拟结果（success/failure，缺省 success）
 }
 
 // NewMockClient 创建 mock 渠道实现；configJSON 为 pay_channel.config 原文。
 func NewMockClient(configJSON string) (*MockClient, error) {
-	if _, err := parseMockConfig(configJSON); err != nil {
+	cfg, err := parseMockConfig(configJSON)
+	if err != nil {
 		return nil, err
 	}
-	return &MockClient{}, nil
+	result := cfg.RefundResult
+	if result == "" {
+		result = "success"
+	}
+	return &MockClient{refundResult: result}, nil
 }
 
 // Code 渠道码。
@@ -96,12 +122,55 @@ func (c *MockClient) ParseOrderNotify(ctx context.Context, req NotifyReq) (Order
 	}
 }
 
-// Refund 发起退款（#135 落地 wallet/mock 退款分支，本票未实现）。
-func (c *MockClient) Refund(ctx context.Context, req RefundReq) (RefundResp, error) {
-	return RefundResp{}, errors.New("mock 渠道退款未实现（#135）")
+// mockRefundNotifyBody 是 mock 退款回调原文结构（Refund 内部构造——mock 退款
+// 路径与真实渠道回调共用同一解析入口，原文形态由各渠道定义，mock 用最小
+// JSON 演练）。
+type mockRefundNotifyBody struct {
+	OutRefundNo string `json:"outRefundNo"`
+	Result      string `json:"result"` // success / failure
 }
 
-// ParseRefundNotify 解析退款回调（#135 落地）。
+// ParseRefundNotify 验「签」并解析 mock 退款回调（与 ParseOrderNotify 同口径，
+// spec §4.4）：result 仅接受 success/failure 两值，其他一律解析失败（回调
+// 伪造 4xx 语义的 mock 对应）。
 func (c *MockClient) ParseRefundNotify(ctx context.Context, req NotifyReq) (RefundNotify, error) {
-	return RefundNotify{}, errors.New("mock 渠道退款回调未实现（#135）")
+	var body mockRefundNotifyBody
+	if err := json.Unmarshal(req.Body, &body); err != nil {
+		return RefundNotify{}, xerr.BadRequest("mock 退款回调报文不是合法 JSON：" + err.Error())
+	}
+	outRefundNo := strings.TrimSpace(body.OutRefundNo)
+	if outRefundNo == "" {
+		return RefundNotify{}, xerr.BadRequest("mock 退款回调缺少 outRefundNo")
+	}
+	switch strings.TrimSpace(body.Result) {
+	case "success":
+		return RefundNotify{
+			Success:         true,
+			ChannelRefundNo: "MOCK-" + outRefundNo,
+			Raw:             string(req.Body),
+		}, nil
+	case "failure":
+		return RefundNotify{Success: false, ChannelRefundNo: "MOCK-" + outRefundNo, Raw: string(req.Body)}, nil
+	default:
+		return RefundNotify{}, xerr.BadRequest(fmt.Sprintf("mock 退款回调 result 不合法：%q（期望 success/failure）", body.Result))
+	}
+}
+
+// Refund 发起退款（issue #135，spec §4.4）：mock 渠道不动资金，按渠道配置
+// refundResult 模拟成功/失败两分支（缺省 success——demo 退款默认走成功分支；
+// failure 失败分支供测试）。内部构造回调原文并经 ParseRefundNotify 解析后
+// 返回（成功带渠道回执 MOCK-<TK 单号>，失败带回调原文落错误分支）。
+func (c *MockClient) Refund(ctx context.Context, req RefundReq) (RefundResp, error) {
+	raw, err := json.Marshal(mockRefundNotifyBody{OutRefundNo: req.OutRefundNo, Result: c.refundResult})
+	if err != nil {
+		return RefundResp{}, err
+	}
+	notify, err := c.ParseRefundNotify(ctx, NotifyReq{Body: raw})
+	if err != nil {
+		return RefundResp{}, err
+	}
+	if !notify.Success {
+		return RefundResp{Status: RefundStatusFail, ChannelRefundNo: notify.ChannelRefundNo, Raw: notify.Raw}, nil
+	}
+	return RefundResp{Status: RefundStatusSuccess, ChannelRefundNo: notify.ChannelRefundNo, Raw: notify.Raw}, nil
 }

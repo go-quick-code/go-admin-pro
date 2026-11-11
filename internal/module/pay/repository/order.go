@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
 )
 
 // order.go 是交易与回调域的数据访问原语与查询（issue #133，
@@ -57,14 +58,23 @@ func (r *Repository) InsertOrder(ctx context.Context, row *model.Order) error {
 	return wrapDuplicateEntry(r.db.WithContext(ctx).Create(row).Error)
 }
 
-// LockOrder 取订单行锁并返回当前状态（submit 事务内第一步，先锁后写）。
-// 只能在事务内调用；缺失视为数据异常（先经插件可见性查询确认存在）。
-func (r *Repository) LockOrder(ctx context.Context, tenantID, id int64) (status int8, err error) {
-	err = r.db.WithContext(ctx).Raw(
-		"SELECT `status` FROM `pay_order` WHERE `id` = ? AND `tenant_id` = ? AND `deleted_at` IS NULL FOR UPDATE",
+// LockOrder 取订单行锁并返回锁定读的整行（submit/refund 事务内第一步，先锁
+// 后写；status/refund_price/price 为锁下权威值——并发 submit 与并发退款由行锁
+// 串行化，累计判定无并发窗）。只能在事务内调用；行不存在返回 (nil, nil)
+// （先经插件可见性查询确认存在的场景不会出现，防御翻译为 404）。
+func (r *Repository) LockOrder(ctx context.Context, tenantID, id int64) (*model.Order, error) {
+	var row model.Order
+	err := r.db.WithContext(ctx).Raw(
+		"SELECT * FROM `pay_order` WHERE `id` = ? AND `tenant_id` = ? AND `deleted_at` IS NULL FOR UPDATE",
 		id, tenantID,
-	).Scan(&status).Error
-	return status, err
+	).Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if row.ID == 0 {
+		return nil, nil
+	}
+	return &row, nil
 }
 
 // CountOrderExtensions 统计订单已存在的发起尝试数（extension no 的发起序，
@@ -127,6 +137,19 @@ func (r *Repository) UpdateOrderChannelAttempt(ctx context.Context, tenantID, or
 		"UPDATE `pay_order` SET `channel_code` = ?, `extension_id` = ?, `updated_at` = ?, `updater` = ? "+
 			"WHERE `id` = ? AND `tenant_id` = ? AND `deleted_at` IS NULL",
 		channelCode, extensionID, time.Now(), database.AuditUser(ctx), orderID, tenantID,
+	).Error
+}
+
+// ApplyOrderRefund 订单退款累计（refundSuccessTx 第 3 步，spec §4.4）：
+// refund_price = refund_price + 本次退款金额，status 置调用方锁内计算的目标
+// 状态（累计 = price → 20 已退款；部分退款 → 保持 10）。订单行锁由调用方
+// 持有（refundSuccessTx 锁内重读后调用），先读后写无并发窗。显式租户参数
+// 裸 SQL（同 ClaimOrderSuccess 口径）。只能在事务内调用。
+func (r *Repository) ApplyOrderRefund(ctx context.Context, tenantID, orderID int64, refundPrice money.Money, status int8) error {
+	return r.db.WithContext(ctx).Exec(
+		"UPDATE `pay_order` SET `refund_price` = `refund_price` + ?, `status` = ?, `updated_at` = ?, `updater` = ? "+
+			"WHERE `id` = ? AND `tenant_id` = ? AND `deleted_at` IS NULL",
+		refundPrice, status, time.Now(), database.AuditUser(ctx), orderID, tenantID,
 	).Error
 }
 

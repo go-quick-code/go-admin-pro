@@ -269,8 +269,11 @@ func (s *Service) SubmitOrder(ctx context.Context, req *dto.OrderSubmitReq, user
 		if err != nil {
 			return err
 		}
-		if locked != model.OrderStatusPending {
-			return xerr.Conflict(orderStatusMessage(locked))
+		if locked == nil {
+			return xerr.NotFound("支付订单不存在")
+		}
+		if locked.Status != model.OrderStatusPending {
+			return xerr.Conflict(orderStatusMessage(locked.Status))
 		}
 		if order.ExpireTime != nil && s.businessNow().After(*order.ExpireTime) {
 			return xerr.Conflict("订单已过期，请重新下单")

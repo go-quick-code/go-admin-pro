@@ -50,6 +50,15 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	order.GET("/page", h.perm("pay:order:query"), h.PageOrders)
 	order.GET("/:id", h.perm("pay:order:query"), h.GetOrder)
 
+	// 退款（issue #135，spec §5/§4.4/§4.11）：发起只挂登录（消费方服务端
+	// 自助端点，订单归属校验在 service 层强制——非本人 403）；管理端分页/
+	// 详情挂 pay:refund:query（交易单据 append-only 无写入端点，spec §4.10；
+	// 导出随 #138 export-excel 补 pay:refund:export）。
+	refund := rg.Group("/pay/refund")
+	refund.POST("/create", h.CreateRefund)
+	refund.GET("/page", h.perm("pay:refund:query"), h.PageRefunds)
+	refund.GET("/:id", h.perm("pay:refund:query"), h.GetRefund)
+
 	cashier := rg.Group("/pay/cashier")
 	cashier.GET("/order", h.GetCashierOrder)
 
