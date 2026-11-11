@@ -4,6 +4,7 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/ratelimit"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
@@ -15,11 +16,14 @@ type PermissionMiddleware func(code string) gin.HandlerFunc
 type Handler struct {
 	svc  *service.Service
 	perm PermissionMiddleware
+	// demoLimiter 是 demo 商户回调端点的 IP 限速器（issue #134，照社交回调
+	// 先例）：随 Handler 实例创建，公开端点防滥用（#85 安全审计同款定位）。
+	demoLimiter *ratelimit.Limiter
 }
 
 // New 创建 pay Handler。perm 复用 system 的 RequirePermission。
 func New(svc *service.Service, perm PermissionMiddleware) *Handler {
-	return &Handler{svc: svc, perm: perm}
+	return &Handler{svc: svc, perm: perm, demoLimiter: demoNotifyLimiter()}
 }
 
 func bindJSON(c *gin.Context, v interface{}) bool {

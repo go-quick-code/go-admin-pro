@@ -51,15 +51,17 @@ func seedPayChannels(db *gorm.DB) error {
 	return nil
 }
 
-// payMenus 构造支付中心 800 段菜单（issue #131/#132/#133，spec §7）：dir 800 +
-// 810 支付应用 + 811 支付订单 + 820 渠道配置 + 821 钱包管理 + 840 收银台；
-// 按钮 = 菜单ID×10+n（8101–8103、8201，开工前 grep seed 去重确认未占用）。
-// 812–814/822/830/831 留给后续票（退款/转账/回调/套餐/示例）。
+// payMenus 构造支付中心 800 段菜单（issue #131/#132/#133/#134，spec §7）：
+// dir 800 + 810 支付应用 + 811 支付订单 + 814 回调通知 + 820 渠道配置 +
+// 821 钱包管理 + 840 收银台；按钮 = 菜单ID×10+n（8101–8103、8201，开工前
+// grep seed 去重确认未占用）。812/813/822/830/831 留给后续票（退款/转账/
+// 套餐/示例——#135 退款 812、#136 转账 813 并入时按 spec 顺序重排 sort，
+// 并行工单下 sort 文本冲突在合并时保持两侧菜单即可）。
 //
-// 支付订单（811）无按钮行：交易单据页只读（append-only，spec §4.10——无
-// 新增/编辑/删除），导出按钮（pay:order:export）随 #138 的 export-excel
-// 端点按「按页面实际授予」纪律一并补种；钱包管理（821）同理（余额调整
-// 无管理端入口，spec §4.3 差异清单）。
+// 支付订单（811）与回调通知（814）无按钮行：交易单据页只读（append-only，
+// spec §4.10——无新增/编辑/删除），导出按钮（pay:order:export）随 #138 的
+// export-excel 端点按「按页面实际授予」纪律一并补种；钱包管理（821）同理
+// （余额调整无管理端入口，spec §4.3 差异清单）。
 //
 // 收银台（840）是布局内独立操作页（照 OA 我的考勤 531 形态）：自助页无
 // 权限码（登录即可，归属校验在 service 层强制，spec §4.11）。
@@ -76,9 +78,10 @@ func payMenus() []sysmodel.Menu {
 		btnRow(8102, 810, "应用修改", "pay:app:update", 2),
 		btnRow(8103, 810, "应用删除", "pay:app:delete", 3),
 		menuRow(811, 800, "支付订单", "order", "pay/order/index", "pay:order:query", "List", 2),
-		menuRow(820, 800, "渠道配置", "channel", "pay/channel/index", "pay:channel:query", "Connection", 3),
+		menuRow(814, 800, "回调通知", "notify-task", "pay/notify-task/index", "pay:notify-task:query", "Bell", 3),
+		menuRow(820, 800, "渠道配置", "channel", "pay/channel/index", "pay:channel:query", "Connection", 4),
 		btnRow(8201, 820, "渠道修改", "pay:channel:update", 1),
-		menuRow(821, 800, "钱包管理", "wallet", "pay/wallet/index", "pay:wallet:query", "Wallet", 4),
-		menuRow(840, 800, "收银台", "cashier", "pay/cashier/index", "", "ShoppingCart", 5),
+		menuRow(821, 800, "钱包管理", "wallet", "pay/wallet/index", "pay:wallet:query", "Wallet", 5),
+		menuRow(840, 800, "收银台", "cashier", "pay/cashier/index", "", "ShoppingCart", 6),
 	}
 }

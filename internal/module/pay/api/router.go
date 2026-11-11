@@ -54,4 +54,11 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	cashier.GET("/order", h.GetCashierOrder)
 
 	rg.POST("/pay/mock/notify", h.MockNotifyOrder)
+
+	// 回调通知（issue #134，spec §5）：交易单据只读（append-only，spec §4.10
+	// ——无新增/编辑/删除端点），管理页不设 owner 行级数据权限（spec §4.11）；
+	// 导出按钮随 #138 的 export-excel 端点补种。
+	notifyTask := rg.Group("/pay/notify-task")
+	notifyTask.GET("/page", h.perm("pay:notify-task:query"), h.PageNotifyTasks)
+	notifyTask.GET("/:id", h.perm("pay:notify-task:query"), h.GetNotifyTask)
 }
