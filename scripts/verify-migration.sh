@@ -56,6 +56,9 @@
 #                       erp_finance_receipt_items、erp_finance_payment、
 #                       erp_finance_payment_items（issue #94，5 张：结算账户 +
 #                       收付款两主两明；95→100），
+#                       00035 新增 pay_channel、pay_app、pay_app_channel、
+#                       pay_sequence（issue #131，4 张：平台渠道 + 应用/绑定/
+#                       序列三租户表；100→104），
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -63,7 +66,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-100}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-104}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

@@ -32,6 +32,9 @@ import (
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
+	payapi "github.com/go-quick-code/go-admin-pro/internal/module/pay/api"
+	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
+	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
 	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
@@ -70,6 +73,9 @@ type App struct {
 	// Create/CreateInTx——与生产装配的推送发布器是同一实例，保证「创建通知
 	// → 在线用户 1 秒内收到」走的是真实链路。
 	Notify *notifyservice.Service
+	// Pay 是 pay 模块的 Service（issue #131）：集成测试经该字段发放序列单号
+	//（pay_sequence 并发发放用例）；业务侧只经 HTTP 端点消费。
+	Pay *payservice.Service
 	// APILog 是访问日志异步写（issue #80）：集成测试在断言前经 FlushAPILogs
 	// 排干队列；Close 时随应用一起排干退出。
 	APILog *infraservice.APILogWriter
@@ -424,11 +430,19 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission, apiLogWriter)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI)
+	// pay 模块（issue #131，docs/pay-mvp-spec.md §2）：repo→service→api 顺序
+	// 装配；业务时区（ADR 0006）是单号日期键的唯一口径。渠道 SPI 注册表在
+	// #132 注册 mock/wallet 实现；应用删除引用检查在 #133+ 以 RefCheckerChain
+	// 追加（本票骨架见 pay/service/app_ref.go）。
+	paySvc := payservice.New(payrepo.New(db))
+	paySvc.SetLocation(cfg.Location())
+	payAPI := payapi.New(paySvc, sysAPI.RequirePermission)
+
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI, payAPI)
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, APILog: apiLogWriter}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, Pay: paySvc, APILog: apiLogWriter}, nil
 }
 
 // Close 释放资源。
