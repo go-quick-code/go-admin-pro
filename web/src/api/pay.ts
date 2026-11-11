@@ -64,6 +64,20 @@ export function getPayOrder(id: number) {
   return request.get(`/pay/order/${id}`) as Promise<any>
 }
 
+// ---------- 退款单（issue #135） ----------
+// 交易单据只读（append-only，spec §4.10）：无新增/编辑/删除接口；退款发起由
+// 消费方业务服务端调用（原路退回，累计 ≤ 实付服务端裁决 409，spec §4.4），
+// 浏览器侧无发起入口。
+export function createPayRefund(data: any) {
+  return request.post('/pay/refund/create', data) as Promise<any>
+}
+export function pagePayRefunds(params: any) {
+  return request.get('/pay/refund/page', { params }) as Promise<any>
+}
+export function getPayRefund(id: number) {
+  return request.get(`/pay/refund/${id}`) as Promise<any>
+}
+
 // ---------- 支付渠道（平台级，仅平台租户可管理） ----------
 export function pageChannels(params: any) {
   return request.get('/pay/channel/page', { params }) as Promise<any>
