@@ -67,6 +67,11 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedMessages(db); err != nil {
 		return err
 	}
+	// 支付渠道种子（issue #131，spec §3.1/§7）：14 渠道码常量逐一预插，
+	// mock/wallet 启用、其余停用且 config={}；表为空时幂等写入。
+	if err := seedPayChannels(db); err != nil {
+		return err
+	}
 	if err := seedPoolConfigs(db); err != nil {
 		return err
 	}
@@ -547,6 +552,10 @@ func seedMenus(db *gorm.DB) error {
 	//（spec §7，见 seedRoles 的 roleMenus——刻意无 700 段条目）。
 	menus = append(menus, erpCoreMenus()...)
 	menus = append(menus, erpDocMenus()...)
+	// 支付中心 800 段（issue #131，spec §7）：dir 800 + 810 支付应用 +
+	// 820 渠道配置。资金敏感：内置普通角色（role id=2）默认不授予任何
+	// pay 菜单（见 seedRoles 的 roleMenus——刻意无 800 段条目）。
+	menus = append(menus, payMenus()...)
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
 	// 页面与查询按钮共用权限码 crm:dashboard:view（API 路由同码）。

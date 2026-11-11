@@ -1,0 +1,29 @@
+package api
+
+import "github.com/gin-gonic/gin"
+
+// RegisterProtected 注册 pay 模块接口（调用方需已挂载 Auth 中间件）。
+// 权限码见 docs/pay-mvp-spec.md §7；渠道的「仅平台租户」在 service 层收口
+// （非平台租户 403），这里只做权限码门槛。交易/回调/钱包等路由由后续票追加。
+func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
+	// 应用（租户级）：CRUD + 渠道绑定（全量替换）。
+	app := rg.Group("/pay/app")
+	app.GET("/page", h.perm("pay:app:query"), h.PageApps)
+	app.GET("/:id", h.perm("pay:app:query"), h.GetApp)
+	app.POST("", h.perm("pay:app:create"), h.CreateApp)
+	app.PUT("", h.perm("pay:app:update"), h.UpdateApp)
+	app.DELETE("/:id", h.perm("pay:app:delete"), h.DeleteApp)
+	// 绑定是应用管理的一部分：查询随 pay:app:query、替换随 pay:app:update
+	//（spec §7 权限码仅 pay:app:*，不设独立 bind 码）。
+	app.GET("/:id/channels", h.perm("pay:app:query"), h.GetAppChannels)
+	app.PUT("/:id/channels", h.perm("pay:app:update"), h.ReplaceAppChannels)
+
+	// 渠道（平台级，requirePlatform 在 service 层收口）：只启停 + 凭证合并，
+	// 无新增/删除端点（14 行种子常驻，spec §4.10）。
+	channel := rg.Group("/pay/channel")
+	channel.GET("/page", h.perm("pay:channel:query"), h.PageChannels)
+	channel.PUT("/:id", h.perm("pay:channel:update"), h.UpdateChannel)
+	// 租户侧只读清单（无凭证）：应用详情绑定 tab 的数据源，挂 pay:app:query
+	//（持有支付应用菜单即可读；渠道凭证不在返回里）。
+	channel.GET("/list", h.perm("pay:app:query"), h.ListChannelOptions)
+}

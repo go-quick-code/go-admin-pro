@@ -8,6 +8,7 @@ import (
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
+	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -40,6 +41,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
 		&msgmodel.Channel{}, &msgmodel.Template{}, &sysmodel.Area{},
+		&paymodel.Channel{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -65,6 +67,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
 	assertRoleMenus(t, db, 2, []int64{512, 5121, 5297, 5236, 5123}, true, "普通角色")
 	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
+	// 支付中心 800 段（issue #131，spec §7）：资金敏感，普通角色默认不授予
+	// 任何 pay 菜单/按钮。
+	assertRoleMenus(t, db, 2, []int64{800, 810, 820, 8101, 8102, 8103, 8201}, false, "普通角色")
 	// ERP 700 段同级菜单 sort 唯一（终审 P1：历史 725/731/741 等 11/12/13 重复
 	// 会让侧栏按 sort ASC,id ASC 交错；按 spec §1 分组序 1–22 连续编号）。
 	assertERPMenuSortUnique(t, db)
@@ -85,6 +90,10 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
 	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板")
+	// 支付渠道种子（issue #131，spec §3.1/§7）：14 渠道码常量逐一预插，
+	// mock/wallet 启用、其余停用。
+	assertCount(t, db, &paymodel.Channel{}, 14, "支付渠道")
+	assertPayChannelSeed(t, db)
 	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
 	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
@@ -133,6 +142,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")
 	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板（幂等）")
+	assertCount(t, db, &paymodel.Channel{}, 14, "支付渠道（幂等）")
 	// 行政区划（issue #82，spec §4.8.2）：省市两级全量 377 行（34 省 + 343 市）。
 	assertCount(t, db, &sysmodel.Area{}, 377, "地区（省市两级）")
 }
@@ -216,6 +226,41 @@ func assertCount(t *testing.T, db *gorm.DB, model any, want int64, label string)
 	}
 	if total != want {
 		t.Fatalf("%s 数量不符：期望 %d，实际 %d", label, want, total)
+	}
+}
+
+// assertPayChannelSeed 断言支付渠道种子的启停分布（issue #131，spec §3.1）：
+// mock/wallet 启用、其余停用且 config={}。
+func assertPayChannelSeed(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var channels []paymodel.Channel
+	if err := tenant.Skip(db).Order("id ASC").Find(&channels).Error; err != nil {
+		t.Fatalf("读取支付渠道种子: %v", err)
+	}
+	byCode := make(map[string]paymodel.Channel, len(channels))
+	for _, row := range channels {
+		byCode[row.Code] = row
+	}
+	for _, code := range []string{"mock", "wallet"} {
+		row, ok := byCode[code]
+		if !ok {
+			t.Fatalf("支付渠道种子缺少 %s", code)
+		}
+		if row.Status != paymodel.StatusEnable {
+			t.Fatalf("支付渠道 %s 应启用，实际 %d", code, row.Status)
+		}
+	}
+	for _, code := range []string{"wx_pub", "alipay_pc", "alipay_lite"} {
+		row, ok := byCode[code]
+		if !ok {
+			t.Fatalf("支付渠道种子缺少 %s", code)
+		}
+		if row.Status != paymodel.StatusDisable {
+			t.Fatalf("支付渠道 %s 应停用，实际 %d", code, row.Status)
+		}
+		if row.Config != "{}" {
+			t.Fatalf("支付渠道 %s 种子 config 应为 {}，实际 %s", code, row.Config)
+		}
 	}
 }
 

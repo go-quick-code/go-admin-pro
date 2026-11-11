@@ -186,6 +186,14 @@ var TenantTables = []string{
 	"erp_stock_move_item",
 	"erp_stock_check",
 	"erp_stock_check_item",
+
+	// 支付应用与渠道域（issue #131，迁移 00035，docs/pay-mvp-spec.md §3.1/§7）：
+	// 应用/绑定/序列三表全量租户隔离（跨租户业务 ID 一律 404）；绑定表的
+	// tenant_id 入唯一键（同构 crm_opportunity_product）。pay_channel 是平台级
+	// 表（凭证/启停全平台共享），登记进 PlatformTables，刻意不在这里。
+	"pay_app",
+	"pay_app_channel",
+	"pay_sequence",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。
@@ -201,4 +209,5 @@ var PlatformTables = map[string]string{
 	"message_template":      "平台级消息模板",
 	"system_social_client":  "平台级社交登录应用配置",
 	"system_area":           "平台级行政区划参考数据",
+	"pay_channel":           "平台级支付渠道凭证配置（14 行种子常驻禁删，租户级应用按渠道码引用；ADR 0021）",
 }
