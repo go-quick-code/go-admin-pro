@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/dto"
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
@@ -349,6 +350,32 @@ func (s *Service) refundSuccessTx(ctx context.Context, tx *payrepo.Repository, t
 		MaxNotifyTimes:   model.NotifyTaskMaxTimes,
 	}
 	return true, tx.InsertNotifyTask(ctx, task)
+}
+
+// ---------- 商户回调报文详情（type=2 退款，#134 的 NotifyPayloadEnricher） ----------
+
+// enrichRefundPayload 实现 type=2（退款）回调报文详情扩展（service.New 内注册，
+// spec §4.5）：原支付订单号/渠道单号/本次退款金额/退款成功时间；商户以
+// merchant_refund_id（任务自带）关联自己的退款单。
+func (s *Service) enrichRefundPayload(ctx context.Context, task *model.NotifyTask, payload *NotifyPayload) error {
+	refund, err := s.repo.FindRefundByID(ctx, task.DataID)
+	if err != nil {
+		return err
+	}
+	if refund == nil {
+		return fmt.Errorf("回调任务 %d 对应的退款单 %d 不存在", task.ID, task.DataID)
+	}
+	payload.OrderNo = refund.OrderNo
+	payload.ChannelOrderNo = refund.ChannelOrderNo
+	text, err := refund.RefundPrice.MarshalText()
+	if err != nil {
+		return fmt.Errorf("编码退款金额: %w", err)
+	}
+	payload.Price = string(text)
+	if refund.SuccessTime != nil {
+		payload.SuccessTime = refund.SuccessTime.Format(time.RFC3339)
+	}
+	return nil
 }
 
 // ---------- 管理端（权限码 pay:refund:query，spec §4.11/§7） ----------

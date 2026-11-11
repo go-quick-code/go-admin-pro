@@ -79,12 +79,13 @@ func (s *Service) channelRegistry() *channel.Registry {
 	return s.registry
 }
 
-// New 创建 pay Service：内置 type=1（支付）的回调报文详情 enricher；
-// #135 退款 / #136 转账经 SetNotifyPayloadEnricher 追加各自的详情。
+// New 创建 pay Service：内置 type=1（支付）与 type=2（退款，#135）的回调
+// 报文详情 enricher；#136 转账经 SetNotifyPayloadEnricher 追加各自的详情。
 func New(repo *payrepo.Repository) *Service {
 	s := &Service{repo: repo, notifyHTTPClient: newNotifyHTTP()}
 	s.payloadEnrichers = map[int8]NotifyPayloadEnricher{
 		paymodel.NotifyTypePayment: s.enrichPaymentPayload,
+		paymodel.NotifyTypeRefund:  s.enrichRefundPayload,
 	}
 	return s
 }
