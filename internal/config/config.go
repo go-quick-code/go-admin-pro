@@ -21,9 +21,19 @@ type Config struct {
 	Push       PushConfig       `mapstructure:"push"`
 	AccessLog  AccessLogConfig  `mapstructure:"access-log"`
 	IPLocation IPLocationConfig `mapstructure:"ip-location"`
+	Pay        PayConfig        `mapstructure:"pay"`
 
 	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
 	loc *time.Location
+}
+
+// PayConfig 是支付模块（issue #134，docs/pay-mvp-spec.md §4.5）的配置。
+type PayConfig struct {
+	// NotifyHMACKey 是服务端回调密钥：商户回调 POST 报文的
+	// Pay-Signature = HMAC-SHA256(rawBody, 本密钥)，demo 回调端点用同一密钥
+	// 验签。为空时 payNotifyRetry job 拒发（fail-closed，任务保持待重试）、
+	// demo 回调端点拒绝一切验签。默认值仅 dev/test 便利，生产必须覆盖。
+	NotifyHMACKey string `mapstructure:"notify-hmac-key"`
 }
 
 // PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。
@@ -296,6 +306,10 @@ func (c *Config) applyEnv() {
 				c.App.CORS.AllowedOrigins = append(c.App.CORS.AllowedOrigins, origin)
 			}
 		}
+	}
+	// 支付回调密钥（issue #134）：允许部署侧环境变量覆盖，免改配置文件。
+	if v := os.Getenv("GAP_PAY_NOTIFY_HMAC_KEY"); v != "" {
+		c.Pay.NotifyHMACKey = v
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_SEED"))) {
 	case "true":

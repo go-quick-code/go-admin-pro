@@ -445,7 +445,46 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	}
 	paySvc.SetRegistry(payRegistry)
 	paySvc.SetAppRefChecker(payservice.RefCheckerChain{payservice.OrderRefChecker{Repo: payRepo}})
+	// 回调链路装配（issue #134，spec §4.5）：HMAC 密钥（pay.notify-hmac-key，
+	// 空值 job 拒发 fail-closed）与启用租户清单（job 跨租户逐租户，照公海
+	// 回收模式——system Service 直接满足 payservice.TenantLister 窄接口）。
+	paySvc.SetNotifyHMACKey(cfg.Pay.NotifyHMACKey)
+	paySvc.SetTenantLister(sysSvc)
+	// 回调报文详情：type=1 支付已内置；#135 退款 / #136 转账在各自工单以
+	// paySvc.SetNotifyPayloadEnricher(类型, …) 追加单据详情。
+	// TODO(#137): demo 状态联动 —— 在此注册
+	// paySvc.SetDemoNotifyHandler(...)（按 payload 里的 merchantOrderId 等
+	// 幂等键联动 pay_demo_order/pay_demo_withdraw 状态）；未注册前 demo 回调
+	// 端点验签通过即回 {"code":0}。
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission)
+
+	// 商户回调重试任务（issue #134，spec §4.5/§7）：系统级 handler（跨租户
+	// 逐租户，照公海回收模式），infra_job 种子默认行每分钟一次。扫描到期任务
+	//（status IN (0,21,22) 且 next_notify_time 到期）POST 商户回调地址，
+	// 报文带 Pay-Signature（HMAC-SHA256(rawBody, pay.notify-hmac-key)）；
+	// 条件更新认领防重发（同任务双触发只执行一次）；密钥缺失拒发（fail-closed）。
+	scheduler.RegisterSystem(payservice.NotifyRetryJobHandlerName, func(ctx context.Context, param string) error {
+		result, err := paySvc.RunNotifyRetry(ctx)
+		if err != nil {
+			return err
+		}
+		slog.Info("pay notify retry job finished",
+			"tenants", result.Tenants, "executed", result.Executed, "success", result.Success, "failClosed", result.FailClosed)
+		return nil
+	})
+
+	// 订单超时关闭任务（issue #134，spec §7）：系统级 handler（跨租户迭代），
+	// infra_job 种子默认行每 5 分钟一次。扫描过期待支付订单（status=0 且
+	// expire_time < now）条件更新置 30 已关闭；已支付/已关闭不受影响。
+	scheduler.RegisterSystem(payservice.OrderTimeoutCloseJobHandlerName, func(ctx context.Context, param string) error {
+		result, err := paySvc.RunOrderTimeoutClose(ctx)
+		if err != nil {
+			return err
+		}
+		slog.Info("pay order timeout close job finished",
+			"tenants", result.Tenants, "closed", result.Closed)
+		return nil
+	})
 
 	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI, payAPI)
 

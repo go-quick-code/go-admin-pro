@@ -1174,6 +1174,32 @@ func seedJobs(db *gorm.DB) error {
 			Status:         inframodel.JobStatusRunning,
 			Remark:         "每天 03:00 清理超过保留期（access-log.retention-days，默认 30 天）的 API 访问日志（跨租户）；handler_param 可填天数覆盖保留期",
 		},
+		// 商户回调重试（issue #134，spec §4.5/§7）：每分钟扫描到期任务
+		//（status IN (0,21,22) 且 next_notify_time <= now）POST 商户回调地址，
+		// 重试间隔 {15,15,30,180,1800,1800,1800,3600} 秒、首次 + 8 重试共 9 次。
+		// 默认启用（投递是资金链路的正常环节；条件更新认领防重发，密钥缺失
+		// 拒发 fail-closed，不会产生误发）。
+		{
+			TenantID:       1,
+			Name:           "商户回调重试",
+			HandlerName:    "payNotifyRetry",
+			CronExpression: "0 * * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每分钟扫描到期商户回调任务并 POST 商户回调地址（重试间隔 {15,15,30,180,1800,1800,1800,3600} 秒，9 次失败置彻底失败）；回调密钥缺失时拒发（fail-closed）",
+		},
+		// 订单超时关闭（issue #134，spec §7）：每 5 分钟扫描过期待支付订单
+		//（status=0 且 expire_time < now）置 30 已关闭。默认启用（幂等条件
+		// 更新，已支付/已关闭不受影响，非破坏性）。
+		{
+			TenantID:       1,
+			Name:           "订单超时关闭",
+			HandlerName:    "payOrderTimeoutClose",
+			CronExpression: "0 */5 * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每 5 分钟扫描过期待支付订单（expire_time < now）并置为已关闭；已支付/已关闭订单不受影响",
+		},
 	}
 	// Create 会把带 default 标签的零值列回写成数据库默认值（1 暂停），
 	// 因此在插入前先快照种子的意图状态，再逐条用 Exec 显式回写。
