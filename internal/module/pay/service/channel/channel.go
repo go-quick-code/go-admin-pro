@@ -114,18 +114,30 @@ type OrderNotify struct {
 	Raw            string      // 回调原文（落 extension.channel_notify_data）
 }
 
-// RefundReq 退款请求（原路退回）。
+// RefundResp.Status 取值（字符串形态对齐芋道；wallet/mock 同步完成用 10/20，
+// 异步渠道（微信/支付宝）pending 等退款回调）。
+const (
+	RefundStatusPending = "0"  // 处理中（退款单停 0 待处理，等渠道回调）
+	RefundStatusSuccess = "10" // 成功（wallet/mock 同步退款成功）
+	RefundStatusFail    = "20" // 失败（mock 失败分支供测试，spec §4.4）
+)
+
+// RefundReq 退款请求（原路退回；金额一律退款单快照，渠道请求不含任何客户端
+// 输入金额）。
 type RefundReq struct {
 	OutRefundNo    string // 业务退款单号（TK 前缀）
 	ChannelOrderNo string
 	RefundPrice    money.Money // 本次退款金额
 	Reason         string
+	BizID          int64 // 业务退款单据 ID（pay_refund.id；wallet 渠道回加定位原下单用户与流水 biz_id 用）
 }
 
-// RefundResp 退款响应。
+// RefundResp 退款响应：Raw 为渠道回调原文/末次响应摘要（落
+// pay_refund.channel_notify_data；同步渠道的 mock 携带模拟回调原文）。
 type RefundResp struct {
 	Status          string // 0 处理中 / 10 成功 / 20 失败
 	ChannelRefundNo string
+	Raw             string
 }
 
 // RefundNotify 渠道退款回调解析结果（验签 + 解析）。

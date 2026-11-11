@@ -435,23 +435,29 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 装配；业务时区（ADR 0006）是单号日期键的唯一口径。渠道 SPI 注册表
 	//（#133 定形）：mock/wallet 两实现注册进 Registry，未注册渠道在绑定与
 	// submit 处 409「渠道未实现」；应用删除引用检查以 RefCheckerChain 注册
-	//（#133 订单引用，#135/#136 追加退款/转账）。
+	//（#133 订单引用 + #135 退款引用，#136 追加转账）。
 	payRepo := payrepo.New(db)
 	paySvc := payservice.New(payRepo)
 	paySvc.SetLocation(cfg.Location())
-	payRegistry, payRegistryErr := payChannelRegistry(db, paySvc)
+	payRegistry, payRegistryErr := payChannelRegistry(db, paySvc, paySvc)
 	if payRegistryErr != nil {
 		return nil, payRegistryErr
 	}
 	paySvc.SetRegistry(payRegistry)
-	paySvc.SetAppRefChecker(payservice.RefCheckerChain{payservice.OrderRefChecker{Repo: payRepo}})
+	// 应用删除引用检查链（spec §4.10）：订单引用（#133）+ 退款引用（#135）
+	// 依次检查，首个命中即拒绝；转账引用随 #136 以同形态追加。
+	paySvc.SetAppRefChecker(payservice.RefCheckerChain{
+		payservice.OrderRefChecker{Repo: payRepo},
+		payservice.RefundRefChecker{Repo: payRepo},
+	})
 	// 回调链路装配（issue #134，spec §4.5）：HMAC 密钥（pay.notify-hmac-key，
 	// 空值 job 拒发 fail-closed）与启用租户清单（job 跨租户逐租户，照公海
 	// 回收模式——system Service 直接满足 payservice.TenantLister 窄接口）。
 	paySvc.SetNotifyHMACKey(cfg.Pay.NotifyHMACKey)
 	paySvc.SetTenantLister(sysSvc)
-	// 回调报文详情：type=1 支付已内置；#135 退款 / #136 转账在各自工单以
-	// paySvc.SetNotifyPayloadEnricher(类型, …) 追加单据详情。
+	// 回调报文详情：type=1 支付与 type=2 退款（#135，service.New 内注册）
+	// 已内置；#136 转账在各自工单以 paySvc.SetNotifyPayloadEnricher(类型, …)
+	// 追加单据详情。
 	// TODO(#137): demo 状态联动 —— 在此注册
 	// paySvc.SetDemoNotifyHandler(...)（按 payload 里的 merchantOrderId 等
 	// 幂等键联动 pay_demo_order/pay_demo_withdraw 状态）；未注册前 demo 回调
@@ -493,12 +499,14 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, Pay: paySvc, APILog: apiLogWriter}, nil
 }
 
-// payChannelRegistry 装配渠道 SPI 注册表（issue #133，docs/pay-mvp-spec.md
-// §4.1）：v1 注册 mock/wallet 两实现；渠道 config 取 pay_channel 种子行原文
-// （空对象 {}，由渠道实现自行反序列化校验）。注册表是「渠道未实现」的唯一
-// 判定源：未注册渠道在应用绑定与 submit 处 409（service 层 Known 检查）。
-// 补渠道实现不改 SPI：实现 Client 后在此 Register 即可。
-func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer) (*paychannel.Registry, error) {
+// payChannelRegistry 装配渠道 SPI 注册表（issue #133 支付 / #135 退款，
+// docs/pay-mvp-spec.md §4.1）：v1 注册 mock/wallet 两实现；渠道 config 取
+// pay_channel 种子行原文（空对象 {}，由渠道实现自行反序列化校验）。注册表是
+// 「渠道未实现」的唯一判定源：未注册渠道在应用绑定与 submit 处 409（service
+// 层 Known 检查）。wallet 渠道的扣减/回加后端均为 pay service 层（同一实例，
+// 事务经 payrepo.WithTx 传递）。补渠道实现不改 SPI：实现 Client 后在此
+// Register 即可。
+func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer, refunder paychannel.WalletRefunder) (*paychannel.Registry, error) {
 	rows, err := payrepo.New(db).ListChannelsByCodes(
 		context.Background(), []string{paychannel.CodeMock, paychannel.CodeWallet})
 	if err != nil {
@@ -512,7 +520,7 @@ func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer) (*paychannel.
 	if err != nil {
 		return nil, fmt.Errorf("init mock pay client: %w", err)
 	}
-	walletClient, err := paychannel.NewWalletClient(configByCode[paychannel.CodeWallet], payer)
+	walletClient, err := paychannel.NewWalletClient(configByCode[paychannel.CodeWallet], payer, refunder)
 	if err != nil {
 		return nil, fmt.Errorf("init wallet pay client: %w", err)
 	}
