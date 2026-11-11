@@ -34,6 +34,11 @@ type PayConfig struct {
 	// 验签。为空时 payNotifyRetry job 拒发（fail-closed，任务保持待重试）、
 	// demo 回调端点拒绝一切验签。默认值仅 dev/test 便利，生产必须覆盖。
 	NotifyHMACKey string `mapstructure:"notify-hmac-key"`
+	// RechargeAppKey 是充值单挂单应用的 app_key（issue #136，spec §4.7 充值
+	// 同事务挂 pay_order）：租户内按此键解析挂单应用，缺失时发起充值 409
+	// 引导配置。缺省 demo（spec §7 演示数据每租户播种 app_key=demo 且绑定
+	// mock/wallet），部署可覆盖为自有应用。
+	RechargeAppKey string `mapstructure:"recharge-app-key"`
 }
 
 // PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。
@@ -310,6 +315,10 @@ func (c *Config) applyEnv() {
 	// 支付回调密钥（issue #134）：允许部署侧环境变量覆盖，免改配置文件。
 	if v := os.Getenv("GAP_PAY_NOTIFY_HMAC_KEY"); v != "" {
 		c.Pay.NotifyHMACKey = v
+	}
+	// 充值挂单应用（issue #136）：允许部署侧环境变量覆盖，免改配置文件。
+	if v := os.Getenv("GAP_PAY_RECHARGE_APP_KEY"); v != "" {
+		c.Pay.RechargeAppKey = v
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GAP_SEED"))) {
 	case "true":

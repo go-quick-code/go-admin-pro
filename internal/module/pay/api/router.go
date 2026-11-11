@@ -70,4 +70,25 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	notifyTask := rg.Group("/pay/notify-task")
 	notifyTask.GET("/page", h.perm("pay:notify-task:query"), h.PageNotifyTasks)
 	notifyTask.GET("/:id", h.perm("pay:notify-task:query"), h.GetNotifyTask)
+
+	// 充值套餐（issue #136，spec §5/§4.10）：管理端 CRUD 四码
+	//（pay:wallet-recharge-package:*，query 为菜单权限码）；自助清单只挂登录
+	//（发起充值的套餐选择数据源）。删除守卫：被充值单引用 409（spec §4.10）。
+	rechargePackage := rg.Group("/pay/wallet-recharge-package")
+	rechargePackage.GET("/page", h.perm("pay:wallet-recharge-package:query"), h.PageRechargePackages)
+	rechargePackage.GET("/list", h.ListRechargePackageOptions)
+	rechargePackage.GET("/:id", h.perm("pay:wallet-recharge-package:query"), h.GetRechargePackage)
+	rechargePackage.POST("", h.perm("pay:wallet-recharge-package:create"), h.CreateRechargePackage)
+	rechargePackage.PUT("", h.perm("pay:wallet-recharge-package:update"), h.UpdateRechargePackage)
+	rechargePackage.DELETE("/:id", h.perm("pay:wallet-recharge-package:delete"), h.DeleteRechargePackage)
+
+	// 充值单（issue #136，spec §5/§4.7/§4.11）：发起/我的充值只挂登录
+	//（自助端点，服务层强制本人钱包归属）；管理端分页挂
+	// pay:wallet-recharge:query。充值单只读（append-only 资金事实，无编辑/
+	// 删除端点）；充值退款发起走 POST /pay/refund/create（挂充值单订单，
+	// 服务层守卫仅全额 + 余额充足，spec §4.7）。
+	recharge := rg.Group("/pay/wallet-recharge")
+	recharge.POST("/create", h.CreateRecharge)
+	recharge.GET("/my", h.PageMyRecharges)
+	recharge.GET("/page", h.perm("pay:wallet-recharge:query"), h.PageRecharges)
 }

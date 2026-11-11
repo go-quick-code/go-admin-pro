@@ -214,6 +214,13 @@ var TenantTables = []string{
 	"pay_transfer",
 	"pay_notify_task",
 	"pay_notify_log",
+
+	// 充值与套餐（issue #136，迁移 00038，docs/pay-mvp-spec.md §3.4/§4.7）：
+	// 充值单（挂支付订单、套餐快照）与充值套餐全量租户隔离。充值支付认领/
+	// 退款列回写走显式租户参数的裸 SQL（同 pay_order 认领口径）；套餐被充值
+	// 单引用禁删（引用计数不带 deleted_at 过滤——充值单不可删，引用永久）。
+	"pay_wallet_recharge",
+	"pay_wallet_recharge_package",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

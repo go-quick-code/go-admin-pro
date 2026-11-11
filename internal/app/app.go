@@ -455,9 +455,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 回收模式——system Service 直接满足 payservice.TenantLister 窄接口）。
 	paySvc.SetNotifyHMACKey(cfg.Pay.NotifyHMACKey)
 	paySvc.SetTenantLister(sysSvc)
+	// 充值挂单应用（issue #136，spec §4.7）：发起充值同事务挂的 pay_order
+	// 归属应用，按 pay.recharge-app-key 解析（缺省 demo，见 service 层决策）。
+	paySvc.SetRechargeAppKey(cfg.Pay.RechargeAppKey)
 	// 回调报文详情：type=1 支付与 type=2 退款（#135，service.New 内注册）
 	// 已内置；#136 转账在各自工单以 paySvc.SetNotifyPayloadEnricher(类型, …)
-	// 追加单据详情。
+	// 追加单据详情。支付成功业务联动：充值入账（#136，service.New 内注册于
+	// OrderSuccessHandler 扩展点）；后续票经 SetOrderSuccessHandler 追加。
 	// TODO(#137): demo 状态联动 —— 在此注册
 	// paySvc.SetDemoNotifyHandler(...)（按 payload 里的 merchantOrderId 等
 	// 幂等键联动 pay_demo_order/pay_demo_withdraw 状态）；未注册前 demo 回调

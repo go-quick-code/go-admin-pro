@@ -85,6 +85,21 @@ func (r *Repository) UpdateRefundResult(ctx context.Context, tenantID, id int64,
 	).Error
 }
 
+// ClaimRefundFail 退款单失败认领（#136 充值退款成功回调发现余额不足以扣回，
+// spec §4.7 先校验后退款）：UPDATE ... WHERE status=0 条件更新置 20 失败——
+// 失败终态的幂等门槛与 ClaimRefundSuccess 同构（0 行 = 已被并发方处理，
+// 幂等返回）。只能在事务内调用。
+func (r *Repository) ClaimRefundFail(ctx context.Context, tenantID, refundID int64, errorCode, errorMsg, notifyData string) (int64, error) {
+	res := r.db.WithContext(ctx).Exec(
+		"UPDATE `pay_refund` SET `status` = ?, `channel_error_code` = ?, `channel_error_msg` = ?, "+
+			"`channel_notify_data` = ?, `updated_at` = ?, `updater` = ? "+
+			"WHERE `id` = ? AND `tenant_id` = ? AND `status` = 0 AND `deleted_at` IS NULL",
+		model.RefundStatusFail, errorCode, errorMsg, notifyData,
+		time.Now(), database.AuditUser(ctx), refundID, tenantID,
+	)
+	return res.RowsAffected, res.Error
+}
+
 // CountRefundsByAppID 统计应用的退款单引用（应用删除守卫，spec §4.10）。
 func (r *Repository) CountRefundsByAppID(ctx context.Context, appID int64) (int64, error) {
 	var total int64
