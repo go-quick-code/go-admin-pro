@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"time"
 
+	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
@@ -47,6 +48,22 @@ type Service struct {
 	// 订单引用检查；#135/#136 的退款/转账检查经同一扩展点追加；未注册时只查
 	// 渠道绑定（纯绑定关系须先解绑）。
 	appRefCheckers AppRefChecker
+	// notifyHMACKey 是服务端回调密钥（issue #134，configs pay.notify-hmac-key）：
+	// 商户回调 POST 的 Pay-Signature 签名与 demo 回调端点验签共用；空值拒发/
+	// 拒验（fail-closed）。装配期 SetNotifyHMACKey 注入。
+	notifyHMACKey string
+	// notifyHTTPClient 是回调 job 的出站 HTTP 客户端（10s 超时、1MB 上限，
+	// 照 socialHTTP 先例）。New 时创建。
+	notifyHTTPClient *notifyHTTP
+	// tenants 是启用租户清单来源（#134 回调/关单 job 跨租户迭代，窄接口
+	// 适配 system Service）。未注入时 job 报错拒跑（fail-closed）。
+	tenants TenantLister
+	// payloadEnrichers 是回调报文详情扩展（按任务类型；#134 内置 type=1，
+	// #135/#136 经 SetNotifyPayloadEnricher 追加）。
+	payloadEnrichers map[int8]NotifyPayloadEnricher
+	// demoHandler 是 demo 商户回调业务联动扩展点（#137 注册；未注册时
+	// demo 端点验签通过即回 code=0）。
+	demoHandler DemoNotifyHandler
 }
 
 // SetRegistry 注入渠道实现注册表（装配期；未注入视为空表——所有渠道未实现）。
@@ -62,9 +79,14 @@ func (s *Service) channelRegistry() *channel.Registry {
 	return s.registry
 }
 
-// New 创建 pay Service。
+// New 创建 pay Service：内置 type=1（支付）的回调报文详情 enricher；
+// #135 退款 / #136 转账经 SetNotifyPayloadEnricher 追加各自的详情。
 func New(repo *payrepo.Repository) *Service {
-	return &Service{repo: repo}
+	s := &Service{repo: repo, notifyHTTPClient: newNotifyHTTP()}
+	s.payloadEnrichers = map[int8]NotifyPayloadEnricher{
+		paymodel.NotifyTypePayment: s.enrichPaymentPayload,
+	}
+	return s
 }
 
 // SetAppRefChecker 注册应用删除引用检查链（装配期或后续票追加；后注册覆盖先注册）。

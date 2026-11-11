@@ -78,6 +78,16 @@ export function getPayRefund(id: number) {
   return request.get(`/pay/refund/${id}`) as Promise<any>
 }
 
+// ---------- 回调通知（issue #134） ----------
+// 交易单据只读（append-only，spec §4.10）：任务列表 + 执行日志子表，无写入接口。
+export function pageNotifyTasks(params: any) {
+  return request.get('/pay/notify-task/page', { params }) as Promise<any>
+}
+// 详情含执行日志（logs，append-only 时间线）。
+export function getNotifyTask(id: number) {
+  return request.get(`/pay/notify-task/${id}`) as Promise<any>
+}
+
 // ---------- 支付渠道（平台级，仅平台租户可管理） ----------
 export function pageChannels(params: any) {
   return request.get('/pay/channel/page', { params }) as Promise<any>

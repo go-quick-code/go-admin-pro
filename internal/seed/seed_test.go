@@ -67,10 +67,10 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
 	assertRoleMenus(t, db, 2, []int64{512, 5121, 5297, 5236, 5123}, true, "普通角色")
 	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
-	// 支付中心 800 段（issue #131/#132/#133/#135，spec §7）：资金敏感，普通角色默认不授予
-	// 任何 pay 菜单/按钮（811 订单/812 退款单/821 钱包无按钮行、840 收银台无权限码，
-	// 见 seed/pay.go 注释）。
-	assertRoleMenus(t, db, 2, []int64{800, 810, 811, 812, 820, 821, 840, 8101, 8102, 8103, 8201}, false, "普通角色")
+	// 支付中心 800 段（issue #131/#132/#133/#134/#135，spec §7）：资金敏感，普通角色默认不授予
+	// 任何 pay 菜单/按钮（811 订单/812 退款单/814 回调/821 钱包无按钮行、
+	// 840 收银台无权限码，见 seed/pay.go 注释）。
+	assertRoleMenus(t, db, 2, []int64{800, 810, 811, 812, 814, 820, 821, 840, 8101, 8102, 8103, 8201}, false, "普通角色")
 	// ERP 700 段同级菜单 sort 唯一（终审 P1：历史 725/731/741 等 11/12/13 重复
 	// 会让侧栏按 sort ASC,id ASC 交错；按 spec §1 分组序 1–22 连续编号）。
 	assertERPMenuSortUnique(t, db)
@@ -85,8 +85,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
-	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）。
-	assertCount(t, db, &inframodel.Job{}, 5, "定时任务")
+	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）+ 商户回调重试/
+	// 订单超时关闭（issue #134，spec §7 job 种子两行）。
+	assertCount(t, db, &inframodel.Job{}, 7, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
 	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
@@ -101,12 +102,15 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
 	// 定时任务状态（issue #63 收口 GORM 零值 + default:1 导致「默认启用」被写成暂停）：
-	// 演示任务与公海回收默认暂停，考勤日结果与会议提醒默认启用。
+	// 演示任务与公海回收默认暂停，考勤日结果与会议提醒默认启用；
+	// 商户回调重试与订单超时关闭默认启用（issue #134，spec §7）。
 	assertJobStatus(t, db, "demoJob", inframodel.JobStatusPaused)
 	assertJobStatus(t, db, "recyclePoolCustomers", inframodel.JobStatusPaused)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "payNotifyRetry", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "payOrderTimeoutClose", inframodel.JobStatusRunning)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")

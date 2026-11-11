@@ -90,3 +90,12 @@ ip-location:
   # 文件不存在/加载失败只告警一次并退回空实现，不影响启动。
   # 可用环境变量 GAP_IP_LOCATION_XDB_PATH 覆盖。
   xdb-path: ""
+
+# 支付模块（issue #134，docs/pay-mvp-spec.md §4.5）：商户回调 HMAC 签名密钥。
+pay:
+  # 服务端回调密钥：payNotifyRetry job POST 商户回调地址时带
+  # Pay-Signature = HMAC-SHA256(rawBody, 本密钥)；demo 回调三端点
+  #（/pay/demo/notify/*）用同一密钥验签。留空时 job 拒发（fail-closed，
+  # 任务保持待重试并记日志）、demo 端点拒绝一切验签。
+  # 默认值仅 dev/test 便利，生产必须改成唯一强密钥（GAP_PAY_NOTIFY_HMAC_KEY 可覆盖）。
+  notify-hmac-key: go-admin-pro-pay-notify-dev-key

@@ -51,14 +51,14 @@ func seedPayChannels(db *gorm.DB) error {
 	return nil
 }
 
-// payMenus 构造支付中心 800 段菜单（issue #131/#132/#133/#135，spec §7）：
-// dir 800 + 810 支付应用 + 811 支付订单 + 812 退款单 + 820 渠道配置 +
-// 821 钱包管理 + 840 收银台；按钮 = 菜单ID×10+n（8101–8103、8201，开工前
-// grep seed 去重确认未占用）。813/814/822/830/831 留给后续票
-// （转账/回调/套餐/示例）。
+// payMenus 构造支付中心 800 段菜单（issue #131/#132/#133/#134/#135，spec §7）：
+// dir 800 + 810 支付应用 + 811 支付订单 + 812 退款单 + 814 回调通知 +
+// 820 渠道配置 + 821 钱包管理 + 840 收银台；按钮 = 菜单ID×10+n（8101–8103、
+// 8201，开工前 grep seed 去重确认未占用）。813/822/830/831 留给后续票
+// （转账/套餐/示例；并行工单下 sort 文本冲突在合并时保持两侧菜单并重排 sort）。
 //
-// 支付订单（811）/退款单（812）无按钮行：交易单据页只读（append-only，
-// spec §4.10——无新增/编辑/删除），导出按钮（pay:order:export /
+// 支付订单（811）/退款单（812）/回调通知（814）无按钮行：交易单据页只读
+// （append-only，spec §4.10——无新增/编辑/删除），导出按钮（pay:order:export /
 // pay:refund:export）随 #138 的 export-excel 端点按「按页面实际授予」纪律
 // 一并补种；钱包管理（821）同理（余额调整无管理端入口，spec §4.3 差异清单）。
 //
@@ -79,9 +79,11 @@ func payMenus() []sysmodel.Menu {
 		menuRow(811, 800, "支付订单", "order", "pay/order/index", "pay:order:query", "List", 2),
 		// 退款单（812，issue #135，spec §6）：只读列表 + 详情 drawer。
 		menuRow(812, 800, "退款单", "refund", "pay/refund/index", "pay:refund:query", "RefreshLeft", 3),
-		menuRow(820, 800, "渠道配置", "channel", "pay/channel/index", "pay:channel:query", "Connection", 4),
+		// 回调通知（814，issue #134，spec §6）：任务列表 + 日志子表，只读。
+		menuRow(814, 800, "回调通知", "notify-task", "pay/notify-task/index", "pay:notify-task:query", "Bell", 4),
+		menuRow(820, 800, "渠道配置", "channel", "pay/channel/index", "pay:channel:query", "Connection", 5),
 		btnRow(8201, 820, "渠道修改", "pay:channel:update", 1),
-		menuRow(821, 800, "钱包管理", "wallet", "pay/wallet/index", "pay:wallet:query", "Wallet", 5),
-		menuRow(840, 800, "收银台", "cashier", "pay/cashier/index", "", "ShoppingCart", 6),
+		menuRow(821, 800, "钱包管理", "wallet", "pay/wallet/index", "pay:wallet:query", "Wallet", 6),
+		menuRow(840, 800, "收银台", "cashier", "pay/cashier/index", "", "ShoppingCart", 7),
 	}
 }
