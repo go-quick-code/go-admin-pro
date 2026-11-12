@@ -181,6 +181,21 @@ func (r *Repository) UpdateExtensionResult(ctx context.Context, tenantID, id int
 	).Error
 }
 
+// ClaimExtensionFail 失败回调的条件认领（公开渠道回调失败分支，PR #140
+// 安全审查 P1）：仅「处理中」（status=0）的发起可被失败结论改写——已成功
+// （10）/已失败（20）的发起不可被迟到的失败回调重写（同 ClaimOrderSuccess
+// 的谓词纪律）。返回 0 行 = 发起非处理中（已被处理），调用方按幂等跳过。
+// 显式租户参数裸 SQL。只能在事务内调用。
+func (r *Repository) ClaimExtensionFail(ctx context.Context, tenantID, id int64, errorCode, errorMsg, notifyData string) (int64, error) {
+	res := r.db.WithContext(ctx).Exec(
+		"UPDATE `pay_order_extension` SET `status` = ?, `channel_error_code` = ?, `channel_error_msg` = ?, "+
+			"`channel_notify_data` = ?, `updated_at` = ?, `updater` = ? "+
+			"WHERE `id` = ? AND `tenant_id` = ? AND `status` = 0 AND `deleted_at` IS NULL",
+		model.ExtensionStatusFail, errorCode, errorMsg, notifyData, time.Now(), database.AuditUser(ctx), id, tenantID,
+	)
+	return res.RowsAffected, res.Error
+}
+
 // InsertNotifyTask 创建商户回调任务（支付成功入账函数第 4 步，type=1）。
 // 重复回调被订单状态认领挡住，任务不会重复创建。
 func (r *Repository) InsertNotifyTask(ctx context.Context, row *model.NotifyTask) error {

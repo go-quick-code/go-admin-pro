@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -523,14 +524,23 @@ func (s *Service) MockNotifyOrder(ctx context.Context, req *dto.MockNotifyReq) (
 // ---------- 渠道支付回调（POST /pay/channel-notify/:channelCode，公开，spec §4.6） ----------
 
 // ErrChannelNotifyUnknownChannel 是渠道回调端点的 404 哨兵（spec §4.6
-// 「未实现/停用渠道 404」）：注册表无 Client 与平台停用同答不区分（不泄露
-// 渠道实现/启停差异）。
+// 「未实现/停用渠道 404」）：三种情况同答 404 不区分（不泄露渠道实现/启停/
+// 承接能力差异）——注册表无 Client（未实现）、平台停用、渠道不承接公开回调
+// （PublicNotifyCallback=false，无验签能力的 mock/wallet，PR #140 安全审查
+// P1）。
 var ErrChannelNotifyUnknownChannel = errors.New("渠道回调端点不存在")
 
 // ErrChannelNotifyPayloadInvalid 是回调验签/解析失败的哨兵（spec §4.6
 // 「验签失败 4xx」）：验签在渠道 Client.ParseOrderNotify 内完成，解析拒绝
 // 一律经本哨兵翻译为 4xx。
 var ErrChannelNotifyPayloadInvalid = errors.New("回调验签或报文无效")
+
+// ErrChannelNotifyLocateFailed 是回调定位/联动失败的哨兵（HTTP 层回 200 +
+// 非 0 业务码信封，回调方可重试）：文案为通用哨兵文本，不回显单号/计数/
+// 内部 ID（公开端点应答可被未认证者枚举探测，PR #140 安全审查 P1——「命中
+// %d 条」计数即单号枚举 oracle）；定位细节（单号/命中行数/缺失 ID）只进
+// slog 服务端日志供排查。
+var ErrChannelNotifyLocateFailed = errors.New("回调定位支付发起失败")
 
 // ChannelNotifyResult 渠道支付回调的处理结果（HTTP 应答体构造用）。
 type ChannelNotifyResult struct {
@@ -541,12 +551,14 @@ type ChannelNotifyResult struct {
 }
 
 // ChannelNotifyOrder 渠道支付回调服务端入口（spec §4.6 公开端点，PR #140 F1）：
-// 渠道码 → 注册表 Client ∧ 平台 pay_channel 启用（否则 404）→ 渠道验签解析
+// 渠道码 → 注册表 Client ∧ 平台 pay_channel 启用 ∧ 渠道声明可公开承接回调
+// （PublicNotifyCallback，否则 404——三种情况同答不区分）→ 渠道验签解析
 // （验签在 Client 内；拒绝 → 4xx）→ 按 outTradeNo 定位支付发起 → 成功走支付
 // 成功入账函数（wallet 发起 / mock 模拟回调 / 渠道回调三路共用的
 // paymentSuccessTx，状态认领幂等——重复回调不双入账/不双建任务）→ 失败结论
-// 置发起失败（同 mock 模拟回调失败分支口径）。应答语义同 demo 商户回调端点：
-// 成功 code 0；定位/联动失败回非 0 业务码信封（回调方可重试）。
+// 经条件认领置发起失败（只影响处理中 0 状态，已成功发起不可被迟到失败回调
+// 改写，PR #140 安全审查 P1）。应答语义同 demo 商户回调端点：成功 code 0；
+// 定位/联动失败回非 0 业务码信封（哨兵文案，回调方可重试）。
 //
 // 本端点只承接支付（order）回调：退款/转账渠道回调随真实渠道实现另立工单
 // （SPI 的 ParseRefundNotify / 异步转账回调成对承接，spec §4.6/§10）。
@@ -570,6 +582,12 @@ func (s *Service) ChannelNotifyOrder(ctx context.Context, code string, body []by
 		// 平台停用：404（spec §4.6——注册表命中也以平台启用状态为准）。
 		return nil, ErrChannelNotifyUnknownChannel
 	}
+	if !client.PublicNotifyCallback() {
+		// 渠道不承接公开回调（无验签能力，如 mock/wallet）：404（spec §4.6
+		// 三种 404 同答不区分；PR #140 安全审查 P1——公开端点只承接具备
+		// 验签能力的渠道，mock 回调触发保持登录 + 本人端点）。
+		return nil, ErrChannelNotifyUnknownChannel
+	}
 	notify, err := client.ParseOrderNotify(ctx, channel.NotifyReq{Body: body})
 	if err != nil {
 		// 验签/解析失败 4xx（spec §4.6）：渠道解析错误文案即面向回调方，
@@ -583,8 +601,12 @@ func (s *Service) ChannelNotifyOrder(ctx context.Context, code string, body []by
 	}
 	if len(exts) != 1 {
 		// 定位失败（发起不存在 / 单号跨租户撞号拒绝猜测）：联动失败——HTTP
-		// 层回业务失败信封（同 demo 端点语义，回调方可重试）。
-		return nil, fmt.Errorf("回调定位支付发起失败：out_trade_no=%s 命中 %d 条", outTradeNo, len(exts))
+		// 层回业务失败信封，哨兵文案不含单号/命中数（公开端点的应答可被
+		// 未认证者枚举，计数即单号枚举 oracle，PR #140 安全审查 P1）；细节
+		// 进 slog 供排查。
+		slog.Warn("pay channel-notify 定位失败",
+			"channelCode", code, "outTradeNo", outTradeNo, "hits", len(exts))
+		return nil, ErrChannelNotifyLocateFailed
 	}
 	ext := &exts[0]
 	ctx, tenantID, err := guardTenantContext(tenant.WithTenantID(ctx, ext.TenantID))
@@ -596,8 +618,11 @@ func (s *Service) ChannelNotifyOrder(ctx context.Context, code string, body []by
 		return nil, err
 	}
 	if order == nil {
-		// 发起与订单同事务落库，行缺失属数据异常：联动失败交回调重试排查。
-		return nil, fmt.Errorf("支付发起 %s 关联的订单 %d 不存在", ext.No, ext.OrderID)
+		// 发起与订单同事务落库，行缺失属数据异常：联动失败交回调重试排查
+		//（哨兵文案不回显内部 ID，PR #140 安全审查 P1）。
+		slog.Warn("pay channel-notify 关联订单缺失",
+			"channelCode", code, "outTradeNo", outTradeNo, "extensionId", ext.ID, "orderId", ext.OrderID)
+		return nil, ErrChannelNotifyLocateFailed
 	}
 	out := &ChannelNotifyResult{OutTradeNo: ext.No, ChannelOrderNo: notify.ChannelOrderNo, Success: notify.Success}
 	err = s.repo.Transaction(ctx, func(tx *payrepo.Repository) error {
@@ -609,9 +634,14 @@ func (s *Service) ChannelNotifyOrder(ctx context.Context, code string, body []by
 			out.Claimed = claimed
 			return nil
 		}
-		// 失败结论：置发起失败（同 mock 模拟回调失败分支口径），订单不动、
-		// 无任务；失败是合法回调结论，应答 code 0（渠道无需重试）。
-		return tx.UpdateExtensionResult(ctx, tenantID, ext.ID, model.ExtensionStatusFail, "CHANNEL_FAIL", "渠道回调支付失败", notify.Raw)
+		// 失败结论：条件认领置发起失败（只影响处理中 0 状态——已成功/已
+		// 失败的发起不可被迟到的失败回调改写，PR #140 安全审查 P1；同
+		// mock 模拟回调失败分支的谓词纪律），订单不动、无任务；失败是合法
+		// 回调结论，应答 code 0（渠道无需重试；0 行 = 已被处理，幂等跳过）。
+		if _, err := tx.ClaimExtensionFail(ctx, tenantID, ext.ID, "CHANNEL_FAIL", "渠道回调支付失败", notify.Raw); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
