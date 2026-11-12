@@ -37,7 +37,13 @@ func formatNo(prefix, dateKey string, seq int64) string {
 	return prefix + dateKey + fmt.Sprintf("%04d", seq)
 }
 
-// NextOrderNo 发放支付订单号（ZF 前缀）。
+// NextOrderNo / NextRefundNo / NextTransferNo / NextWalletTxNo 是集成测试专用
+// 的发号入口（刻意保留的测试 seam——internal/app.App.Pay 暴露给
+// pay_sequence 并发发放用例，见 app.go 对 Pay 字段的注释）：生产写路径一律
+// 经 nextNoInTx 在业务事务内发号，不走这组自开事务的入口；非测试代码调用
+// 即绕过了「发号与单据落库同事务」的 spec §4.9 保证（误用自证）。
+
+// NextOrderNo 发放支付订单号（ZF 前缀）。仅集成测试使用（见上组注释）。
 func (s *Service) NextOrderNo(ctx context.Context) (string, error) {
 	return s.nextNo(ctx, SeqOrder, NoPrefixOrder)
 }

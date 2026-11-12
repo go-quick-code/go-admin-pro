@@ -241,11 +241,13 @@ func (s *Service) ListMyWalletTransactions(ctx context.Context, req *dto.WalletT
 	if wallet == nil {
 		return []model.WalletTransaction{}, 0, nil
 	}
+	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
+	page.Normalize()
 	return s.listWalletTransactions(ctx, payrepo.WalletTransactionFilter{
 		WalletID: wallet.ID,
 		BizType:  req.BizType,
 		No:       req.No,
-	}, web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize})
+	}, page)
 }
 
 // ---------- 管理端（权限码 pay:wallet:query，spec §4.11/§7） ----------
@@ -281,9 +283,10 @@ func (s *Service) ListWalletTransactions(ctx context.Context, req *dto.WalletTra
 	}, page)
 }
 
-// listWalletTransactions 是管理端/自助端共用的流水分页实现（校验+归一化后）。
+// listWalletTransactions 是管理端/自助端共用的流水分页实现（校验+归一化后）：
+// 两个入口各自 Normalize 一次后调用（重复 Normalize 幂等无害，但此前管理端
+// 归一化两次——PR #140 F4 收敛为各入口一次）。
 func (s *Service) listWalletTransactions(ctx context.Context, filter payrepo.WalletTransactionFilter, page web.PageQuery) ([]model.WalletTransaction, int64, error) {
-	page.Normalize()
 	return s.repo.ListWalletTransactions(ctx, filter, page.Offset(), page.PageSize)
 }
 
