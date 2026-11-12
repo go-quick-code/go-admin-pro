@@ -109,6 +109,15 @@ func Run(db *gorm.DB, withDemo bool) error {
 				return err
 			}
 		}
+		// pay 演示数据（issue #139，docs/pay-mvp-spec.md §7 演示数据/§9 验收 3）：
+		// 演示应用/套餐/充值与退款/示例订单与提现/演示钱包流水——业务行全部经
+		// pay service 真实入口落库。只依赖基础种子（admin 账号 + 14 行渠道种子），
+		// 顺序无关，放最后。
+		if seedPayDemoFunc != nil {
+			if err := seedPayDemoFunc(db); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -132,6 +141,11 @@ var seedERPDemoFunc func(*gorm.DB) error
 // seedPlatformDemoFunc 是平台能力演示数据的写入入口，由 platform_demo.go 的
 // init 注册。不依赖 CRM/OA 演示数据（自带渠道/模板/套餐兜底），顺序无关。
 var seedPlatformDemoFunc func(*gorm.DB) error
+
+// seedPayDemoFunc 是 pay 演示数据的写入入口，由 pay_demo.go 的 init 注册。
+// 不依赖 CRM/OA/ERP 演示数据（只依赖基础种子的 admin 账号与 14 行渠道种子），
+// 顺序无关；业务行全部经 pay service 真实入口落库（含钱包唯一入账入口）。
+var seedPayDemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64
