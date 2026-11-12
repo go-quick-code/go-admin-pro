@@ -67,6 +67,11 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedMessages(db); err != nil {
 		return err
 	}
+	// 支付渠道种子（issue #131，spec §3.1/§7）：14 渠道码常量逐一预插，
+	// mock/wallet 启用、其余停用且 config={}；表为空时幂等写入。
+	if err := seedPayChannels(db); err != nil {
+		return err
+	}
 	if err := seedPoolConfigs(db); err != nil {
 		return err
 	}
@@ -104,6 +109,15 @@ func Run(db *gorm.DB, withDemo bool) error {
 				return err
 			}
 		}
+		// pay 演示数据（issue #139，docs/pay-mvp-spec.md §7 演示数据/§9 验收 3）：
+		// 演示应用/套餐/充值与退款/示例订单与提现/演示钱包流水——业务行全部经
+		// pay service 真实入口落库。只依赖基础种子（admin 账号 + 14 行渠道种子），
+		// 顺序无关，放最后。
+		if seedPayDemoFunc != nil {
+			if err := seedPayDemoFunc(db); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -127,6 +141,11 @@ var seedERPDemoFunc func(*gorm.DB) error
 // seedPlatformDemoFunc 是平台能力演示数据的写入入口，由 platform_demo.go 的
 // init 注册。不依赖 CRM/OA 演示数据（自带渠道/模板/套餐兜底），顺序无关。
 var seedPlatformDemoFunc func(*gorm.DB) error
+
+// seedPayDemoFunc 是 pay 演示数据的写入入口，由 pay_demo.go 的 init 注册。
+// 不依赖 CRM/OA/ERP 演示数据（只依赖基础种子的 admin 账号与 14 行渠道种子），
+// 顺序无关；业务行全部经 pay service 真实入口落库（含钱包唯一入账入口）。
+var seedPayDemoFunc func(*gorm.DB) error
 
 func seedTenant(db *gorm.DB) error {
 	var count int64
@@ -547,6 +566,10 @@ func seedMenus(db *gorm.DB) error {
 	//（spec §7，见 seedRoles 的 roleMenus——刻意无 700 段条目）。
 	menus = append(menus, erpCoreMenus()...)
 	menus = append(menus, erpDocMenus()...)
+	// 支付中心 800 段（issue #131，spec §7）：dir 800 + 810 支付应用 +
+	// 820 渠道配置。资金敏感：内置普通角色（role id=2）默认不授予任何
+	// pay 菜单（见 seedRoles 的 roleMenus——刻意无 800 段条目）。
+	menus = append(menus, payMenus()...)
 	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
 	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
 	// 页面与查询按钮共用权限码 crm:dashboard:view（API 路由同码）。
@@ -1164,6 +1187,32 @@ func seedJobs(db *gorm.DB) error {
 			RetryCount:     0,
 			Status:         inframodel.JobStatusRunning,
 			Remark:         "每天 03:00 清理超过保留期（access-log.retention-days，默认 30 天）的 API 访问日志（跨租户）；handler_param 可填天数覆盖保留期",
+		},
+		// 商户回调重试（issue #134，spec §4.5/§7）：每分钟扫描到期任务
+		//（status IN (0,21,22) 且 next_notify_time <= now）POST 商户回调地址，
+		// 重试间隔 {15,15,30,180,1800,1800,1800,3600} 秒、首次 + 8 重试共 9 次。
+		// 默认启用（投递是资金链路的正常环节；条件更新认领防重发，密钥缺失
+		// 拒发 fail-closed，不会产生误发）。
+		{
+			TenantID:       1,
+			Name:           "商户回调重试",
+			HandlerName:    "payNotifyRetry",
+			CronExpression: "0 * * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每分钟扫描到期商户回调任务并 POST 商户回调地址（重试间隔 {15,15,30,180,1800,1800,1800,3600} 秒，9 次失败置彻底失败）；回调密钥缺失时拒发（fail-closed）",
+		},
+		// 订单超时关闭（issue #134，spec §7）：每 5 分钟扫描过期待支付订单
+		//（status=0 且 expire_time < now）置 30 已关闭。默认启用（幂等条件
+		// 更新，已支付/已关闭不受影响，非破坏性）。
+		{
+			TenantID:       1,
+			Name:           "订单超时关闭",
+			HandlerName:    "payOrderTimeoutClose",
+			CronExpression: "0 */5 * * * *",
+			RetryCount:     0,
+			Status:         inframodel.JobStatusRunning,
+			Remark:         "每 5 分钟扫描过期待支付订单（expire_time < now）并置为已关闭；已支付/已关闭订单不受影响",
 		},
 	}
 	// Create 会把带 default 标签的零值列回写成数据库默认值（1 暂停），

@@ -16,6 +16,7 @@ import (
 	messageapi "github.com/go-quick-code/go-admin-pro/internal/module/message/api"
 	notifyapi "github.com/go-quick-code/go-admin-pro/internal/module/notify/api"
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
+	payapi "github.com/go-quick-code/go-admin-pro/internal/module/pay/api"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/middleware"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
@@ -23,7 +24,7 @@ import (
 )
 
 // New 构建 HTTP 引擎，完成公开接口、鉴权接口与静态资源的装配。
-func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler, oaAPI *oaapi.Handler, bpmAPI *bpmapi.Handler, notifyAPI *notifyapi.Handler, messageAPI *messageapi.Handler, erpAPI *erpapi.Handler) *gin.Engine {
+func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handler, codegenAPI *codegen.Handler, crmAPI *crmapi.Handler, oaAPI *oaapi.Handler, bpmAPI *bpmapi.Handler, notifyAPI *notifyapi.Handler, messageAPI *messageapi.Handler, erpAPI *erpapi.Handler, payAPI *payapi.Handler) *gin.Engine {
 	if cfg.App.Env == "dev" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -43,6 +44,11 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	//（GET /notify/push/sse|ws）。票据即凭证；浏览器 EventSource 不能带
 	// 请求头，公开路由是设计使然（ADR 0013），推送关闭时注册为 no-op。
 	notifyAPI.RegisterPublic(api)
+	// pay（issue #134 demo 回调；PR #140 补渠道回调端点，spec §4.6）：demo
+	// 商户回调三端点与渠道支付回调 /pay/channel-notify/:channelCode 公开可达
+	//（无登录、挂 IP 限速照社交回调先例、不记访问日志——公开组在 protected
+	// 组外，结构使然）。退款/转账渠道回调随真实渠道实现工单追加（§10）。
+	payAPI.RegisterPublic(api)
 
 	// 换票端点（POST /notify/push/ticket）：只需登录，不挂操作日志——
 	// 每次建流都会换票，属读语义，避免写操作日志被连接心跳灌满。
@@ -70,6 +76,10 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	// erp（issue #88）：统一前缀 /erp，主数据（分类/单位/产品）起步；
 	// 单据/库存/财务路由由后续票追加注册。
 	erpAPI.RegisterProtected(protected)
+	// pay（issue #131）：统一前缀 /pay，应用与渠道域起步（渠道的平台级约束
+	// 在 service 层 requirePlatform 收口）；交易/回调/钱包路由由后续票追加，
+	// 公开端点（demo 回调）已随 #134 挂载。
+	payAPI.RegisterProtected(protected)
 
 	// 上传文件不挂公开静态目录（PR #39 残余风险 A）：任何匿名用户都不能
 	// 通过 /files/* 直链读取文件，唯一入口是 GET /infra/file/:id/download

@@ -8,7 +8,7 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=100 断言 up 后的业务表数量（默认 100；CI 继承此默认值；
+#   EXPECTED_TABLES=116 断言 up 后的业务表数量（默认 116；CI 继承此默认值；
 #                       00023 新增 system_tenant_package（system_tenant 加
 #                       package_id 列，列变更不改表数），
 #                       00026 新增 infra_api_log，
@@ -56,6 +56,20 @@
 #                       erp_finance_receipt_items、erp_finance_payment、
 #                       erp_finance_payment_items（issue #94，5 张：结算账户 +
 #                       收付款两主两明；95→100），
+#                       00035 新增 pay_channel、pay_app、pay_app_channel、
+#                       pay_sequence（issue #131，4 张：平台渠道 + 应用/绑定/
+#                       序列三租户表；100→104），
+#                       00036 新增 pay_wallet、pay_wallet_transaction
+#                       （issue #132，2 张：钱包余额账 + 流水账；104→106），
+#                       00037 新增 pay_order、pay_order_extension、pay_refund、
+#                       pay_transfer、pay_notify_task、pay_notify_log
+#                       （issue #133，6 张：订单/extension/退款/转账/回调任务/
+#                       回调日志；106→112），
+#                       00038 新增 pay_wallet_recharge、
+#                       pay_wallet_recharge_package（issue #136，2 张：充值单 +
+#                       充值套餐；112→114），
+#                       00039 新增 pay_demo_order、pay_demo_withdraw
+#                       （issue #137，2 张：示例订单 + 示例提现；114→116），
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -63,7 +77,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-100}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-116}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

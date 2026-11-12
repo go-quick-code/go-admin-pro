@@ -77,7 +77,7 @@
 
 ### 4.1 渠道 SPI 与注册表
 
-- `service/channel` 定义 SPI（概念等价芋道 PayClient）：`Code() string`、`Order(ctx, OrderReq) (OrderResp, error)`（统一下单，返回 displayMode：`none` mock 等回调 / `qrcode|url` 预留）、`ParseOrderNotify(ctx, req) (OrderNotify, error)`（验签+解析，产出成功/失败与渠道单号）、`Refund(ctx, RefundReq) (RefundResp, error)`、`ParseRefundNotify(ctx, req) (RefundNotify, error)`。渠道配置为各渠道多态结构（`walletConfig{}`、`mockConfig{}`），JSON 存 `pay_channel.config`。
+- `service/channel` 定义 SPI（概念等价芋道 PayClient）：`Code() string`、`Order(ctx, OrderReq) (OrderResp, error)`（统一下单，返回 displayMode：`none` mock 等回调 / `qrcode|url` 预留）、`ParseOrderNotify(ctx, req) (OrderNotify, error)`（验签+解析，产出成功/失败与渠道单号）、`Refund(ctx, RefundReq) (RefundResp, error)`、`ParseRefundNotify(ctx, req) (RefundNotify, error)`、`Transfer(ctx, TransferReq) (TransferResp, error)`（#137 追加的第五动作，wallet/mock 同步完成、无异步解析动作——异步渠道回调随真实渠道实现接入）。渠道配置为各渠道多态结构（`walletConfig{}`、`mockConfig{}`，mock 退款结果经 `refundResult` 键配置），JSON 存 `pay_channel.config`。
 - 注册表 `map[string]Client`：v1 注册 mock、wallet；未实现渠道在「应用绑定渠道」与「submit」处即报 409「渠道未实现」。补渠道实现不改 SPI。
 - 渠道码常量对齐芋道枚举 14 个；未实现渠道不得绑定到应用（绑定校验拒绝）。
 
@@ -126,7 +126,7 @@
 
 ### 4.8 转账与示例提现
 
-- 转账发起（消费方服务端）：`merchant_transfer_id` 幂等；wallet 渠道 `user_account` = 目标用户标识（user_id），同事务入账目标钱包（biz=6）+ 置 10 成功 + 建回调任务（type=3）；mock 渠道模拟成功。转账为平台出账，v1 无平台资金账本（差异清单）。
+- 转账发起（消费方服务端）：`merchant_transfer_id` 幂等；wallet 渠道 `user_account` = 目标用户标识（user_id），同事务入账目标钱包（biz=6）+ 置 10 成功 + 建回调任务（type=3）；mock 渠道模拟成功。**转账不校验应用渠道绑定**（#137 决策：绑定守卫是收银台 submit 的支付语义，示例提现审批直接以配置应用发起转账，绑定与否不影响资金事实）。转账为平台出账，v1 无平台资金账本（差异清单）。
 - 示例提现：申请（WAITING）→ 管理端审批 `PUT /pay/demo-withdraw/:id/approve`（权限 `pay:demo-withdraw:approve`）→ 创建转账单 → 转账成功回调联动提现单 10 成功；拒绝/关闭置 20。
 
 ### 4.9 编号
@@ -162,22 +162,22 @@
 - **转账**：`POST /pay/transfer/create`、`GET /pay/transfer/page`、`GET /pay/transfer/:id`、`GET /pay/transfer/export-excel`。
 - **回调通知**：`GET /pay/notify-task/page`、`GET /pay/notify-task/:id`（含日志）。
 - **钱包**：`GET /pay/wallet/page`（管理）、`GET /pay/wallet/my`、`GET /pay/wallet-transaction/page`（管理）、`GET /pay/wallet-transaction/my`、`GET /pay/wallet-transaction/export-excel`。
-- **充值**：`POST /pay/wallet-recharge/create`（本人）、`GET /pay/wallet-recharge/page`（管理）、`GET /pay/wallet-recharge/my`、套餐 CRUD `/pay/wallet-recharge-package`。
-- **示例**：`POST /pay/demo-order/create`、`GET /pay/demo-order/page`、`PUT /pay/demo-order/:id/refund`、`POST /pay/demo-withdraw/create`、`GET /pay/demo-withdraw/page`、`PUT /pay/demo-withdraw/:id/approve`；mock 触发 `POST /pay/mock/notify`。
+- **充值**：`POST /pay/wallet-recharge/create`（本人）、`GET /pay/wallet-recharge/page`（管理）、`GET /pay/wallet-recharge/my`、套餐 CRUD `/pay/wallet-recharge-package`、`GET /pay/wallet-recharge-package/list`（自助充值面板数据源）。
+- **示例**：`POST /pay/demo-order/create`、`GET /pay/demo-order/page`、`PUT /pay/demo-order/:id/refund`、`GET /pay/demo-order/spus`（示例订单页商品字典数据源）、`POST /pay/demo-withdraw/create`、`GET /pay/demo-withdraw/page`、`PUT /pay/demo-withdraw/:id/approve`；mock 触发 `POST /pay/mock/notify`。
 - **公开端点**：`POST /pay/channel-notify/:channelCode`、`POST /pay/demo/notify/order`、`POST /pay/demo/notify/refund`、`POST /pay/demo/notify/transfer`（demo 回调三端点验 `Pay-Signature`）。
 
 ## 6. 前端页面
 
 - 菜单驱动路由（`views/pay/<entity>/index.vue`），列表页用 `ProTable`，详情 drawer + descriptions；收银台为布局内独立操作页（照 OA 打卡页形态：订单信息卡 + 渠道选择 + 模拟回调按钮）。
-- 页面清单（11 页）：支付应用（详情含渠道绑定 tab + 凭证只读脱敏展示）、支付订单、退款单、转账单、回调通知（任务列表 + 日志子表）、渠道配置（平台级）、钱包管理（钱包列表 + 流水抽屉）、充值套餐、示例订单（发起支付/发起退款）、示例提现（审批/关闭）、收银台。
+- 页面清单（12 页；#136 按自助端点补充 823 我的充值，spec §7 菜单清单未给自助页留槽位——收口决策记录于菜单种子）：支付应用（详情含渠道绑定 tab + 凭证只读脱敏展示）、支付订单、退款单、转账单、回调通知（任务列表 + 日志子表）、渠道配置（平台级）、钱包管理（钱包列表 + 流水抽屉）、充值套餐、我的充值（823 自助：发起充值 + 我的充值单）、示例订单（发起支付/发起退款）、示例提现（审批/关闭）、收银台。
 - 交易单据页无新增/编辑/删除按钮（append-only）；示例订单/提现的操作按钮走独立权限码；`hasPerm` 显隐；`pnpm type-check` + `pnpm build`。
 
 ## 7. 迁移号、菜单、权限码、种子、安全审查
 
 - **迁移**：00035 应用与渠道（`pay_channel/pay_app/pay_app_channel/pay_sequence`，4 表）、00036 钱包（`pay_wallet/pay_wallet_transaction`，2 表）、00037 交易与回调（`pay_order/pay_order_extension/pay_refund/pay_transfer/pay_notify_task/pay_notify_log`，6 表）、00038 充值（`pay_wallet_recharge/pay_wallet_recharge_package`，2 表）、00039 示例（`pay_demo_order/pay_demo_withdraw`，2 表）；每迁移一个主题、带 Down 段；`EXPECTED_TABLES` 改 **116**。
 - **租户登记**：`TenantTables` += 15 张租户表；`PlatformTables` += `pay_channel`（"平台级支付渠道凭证配置"）——`VerifyTenantTables` 启动强校验（ADR 0019）。
-- **菜单**：顶层 dir **800**（支付中心）；分配：810 支付应用、811 支付订单、812 退款单、813 转账单、814 回调通知、820 渠道配置（平台）、821 钱包管理、822 充值套餐、830 示例订单、831 示例提现、840 收银台。按钮 = 菜单ID×10+n（n=1..5：create/update/delete/approve/export，按页面实际授予；query 为菜单权限码）。纪律照旧：开工前 grep `seed.go` 去重。
-- **权限码**：`pay:app:*`、`pay:channel:query|update`（平台）、`pay:order:query|export`、`pay:refund:query|export`、`pay:transfer:query|export`、`pay:notify-task:query`、`pay:wallet:query|export`、`pay:wallet-recharge-package:*`、`pay:wallet-recharge:query`、`pay:demo-order:create|query`、`pay:demo-withdraw:create|query|approve`。内置普通角色（role id=2）**默认不授予**任何 pay 菜单（资金敏感，照 ERP 先例）。
+- **菜单**：顶层 dir **800**（支付中心）；分配：810 支付应用、811 支付订单、812 退款单、813 转账单、814 回调通知、820 渠道配置（平台）、821 钱包管理、822 充值套餐、823 我的充值（#136 补充分配的自助页）、830 示例订单、831 示例提现、840 收银台。按钮 = 菜单ID×10+n（n=1..5：create/update/delete/approve/export，按页面实际授予；query 为菜单权限码）。纪律照旧：开工前 grep `seed.go` 去重。
+- **权限码**：`pay:app:*`、`pay:channel:query|update`（平台）、`pay:order:query|export`、`pay:refund:query|export`、`pay:transfer:query|export`、`pay:notify-task:query`、`pay:wallet:query|export`、`pay:wallet-recharge-package:*`、`pay:wallet-recharge:query`、`pay:demo-order:create|query|refund`、`pay:demo-withdraw:create|query|approve|close`（refund/close 为页面操作按钮补种的独立码，决策记录见菜单种子注释）。内置普通角色（role id=2）**默认不授予**任何 pay 菜单（资金敏感，照 ERP 先例）。
 - **job 种子**：`payNotifyRetry`（启用，每分钟）、`payOrderTimeoutClose`（启用，每 5 分钟，扫 0 待支付且 `expire_time < now` 置 30 已关闭）。
 - **演示数据**：`make run-demo` 扩展 `pay_demo`（表哨兵幂等，行 ID 5001 起）：演示应用 1 个（app_key=demo，绑定 mock/wallet）、充值套餐 2 档、示例订单与示例提现若干、演示钱包（管理员本人）与流水；跑通下单→收银台→mock 回调→商户回调→退款全链路。
 - **安全审查（强制专项）**：渠道凭证脱敏不回显；公开回调端点（限速/验签/幂等/应答体不泄内部信息）；商户回调 HMAC 签名与 fail-closed；金额全部服务端定（收银台/submit 不收价格）；越权矩阵（跨租户/跨应用/非本人订单/mock 代付/回调伪造）；日志与 Excel 不落凭证；SQL 注入面（唯一入账入口的参数化 UPDATE）。

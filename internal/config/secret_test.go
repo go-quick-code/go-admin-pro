@@ -36,6 +36,8 @@ func TestLoadRejectsInsecureJWTSecretOutsideDev(t *testing.T) {
   timezone: Asia/Shanghai
 jwt:
   secret: "`+secret+`"
+pay:
+  notify-hmac-key: 140sec-jwt-test-strong-key
 `)
 			cfg, err := config.Load(path)
 			if err == nil {
@@ -56,6 +58,8 @@ func TestLoadRejectsInsecureJWTSecretFromEnvOutsideDev(t *testing.T) {
   timezone: Asia/Shanghai
 jwt:
   secret: custom-and-still-replaced
+pay:
+  notify-hmac-key: 140sec-jwt-test-strong-key
 `)
 	if _, err := config.Load(path); err == nil {
 		t.Fatal("环境变量覆盖为已知默认密钥时应启动失败")
@@ -69,6 +73,8 @@ func TestLoadAcceptsCustomJWTSecretOutsideDev(t *testing.T) {
   timezone: Asia/Shanghai
 jwt:
   secret: 6c1f3b2a-strong-unique-secret
+pay:
+  notify-hmac-key: 140sec-jwt-test-strong-key
 `)
 	cfg, err := config.Load(path)
 	if err != nil {

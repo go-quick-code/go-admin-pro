@@ -90,3 +90,26 @@ ip-location:
   # 文件不存在/加载失败只告警一次并退回空实现，不影响启动。
   # 可用环境变量 GAP_IP_LOCATION_XDB_PATH 覆盖。
   xdb-path: ""
+
+# 支付模块（issue #134，docs/pay-mvp-spec.md §4.5）：商户回调 HMAC 签名密钥。
+pay:
+  # 服务端回调密钥：payNotifyRetry job POST 商户回调地址时带
+  # Pay-Signature = HMAC-SHA256(rawBody, 本密钥)；demo 回调三端点
+  #（/pay/demo/notify/*）用同一密钥验签。留空时 job 拒发（fail-closed，
+  # 任务保持待重试并记日志）、demo 端点拒绝一切验签。
+  # 默认值仅 dev/test 便利，生产必须改成唯一强密钥（GAP_PAY_NOTIFY_HMAC_KEY
+  # 可覆盖）；非 dev/test 环境空值或该已知默认值会在启动校验时直接拒绝
+  # （validatePayNotifyHMACKey，与 jwt.secret 同型守卫，PR #140 安全审查 P3-3）。
+  notify-hmac-key: go-admin-pro-pay-notify-dev-key
+  # 充值挂单应用（issue #136，spec §4.7）：发起充值时同事务挂的 pay_order
+  # 归属应用——租户内按此 app_key 解析，缺失时发起充值 409 引导配置。
+  # 缺省 demo（演示数据每租户播种 app_key=demo 并绑定 mock/wallet），
+  # 部署可改为自有应用（GAP_PAY_RECHARGE_APP_KEY 可覆盖）。
+  recharge-app-key: demo
+  # 出站回调 SSRF 放行清单（PR #140 安全审查 P2）：回调 job 对解析到
+  # 环回/私网/链路本地（含云元数据 169.254.169.254）/未指定网段的
+  # notify_url 默认拒发（fail-closed：不消耗重试次数、推进一个间隔、记
+  # 日志），本清单内的主机名/IP/CIDR 放行。dev 缺省放行本机环回（run-demo
+  # 链路与集成测试的 httptest 商户端点）；**生产必须留空**——内网地址不应
+  # 出现在公开可配的回调地址白名单里。
+  notify-ssrf-private-allow: ["127.0.0.1", "::1"]

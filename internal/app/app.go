@@ -32,6 +32,10 @@ import (
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
+	payapi "github.com/go-quick-code/go-admin-pro/internal/module/pay/api"
+	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
+	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
+	paychannel "github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	systemapi "github.com/go-quick-code/go-admin-pro/internal/module/system/api"
 	systemrepo "github.com/go-quick-code/go-admin-pro/internal/module/system/repository"
 	systemservice "github.com/go-quick-code/go-admin-pro/internal/module/system/service"
@@ -70,6 +74,9 @@ type App struct {
 	// Create/CreateInTx——与生产装配的推送发布器是同一实例，保证「创建通知
 	// → 在线用户 1 秒内收到」走的是真实链路。
 	Notify *notifyservice.Service
+	// Pay 是 pay 模块的 Service（issue #131）：集成测试经该字段发放序列单号
+	//（pay_sequence 并发发放用例）；业务侧只经 HTTP 端点消费。
+	Pay *payservice.Service
 	// APILog 是访问日志异步写（issue #80）：集成测试在断言前经 FlushAPILogs
 	// 排干队列；Close 时随应用一起排干退出。
 	APILog *infraservice.APILogWriter
@@ -124,6 +131,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		// ERP 演示数据的业务时间走 app.timezone（ADR 0006）：seed 包不读配置，
 		// 同样显式注入业务时区，避免依赖进程本地时区。
 		seed.SetDemoLocation(cfg.Location())
+		// pay 演示应用回调地址指向本机 demo 回调端点（issue #139，spec §7 演示
+		// 数据）：seed 包不读配置，注入 http://127.0.0.1:port + api-prefix——
+		// 回调 job 对 demo 回调端点自调用（HMAC 同源密钥，商户回调链路真实走通）。
+		seed.SetDemoPayNotifyBase(fmt.Sprintf("http://127.0.0.1:%d%s", cfg.App.Port, cfg.App.APIPrefix))
 		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}
@@ -424,11 +435,112 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission, apiLogWriter)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI)
+	// pay 模块（issue #131，docs/pay-mvp-spec.md §2）：repo→service→api 顺序
+	// 装配；业务时区（ADR 0006）是单号日期键的唯一口径。渠道 SPI 注册表
+	//（#133 定形）：mock/wallet 两实现注册进 Registry，未注册渠道在绑定与
+	// submit 处 409「渠道未实现」；应用删除引用检查以 RefCheckerChain 注册
+	//（#133 订单引用 + #135 退款引用，#136 追加转账）。
+	payRepo := payrepo.New(db)
+	paySvc := payservice.New(payRepo)
+	paySvc.SetLocation(cfg.Location())
+	payRegistry, payRegistryErr := payChannelRegistry(db, paySvc, paySvc, paySvc)
+	if payRegistryErr != nil {
+		return nil, payRegistryErr
+	}
+	paySvc.SetRegistry(payRegistry)
+	// 应用删除引用检查链（spec §4.10）：订单引用（#133）+ 退款引用（#135）+
+	// 转账引用（#137）依次检查，首个命中即拒绝。示例订单/示例提现不另设检查器
+	//（决策见 payservice.DemoRefCheckerDecision：消费行对应用的引用全部经
+	// pay_order/pay_transfer 传递，先行命中）。
+	paySvc.SetAppRefChecker(payservice.RefCheckerChain{
+		payservice.OrderRefChecker{Repo: payRepo},
+		payservice.RefundRefChecker{Repo: payRepo},
+		payservice.TransferRefChecker{Repo: payRepo},
+	})
+	// 回调链路装配（issue #134，spec §4.5）：HMAC 密钥（pay.notify-hmac-key，
+	// 空值 job 拒发 fail-closed）与启用租户清单（job 跨租户逐租户，照公海
+	// 回收模式——system Service 直接满足 payservice.TenantLister 窄接口）。
+	paySvc.SetNotifyHMACKey(cfg.Pay.NotifyHMACKey)
+	// 出站回调 SSRF 放行清单（PR #140 安全审查 P2）：dev 缺省放行本机环回
+	// （configs pay.notify-ssrf-private-allow），生产留空即全拦。
+	paySvc.SetNotifySSRFPrivateAllow(cfg.Pay.NotifySSRFPrivateAllow)
+	paySvc.SetTenantLister(sysSvc)
+	// 充值挂单应用（issue #136，spec §4.7）：发起充值同事务挂的 pay_order
+	// 归属应用，按 pay.recharge-app-key 解析（缺省 demo，见 service 层决策）。
+	paySvc.SetRechargeAppKey(cfg.Pay.RechargeAppKey)
+	// 回调报文详情：type=1 支付 / type=2 退款（#135）/ type=3 转账（#137）
+	// 均在 service.New 内注册。支付成功业务联动：充值入账（#136，service.New
+	// 内注册于 OrderSuccessHandler 扩展点）；后续票经 SetOrderSuccessHandler
+	// 追加。demo 状态联动（#137，spec §4.5/§4.8）：demo 回调三端点验签后经
+	// HandleDemoNotify 回写 pay_demo_order/pay_demo_withdraw 状态（严格
+	// kind↔type 校验、DataID 定位消费行派生租户、非 demo 行幂等应答）。
+	paySvc.SetDemoNotifyHandler(paySvc.HandleDemoNotify)
+	payAPI := payapi.New(paySvc, sysAPI.RequirePermission, cfg.Location())
+
+	// 商户回调重试任务（issue #134，spec §4.5/§7）：系统级 handler（跨租户
+	// 逐租户，照公海回收模式），infra_job 种子默认行每分钟一次。扫描到期任务
+	//（status IN (0,21,22) 且 next_notify_time 到期）POST 商户回调地址，
+	// 报文带 Pay-Signature（HMAC-SHA256(rawBody, pay.notify-hmac-key)）；
+	// 条件更新认领防重发（同任务双触发只执行一次）；密钥缺失拒发（fail-closed）。
+	scheduler.RegisterSystem(payservice.NotifyRetryJobHandlerName, func(ctx context.Context, param string) error {
+		result, err := paySvc.RunNotifyRetry(ctx)
+		if err != nil {
+			return err
+		}
+		slog.Info("pay notify retry job finished",
+			"tenants", result.Tenants, "executed", result.Executed, "success", result.Success, "failClosed", result.FailClosed)
+		return nil
+	})
+
+	// 订单超时关闭任务（issue #134，spec §7）：系统级 handler（跨租户迭代），
+	// infra_job 种子默认行每 5 分钟一次。扫描过期待支付订单（status=0 且
+	// expire_time < now）条件更新置 30 已关闭；已支付/已关闭不受影响。
+	scheduler.RegisterSystem(payservice.OrderTimeoutCloseJobHandlerName, func(ctx context.Context, param string) error {
+		result, err := paySvc.RunOrderTimeoutClose(ctx)
+		if err != nil {
+			return err
+		}
+		slog.Info("pay order timeout close job finished",
+			"tenants", result.Tenants, "closed", result.Closed)
+		return nil
+	})
+
+	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI, payAPI)
 
 	scheduler.Start(context.Background())
 
-	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, APILog: apiLogWriter}, nil
+	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, Pay: paySvc, APILog: apiLogWriter}, nil
+}
+
+// payChannelRegistry 装配渠道 SPI 注册表（issue #133 支付 / #135 退款 /
+// #137 转账，docs/pay-mvp-spec.md §4.1）：v1 注册 mock/wallet 两实现；渠道
+// config 取 pay_channel 种子行原文（空对象 {}，由渠道实现自行反序列化校验）。
+// 注册表是「渠道未实现」的唯一判定源：未注册渠道在应用绑定与 submit 处 409
+// （service 层 Known 检查）。wallet 渠道的扣减/回加/转账入账后端均为 pay
+// service 层（同一实例，事务经 payrepo.WithTx 传递）。补渠道实现不改 SPI：
+// 实现 Client 后在此 Register 即可。
+func payChannelRegistry(db *gorm.DB, payer paychannel.WalletPayer, refunder paychannel.WalletRefunder, transferer paychannel.WalletTransferer) (*paychannel.Registry, error) {
+	rows, err := payrepo.New(db).ListChannelsByCodes(
+		context.Background(), []string{paychannel.CodeMock, paychannel.CodeWallet})
+	if err != nil {
+		return nil, fmt.Errorf("load pay channel configs: %w", err)
+	}
+	configByCode := make(map[string]string, len(rows))
+	for _, row := range rows {
+		configByCode[row.Code] = row.Config
+	}
+	mockClient, err := paychannel.NewMockClient(configByCode[paychannel.CodeMock])
+	if err != nil {
+		return nil, fmt.Errorf("init mock pay client: %w", err)
+	}
+	walletClient, err := paychannel.NewWalletClient(configByCode[paychannel.CodeWallet], payer, refunder, transferer)
+	if err != nil {
+		return nil, fmt.Errorf("init wallet pay client: %w", err)
+	}
+	registry := paychannel.NewRegistry()
+	registry.Register(mockClient)
+	registry.Register(walletClient)
+	return registry, nil
 }
 
 // Close 释放资源。

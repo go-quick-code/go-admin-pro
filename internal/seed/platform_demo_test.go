@@ -9,6 +9,7 @@ import (
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
+	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -46,6 +47,7 @@ func TestSeedPlatformDemoUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
 		&msgmodel.Channel{}, &msgmodel.Template{}, &msgmodel.Log{}, &sysmodel.Area{},
+		&paymodel.Channel{},
 		&sysmodel.SocialClient{}, &sysmodel.SensitiveWord{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},

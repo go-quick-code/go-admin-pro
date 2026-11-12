@@ -186,6 +186,49 @@ var TenantTables = []string{
 	"erp_stock_move_item",
 	"erp_stock_check",
 	"erp_stock_check_item",
+
+	// 支付应用与渠道域（issue #131，迁移 00035，docs/pay-mvp-spec.md §3.1/§7）：
+	// 应用/绑定/序列三表全量租户隔离（跨租户业务 ID 一律 404）；绑定表的
+	// tenant_id 入唯一键（同构 crm_opportunity_product）。pay_channel 是平台级
+	// 表（凭证/启停全平台共享），登记进 PlatformTables，刻意不在这里。
+	"pay_app",
+	"pay_app_channel",
+	"pay_sequence",
+
+	// 钱包域（issue #132，迁移 00036，docs/pay-mvp-spec.md §3.4/§4.3）：余额账
+	// 与流水账全量租户隔离（跨租户业务 ID 一律 404）；UNIQUE(tenant_id, user_id,
+	// user_type) 兜底钱包懒创建并发。余额变动只走唯一入账入口（入账原语走
+	// 显式租户参数的裸 SQL，同 erp_stock 口径）。
+	"pay_wallet",
+	"pay_wallet_transaction",
+
+	// 交易与回调域（issue #133，迁移 00037，docs/pay-mvp-spec.md §3.2/§3.3）：
+	// 订单/extension/退款/转账/回调任务/回调日志六表全量租户隔离（跨租户业务
+	// ID 一律 404）。幂等键入唯一键：订单 (tenant_id, app_id, merchant_order_id)、
+	// 退款 (tenant_id, app_id, merchant_refund_id)、转账 (tenant_id, app_id,
+	// merchant_transfer_id)。pay_refund/pay_transfer/pay_notify_log 先建后用
+	//（#134/#135/#136 只补代码不补表）。
+	"pay_order",
+	"pay_order_extension",
+	"pay_refund",
+	"pay_transfer",
+	"pay_notify_task",
+	"pay_notify_log",
+
+	// 充值与套餐（issue #136，迁移 00038，docs/pay-mvp-spec.md §3.4/§4.7）：
+	// 充值单（挂支付订单、套餐快照）与充值套餐全量租户隔离。充值支付认领/
+	// 退款列回写走显式租户参数的裸 SQL（同 pay_order 认领口径）；套餐被充值
+	// 单引用禁删（引用计数不带 deleted_at 过滤——充值单不可删，引用永久）。
+	"pay_wallet_recharge",
+	"pay_wallet_recharge_package",
+
+	// 示例业务（issue #137，迁移 00039，docs/pay-mvp-spec.md §3.5/§4.8）：
+	// 示例订单与示例提现全量租户隔离（跨租户业务 ID 一律 404）。两表是 pay
+	// 模块内唯一消费方（ADR 0021）的消费行：状态联动由 #134 商户回调链路
+	//（demo 回调端点 → SetDemoNotifyHandler）回写，认领走显式租户参数的裸
+	// SQL（回调端点是公开路由，租户经关联单据派生后显式传入）。
+	"pay_demo_order",
+	"pay_demo_withdraw",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。
@@ -201,4 +244,5 @@ var PlatformTables = map[string]string{
 	"message_template":      "平台级消息模板",
 	"system_social_client":  "平台级社交登录应用配置",
 	"system_area":           "平台级行政区划参考数据",
+	"pay_channel":           "平台级支付渠道凭证配置（14 行种子常驻禁删，租户级应用按渠道码引用；ADR 0021）",
 }

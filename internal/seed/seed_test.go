@@ -8,6 +8,7 @@ import (
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
+	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -40,6 +41,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&sysmodel.TenantPackage{},
 		&inframodel.Config{}, &inframodel.Job{},
 		&msgmodel.Channel{}, &msgmodel.Template{}, &sysmodel.Area{},
+		&paymodel.Channel{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -65,6 +67,27 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	//   - 考勤管理面 533/5331/5332 不再授予（HR 视角由 seed-demo 的 hr 角色承载）。
 	assertRoleMenus(t, db, 2, []int64{512, 5121, 5297, 5236, 5123}, true, "普通角色")
 	assertRoleMenus(t, db, 2, []int64{533, 5331, 5332}, false, "普通角色")
+	// 支付中心 800 段（issue #131/#132/#133/#134/#135/#136/#137 与 #138，spec §7）：
+	// 资金敏感，普通角色默认不授予任何 pay 菜单/按钮（811 订单/812 退款单/
+	// 813 转账单/814 回调/821 钱包的导出按钮 8115/8125/8135/8215 为各自唯一
+	// 按钮行、822 充值套餐按钮 8221–8223 与充值单导出 8225、830 示例订单按钮
+	// 8301–8302、831 示例提现按钮 8311–8313、823 我的充值与 840 收银台无权限码，
+	// 见 seed/pay.go 注释）。
+	assertRoleMenus(t, db, 2, []int64{
+		800, 810, 811, 812, 813, 814, 820, 821, 822, 823, 830, 831, 840,
+		8101, 8102, 8103, 8115, 8125, 8135, 8201, 8215, 8221, 8222, 8223, 8225,
+		8301, 8302, 8311, 8312, 8313,
+	}, false, "普通角色")
+	// 菜单 800 段存在性（issue #139，spec §8.2 迁移/种子行「菜单 800 段 seed
+	// 幂等」前置：未授予断言只有在菜单行真实存在时才有意义）+ 超管全量授予。
+	// 13 个页面/目录 + 17 个按钮行 = 30 行，清单与 payMenus() 逐一对应。
+	payMenuIDs := []int64{
+		800, 810, 811, 812, 813, 814, 820, 821, 822, 823, 830, 831, 840,
+		8101, 8102, 8103, 8115, 8125, 8135, 8201, 8215, 8221, 8222, 8223, 8225,
+		8301, 8302, 8311, 8312, 8313,
+	}
+	assertPayMenusExist(t, db, payMenuIDs)
+	menuCountBefore := countMenus(t, db)
 	// ERP 700 段同级菜单 sort 唯一（终审 P1：历史 725/731/741 等 11/12/13 重复
 	// 会让侧栏按 sort ASC,id ASC 交错；按 spec §1 分组序 1–22 连续编号）。
 	assertERPMenuSortUnique(t, db)
@@ -79,24 +102,32 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐")
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
-	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）。
-	assertCount(t, db, &inframodel.Job{}, 5, "定时任务")
+	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）+ 商户回调重试/
+	// 订单超时关闭（issue #134，spec §7 job 种子两行）。
+	assertCount(t, db, &inframodel.Job{}, 7, "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
 	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
 	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板")
+	// 支付渠道种子（issue #131，spec §3.1/§7）：14 渠道码常量逐一预插，
+	// mock/wallet 启用、其余停用。
+	assertCount(t, db, &paymodel.Channel{}, 14, "支付渠道")
+	assertPayChannelSeed(t, db)
 	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
 	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
 	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
 	// 定时任务状态（issue #63 收口 GORM 零值 + default:1 导致「默认启用」被写成暂停）：
-	// 演示任务与公海回收默认暂停，考勤日结果与会议提醒默认启用。
+	// 演示任务与公海回收默认暂停，考勤日结果与会议提醒默认启用；
+	// 商户回调重试与订单超时关闭默认启用（issue #134，spec §7）。
 	assertJobStatus(t, db, "demoJob", inframodel.JobStatusPaused)
 	assertJobStatus(t, db, "recyclePoolCustomers", inframodel.JobStatusPaused)
 	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
 	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "payNotifyRetry", inframodel.JobStatusRunning)
+	assertJobStatus(t, db, "payOrderTimeoutClose", inframodel.JobStatusRunning)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -121,6 +152,12 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	if err := seed.Run(db, false); err != nil {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
+	// 菜单幂等（含 800 段，issue #139）：seedMenus 按 ID 差集补插，重复执行
+	// 不新增行；800 段行不消失（普通角色未授予断言持续有效）。
+	if got := countMenus(t, db); got != menuCountBefore {
+		t.Fatalf("重复 seed 不应新增菜单：before %d after %d", menuCountBefore, got)
+	}
+	assertPayMenusExist(t, db, payMenuIDs)
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义（幂等）")
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐（幂等）")
@@ -133,6 +170,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")
 	assertCount(t, db, &msgmodel.Template{}, 2, "消息模板（幂等）")
+	assertCount(t, db, &paymodel.Channel{}, 14, "支付渠道（幂等）")
 	// 行政区划（issue #82，spec §4.8.2）：省市两级全量 377 行（34 省 + 343 市）。
 	assertCount(t, db, &sysmodel.Area{}, 377, "地区（省市两级）")
 }
@@ -219,6 +257,41 @@ func assertCount(t *testing.T, db *gorm.DB, model any, want int64, label string)
 	}
 }
 
+// assertPayChannelSeed 断言支付渠道种子的启停分布（issue #131，spec §3.1）：
+// mock/wallet 启用、其余停用且 config={}。
+func assertPayChannelSeed(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var channels []paymodel.Channel
+	if err := tenant.Skip(db).Order("id ASC").Find(&channels).Error; err != nil {
+		t.Fatalf("读取支付渠道种子: %v", err)
+	}
+	byCode := make(map[string]paymodel.Channel, len(channels))
+	for _, row := range channels {
+		byCode[row.Code] = row
+	}
+	for _, code := range []string{"mock", "wallet"} {
+		row, ok := byCode[code]
+		if !ok {
+			t.Fatalf("支付渠道种子缺少 %s", code)
+		}
+		if row.Status != paymodel.StatusEnable {
+			t.Fatalf("支付渠道 %s 应启用，实际 %d", code, row.Status)
+		}
+	}
+	for _, code := range []string{"wx_pub", "alipay_pc", "alipay_lite"} {
+		row, ok := byCode[code]
+		if !ok {
+			t.Fatalf("支付渠道种子缺少 %s", code)
+		}
+		if row.Status != paymodel.StatusDisable {
+			t.Fatalf("支付渠道 %s 应停用，实际 %d", code, row.Status)
+		}
+		if row.Config != "{}" {
+			t.Fatalf("支付渠道 %s 种子 config 应为 {}，实际 %s", code, row.Config)
+		}
+	}
+}
+
 // assertRoleMenus 断言角色对指定菜单的授予/未授予状态（issue #64 review：
 // 普通角色权限收敛的回归守卫）。
 func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, want bool, label string) {
@@ -235,6 +308,32 @@ func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, w
 			t.Fatalf("%s菜单 %d 授予状态不符：期望 %v，实际 %v", label, menuID, want, got)
 		}
 	}
+}
+
+// assertPayMenusExist 断言菜单行真实存在（issue #139，spec §8.2「菜单 800 段
+// seed 幂等」）：「未授予」断言只有在菜单行在场时才有意义。
+func assertPayMenusExist(t *testing.T, db *gorm.DB, menuIDs []int64) {
+	t.Helper()
+	for _, menuID := range menuIDs {
+		var total int64
+		if err := tenant.Skip(db).Model(&sysmodel.Menu{}).
+			Where("id = ?", menuID).Count(&total).Error; err != nil {
+			t.Fatalf("统计菜单 %d: %v", menuID, err)
+		}
+		if total != 1 {
+			t.Fatalf("pay 菜单 %d 应存在且唯一，实际 %d 行", menuID, total)
+		}
+	}
+}
+
+// countMenus 统计菜单总行数（菜单幂等断言用）。
+func countMenus(t *testing.T, db *gorm.DB) int64 {
+	t.Helper()
+	var total int64
+	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).Count(&total).Error; err != nil {
+		t.Fatalf("统计菜单行数: %v", err)
+	}
+	return total
 }
 
 // assertERPMenuSortUnique 断言 ERP 顶层目录 700 下所有直接子菜单的 sort 唯一，
