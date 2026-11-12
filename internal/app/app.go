@@ -131,6 +131,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		// ERP 演示数据的业务时间走 app.timezone（ADR 0006）：seed 包不读配置，
 		// 同样显式注入业务时区，避免依赖进程本地时区。
 		seed.SetDemoLocation(cfg.Location())
+		// pay 演示应用回调地址指向本机 demo 回调端点（issue #139，spec §7 演示
+		// 数据）：seed 包不读配置，注入 http://127.0.0.1:port + api-prefix——
+		// 回调 job 对 demo 回调端点自调用（HMAC 同源密钥，商户回调链路真实走通）。
+		seed.SetDemoPayNotifyBase(fmt.Sprintf("http://127.0.0.1:%d%s", cfg.App.Port, cfg.App.APIPrefix))
 		if err := seed.Run(db, cfg.SeedDemoEnabled()); err != nil {
 			return nil, fmt.Errorf("seed: %w", err)
 		}

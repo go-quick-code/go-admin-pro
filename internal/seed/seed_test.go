@@ -78,6 +78,16 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		8101, 8102, 8103, 8115, 8125, 8135, 8201, 8215, 8221, 8222, 8223, 8225,
 		8301, 8302, 8311, 8312, 8313,
 	}, false, "普通角色")
+	// 菜单 800 段存在性（issue #139，spec §8.2 迁移/种子行「菜单 800 段 seed
+	// 幂等」前置：未授予断言只有在菜单行真实存在时才有意义）+ 超管全量授予。
+	// 13 个页面/目录 + 17 个按钮行 = 30 行，清单与 payMenus() 逐一对应。
+	payMenuIDs := []int64{
+		800, 810, 811, 812, 813, 814, 820, 821, 822, 823, 830, 831, 840,
+		8101, 8102, 8103, 8115, 8125, 8135, 8201, 8215, 8221, 8222, 8223, 8225,
+		8301, 8302, 8311, 8312, 8313,
+	}
+	assertPayMenusExist(t, db, payMenuIDs)
+	menuCountBefore := countMenus(t, db)
 	// ERP 700 段同级菜单 sort 唯一（终审 P1：历史 725/731/741 等 11/12/13 重复
 	// 会让侧栏按 sort ASC,id ASC 交错；按 spec §1 分组序 1–22 连续编号）。
 	assertERPMenuSortUnique(t, db)
@@ -142,6 +152,12 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	if err := seed.Run(db, false); err != nil {
 		t.Fatalf("重复 seed 失败: %v", err)
 	}
+	// 菜单幂等（含 800 段，issue #139）：seedMenus 按 ID 差集补插，重复执行
+	// 不新增行；800 段行不消失（普通角色未授予断言持续有效）。
+	if got := countMenus(t, db); got != menuCountBefore {
+		t.Fatalf("重复 seed 不应新增菜单：before %d after %d", menuCountBefore, got)
+	}
+	assertPayMenusExist(t, db, payMenuIDs)
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义（幂等）")
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐（幂等）")
@@ -292,6 +308,32 @@ func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, w
 			t.Fatalf("%s菜单 %d 授予状态不符：期望 %v，实际 %v", label, menuID, want, got)
 		}
 	}
+}
+
+// assertPayMenusExist 断言菜单行真实存在（issue #139，spec §8.2「菜单 800 段
+// seed 幂等」）：「未授予」断言只有在菜单行在场时才有意义。
+func assertPayMenusExist(t *testing.T, db *gorm.DB, menuIDs []int64) {
+	t.Helper()
+	for _, menuID := range menuIDs {
+		var total int64
+		if err := tenant.Skip(db).Model(&sysmodel.Menu{}).
+			Where("id = ?", menuID).Count(&total).Error; err != nil {
+			t.Fatalf("统计菜单 %d: %v", menuID, err)
+		}
+		if total != 1 {
+			t.Fatalf("pay 菜单 %d 应存在且唯一，实际 %d 行", menuID, total)
+		}
+	}
+}
+
+// countMenus 统计菜单总行数（菜单幂等断言用）。
+func countMenus(t *testing.T, db *gorm.DB) int64 {
+	t.Helper()
+	var total int64
+	if err := tenant.Skip(db).Model(&sysmodel.Menu{}).Count(&total).Error; err != nil {
+		t.Fatalf("统计菜单行数: %v", err)
+	}
+	return total
 }
 
 // assertERPMenuSortUnique 断言 ERP 顶层目录 700 下所有直接子菜单的 sort 唯一，
