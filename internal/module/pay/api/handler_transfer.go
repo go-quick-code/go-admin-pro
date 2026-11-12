@@ -12,7 +12,12 @@ import (
 //   - 管理端分页/详情挂 pay:transfer:query（交易单据 append-only 无写入端点
 //     之外的入口，spec §4.10；导出随 #138 export-excel 补 pay:transfer:export）。
 
-// CreateTransfer 发起转账（消费方服务端端点，登录）。
+// CreateTransfer 发起转账（消费方服务端端点，登录）。信任模型边界（PR #140
+// 安全审查 P3-1，记录式接受）：本端点与订单发起同型，是「消费方服务端 ↔
+// 支付服务端」的服务端到服务端契约（spec §4.8/§4.11），仅登录不设 pay 权限
+// 码；wallet 渠道入账目标钱包即消费方职责内的资金指令。任何非演示渠道注册
+// 前，消费方接入必须补独立权限码或应用级认证/签名（前置约束见
+// service/transfer.go 头注释信任模型边界段）。
 func (h *Handler) CreateTransfer(c *gin.Context) {
 	var req dto.TransferCreateReq
 	if !bindJSON(c, &req) {
