@@ -97,7 +97,9 @@ pay:
   # Pay-Signature = HMAC-SHA256(rawBody, 本密钥)；demo 回调三端点
   #（/pay/demo/notify/*）用同一密钥验签。留空时 job 拒发（fail-closed，
   # 任务保持待重试并记日志）、demo 端点拒绝一切验签。
-  # 默认值仅 dev/test 便利，生产必须改成唯一强密钥（GAP_PAY_NOTIFY_HMAC_KEY 可覆盖）。
+  # 默认值仅 dev/test 便利，生产必须改成唯一强密钥（GAP_PAY_NOTIFY_HMAC_KEY
+  # 可覆盖）；非 dev/test 环境空值或该已知默认值会在启动校验时直接拒绝
+  # （validatePayNotifyHMACKey，与 jwt.secret 同型守卫，PR #140 安全审查 P3-3）。
   notify-hmac-key: go-admin-pro-pay-notify-dev-key
   # 充值挂单应用（issue #136，spec §4.7）：发起充值时同事务挂的 pay_order
   # 归属应用——租户内按此 app_key 解析，缺失时发起充值 409 引导配置。
