@@ -64,10 +64,17 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	channelNotify.POST("/:channelCode", h.ChannelNotify)
 }
 
-// limitDemoIP 按客户端 IP 固定窗口限速（超限 429，照社交回调先例）。
+// limitDemoIP 按直连对端地址（c.RemoteIP()）固定窗口限速（超限 429，照社交
+// 回调先例）。限速键刻意不用 c.ClientIP()：仓库未配置 SetTrustedProxies 时
+// gin 默认信任任意来源，ClientIP() 会采信请求方可随意伪造的 X-Forwarded-For，
+// 每请求轮换 XFF 即可无限开新桶（PR #140 安全审查 P3-2）。
+//
+// 部署注意（已知权衡）：反代之后所有客户端共享直连对端（反代 IP）一个桶——
+// 对 demo/notify 这类公开演练端点可接受；全局代理信任拓扑（SetTrustedProxies
+// + 按跳数取真实来源）属部署级决策，不在本差异内收敛。
 func (h *Handler) limitDemoIP() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if h.demoLimiter != nil && !h.demoLimiter.Allow(c.ClientIP()) {
+		if h.demoLimiter != nil && !h.demoLimiter.Allow(c.RemoteIP()) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": http.StatusTooManyRequests, "msg": "请求过于频繁，请稍后重试"})
 			return
 		}

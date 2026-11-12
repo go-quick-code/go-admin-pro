@@ -27,9 +27,19 @@ import (
 // 语义），返回 HTTP 状态与响应体原文。
 func postChannelNotify(t *testing.T, env *testutil.IntegrationEnv, channelCode, body string) (int, string) {
 	t.Helper()
+	return postChannelNotifyHeader(t, env, channelCode, body, "")
+}
+
+// postChannelNotifyHeader 带 X-Forwarded-For 的渠道回调请求（伪造 XFF 的
+// 限速键轮换攻击用，PR #140 安全审查 P3-2）。
+func postChannelNotifyHeader(t *testing.T, env *testutil.IntegrationEnv, channelCode, body, xff string) (int, string) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, env.APIPrefixURL("/pay/channel-notify/"+channelCode), strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("构造渠道回调请求: %v", err)
+	}
+	if xff != "" {
+		req.Header.Set("X-Forwarded-For", xff)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -225,5 +235,24 @@ func TestIntegrationPayChannelNotifyRateLimit(t *testing.T) {
 	}
 	if !saw429 {
 		t.Fatal("窗口内第 61 次起应触发 429 限速")
+	}
+}
+
+// TestIntegrationPayChannelNotifyRateLimitForgedXFF 限速键不可被伪造
+// X-Forwarded-For 轮换（PR #140 安全审查 P3-2）：限速键取直连对端地址
+// （c.RemoteIP()），每请求轮换伪造 XFF 不应获得新限速桶——61 次内必现 429。
+func TestIntegrationPayChannelNotifyRateLimitForgedXFF(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	var saw429 bool
+	for i := 1; i <= 61; i++ {
+		xff := fmt.Sprintf("203.0.113.%d", i) // TEST-NET-3 伪造源
+		status, _ := postChannelNotifyHeader(t, env, "mock", `{"outTradeNo":"ZF-XFF-1","result":"success"}`, xff)
+		if status == http.StatusTooManyRequests {
+			saw429 = true
+			break
+		}
+	}
+	if !saw429 {
+		t.Fatal("轮换伪造 X-Forwarded-For 不应获得新限速桶：窗口内第 61 次起应 429")
 	}
 }
