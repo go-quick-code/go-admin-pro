@@ -221,6 +221,14 @@ var TenantTables = []string{
 	// 单引用禁删（引用计数不带 deleted_at 过滤——充值单不可删，引用永久）。
 	"pay_wallet_recharge",
 	"pay_wallet_recharge_package",
+
+	// 示例业务（issue #137，迁移 00039，docs/pay-mvp-spec.md §3.5/§4.8）：
+	// 示例订单与示例提现全量租户隔离（跨租户业务 ID 一律 404）。两表是 pay
+	// 模块内唯一消费方（ADR 0021）的消费行：状态联动由 #134 商户回调链路
+	//（demo 回调端点 → SetDemoNotifyHandler）回写，认领走显式租户参数的裸
+	// SQL（回调端点是公开路由，租户经关联单据派生后显式传入）。
+	"pay_demo_order",
+	"pay_demo_withdraw",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

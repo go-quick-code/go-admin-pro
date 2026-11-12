@@ -8,14 +8,16 @@ import (
 	"strings"
 )
 
-// wallet.go 是 wallet 渠道实现（issue #133 支付 / #135 退款，
-// docs/pay-mvp-spec.md §4.1/§4.2/§4.3/§4.4）：余额扣减渠道——Order 在发起支付
-// 的同一事务内经唯一入账入口扣减下单用户余额（biz=3 负价入账），成功即支付
-// 成功（OrderResp.Status=10，同步完成，无异步回调）。余额不足返回 409 语义
-// 错误，事务整体回滚——无部分扣减（spec §4.2，集成测试断言流水不变）。
+// wallet.go 是 wallet 渠道实现（issue #133 支付 / #135 退款 / #137 转账，
+// docs/pay-mvp-spec.md §4.1/§4.2/§4.3/§4.4/§4.8）：余额扣减渠道——Order 在
+// 发起支付的同一事务内经唯一入账入口扣减下单用户余额（biz=3 负价入账），
+// 成功即支付成功（OrderResp.Status=10，同步完成，无异步回调）。余额不足返回
+// 409 语义错误，事务整体回滚——无部分扣减（spec §4.2，集成测试断言流水不变）。
 // 退款（#135）：Refund 在发起退款的同一事务内回加原下单用户余额（biz=4 正价
 // 入账），成功即退款成功——与支付同锁路径（唯一入账入口行锁），并发支付
-// 扣减串行化（spec §4.4 回加并发安全）。
+// 扣减串行化（spec §4.4 回加并发安全）。转账（#137）：Transfer 在发起转账的
+// 同一事务内入账目标用户钱包（biz=6 正价入账，目标钱包懒创建），成功即转账
+// 成功，回执取目标钱包流水号。
 //
 // 依赖倒置：channel 包不 import service，扣减/回加后端由装配处注入
 //（service 层实现 WalletPayer/WalletRefunder，从 ctx 取 payrepo.WithTx 绑定
@@ -62,15 +64,29 @@ type WalletRefunder interface {
 	RefundByWallet(ctx context.Context, req RefundReq) error
 }
 
+// WalletTransferer 是 wallet 渠道的转账入账后端（issue #137，spec §4.8，由
+// pay service 层实现、装配期注入）：在 ctx 绑定的当前事务内经唯一入账入口
+// 入账 req.UserAccount 指向的目标用户钱包（biz=6 转账，正价入账，
+// biz_id=req.BizID=pay_transfer.id；目标钱包懒创建，spec §4.3）。返回渠道
+// 转账回执（目标钱包流水 LS 单号——资金在本租户账本内移动，流水即回执）。
+// 失败按入账函数语义返回（调用方整体回滚，无部分入账）；实现方不做转账单
+// 状态变更（认领/建任务由发起方在入账成功后统一走转账成功入账函数）。
+type WalletTransferer interface {
+	TransferByWallet(ctx context.Context, req TransferReq) (string, error)
+}
+
 // WalletClient 是钱包渠道（注册表主键 CodeWallet）。
 type WalletClient struct {
-	payer    WalletPayer
-	refunder WalletRefunder
+	payer      WalletPayer
+	refunder   WalletRefunder
+	transferer WalletTransferer
 }
 
 // NewWalletClient 创建 wallet 渠道实现；configJSON 为 pay_channel.config 原文，
-// payer 为余额扣减后端、refunder 为退款回加后端（均为 service 层）。
-func NewWalletClient(configJSON string, payer WalletPayer, refunder WalletRefunder) (*WalletClient, error) {
+// payer 为余额扣减后端、refunder 为退款回加后端、transferer 为转账入账后端
+// （均为 service 层；transferer 兼容旧调用方缺省？不——转账后端必填，三后端
+// 同一 service 实例）。
+func NewWalletClient(configJSON string, payer WalletPayer, refunder WalletRefunder, transferer WalletTransferer) (*WalletClient, error) {
 	if _, err := parseWalletConfig(configJSON); err != nil {
 		return nil, err
 	}
@@ -80,7 +96,10 @@ func NewWalletClient(configJSON string, payer WalletPayer, refunder WalletRefund
 	if refunder == nil {
 		return nil, errors.New("wallet 渠道缺少退款回加后端")
 	}
-	return &WalletClient{payer: payer, refunder: refunder}, nil
+	if transferer == nil {
+		return nil, errors.New("wallet 渠道缺少转账入账后端")
+	}
+	return &WalletClient{payer: payer, refunder: refunder, transferer: transferer}, nil
 }
 
 // Code 渠道码。
@@ -114,4 +133,17 @@ func (c *WalletClient) Refund(ctx context.Context, req RefundReq) (RefundResp, e
 // 不存在退款回调解析场景。
 func (c *WalletClient) ParseRefundNotify(ctx context.Context, req NotifyReq) (RefundNotify, error) {
 	return RefundNotify{}, errors.New("wallet 渠道为同步退款，无异步回调")
+}
+
+// Transfer 发起转账（issue #137，spec §4.8）：同事务经唯一入账入口入账
+// req.UserAccount 指向的目标用户钱包（biz=6 转账，正价入账，biz_id=转账单
+// ID；目标钱包懒创建，spec §4.3）。成功即转账成功（同步完成，无异步回调）；
+// 回执取目标钱包流水 LS 单号。金额一律转账单快照，渠道请求不含任何客户端
+// 输入金额。
+func (c *WalletClient) Transfer(ctx context.Context, req TransferReq) (TransferResp, error) {
+	receipt, err := c.transferer.TransferByWallet(ctx, req)
+	if err != nil {
+		return TransferResp{}, err
+	}
+	return TransferResp{Status: TransferStatusSuccess, ChannelTransferNo: receipt}, nil
 }

@@ -104,14 +104,16 @@ func (s *Service) channelRegistry() *channel.Registry {
 	return s.registry
 }
 
-// New 创建 pay Service：内置 type=1（支付）与 type=2（退款，#135）的回调
-// 报文详情 enricher；充值支付成功联动（#136，spec §4.7 经 OrderSuccessHandler
-// 扩展点注册）；#136 转账经 SetNotifyPayloadEnricher 追加各自的详情。
+// New 创建 pay Service：内置 type=1（支付）/ type=2（退款，#135）/ type=3
+// （转账，#137）的回调报文详情 enricher；充值支付成功联动（#136，spec §4.7
+// 经 OrderSuccessHandler 扩展点注册）；后续票经 SetNotifyPayloadEnricher /
+// SetOrderSuccessHandler 追加各自的详情与联动。
 func New(repo *payrepo.Repository) *Service {
 	s := &Service{repo: repo, notifyHTTPClient: newNotifyHTTP()}
 	s.payloadEnrichers = map[int8]NotifyPayloadEnricher{
-		paymodel.NotifyTypePayment: s.enrichPaymentPayload,
-		paymodel.NotifyTypeRefund:  s.enrichRefundPayload,
+		paymodel.NotifyTypePayment:  s.enrichPaymentPayload,
+		paymodel.NotifyTypeRefund:   s.enrichRefundPayload,
+		paymodel.NotifyTypeTransfer: s.enrichTransferPayload,
 	}
 	s.orderSuccessHandlers = []OrderSuccessHandler{s.creditRechargeOnOrderSuccess}
 	return s

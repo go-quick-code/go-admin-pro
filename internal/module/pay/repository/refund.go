@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 )
 
 // refund.go 是退款单的数据访问原语与查询（issue #135，
@@ -37,6 +38,16 @@ type RefundFilter struct {
 func (r *Repository) FindRefundByID(ctx context.Context, id int64) (*model.Refund, error) {
 	var row model.Refund
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &row, nil
+}
+
+// FindRefundByIDGlobal 按 ID 查退款单（显式 tenant.Skip）：demo 退款回调联动的
+// 租户派生用（公开端点上下文无租户；DataID 全局唯一，签名校验先于本查询）。
+func (r *Repository) FindRefundByIDGlobal(ctx context.Context, id int64) (*model.Refund, error) {
+	var row model.Refund
+	if err := tenant.Skip(r.db.WithContext(ctx)).First(&row, id).Error; err != nil {
 		return nil, notFound(err)
 	}
 	return &row, nil

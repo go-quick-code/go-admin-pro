@@ -137,6 +137,7 @@ type NotifyPayload struct {
 	DataID             int64  `json:"dataId"` // 对应单据 ID（type=1 为 pay_order.id）
 	OrderNo            string `json:"orderNo,omitempty"`
 	ChannelOrderNo     string `json:"channelOrderNo,omitempty"`
+	Subject            string `json:"subject,omitempty"`     // 单据标题（#137 type=3 转账 enricher）
 	Price              string `json:"price,omitempty"`       // decimal 字符串（不经 float）
 	SuccessTime        string `json:"successTime,omitempty"` // RFC3339
 }
@@ -504,7 +505,7 @@ func (s *Service) RunOrderTimeoutClose(ctx context.Context) (OrderTimeoutCloseRe
 // ProcessDemoNotify 是 demo 回调三端点（order/refund/transfer）的公共链路：
 // 验签（Pay-Signature = HMAC-SHA256(rawBody, 服务端回调密钥)，伪造/缺失/密钥
 // 未配置一律 ErrDemoSignatureInvalid）→ 解析报文 → 业务联动扩展点
-// （#137 注册；未注册时验签通过即成功）。
+// （#137 注册真实实现 HandleDemoNotify）。
 //
 // 返回 ErrDemoSignatureInvalid / ErrDemoPayloadInvalid 时 HTTP 层回 4xx；
 // 联动扩展点的错误原样返回（HTTP 层回 200 + 非 0 业务码信封——回调任务转
@@ -522,9 +523,6 @@ func (s *Service) ProcessDemoNotify(ctx context.Context, kind, signature string,
 			return &payload, err
 		}
 	}
-	// TODO(#137): demo 状态联动 —— internal/app 装配处 SetDemoNotifyHandler
-	// 注册 pay_demo_order/pay_demo_withdraw 状态回写（按 payload.MerchantOrderID
-	// /MerchantRefundID/MerchantTransferID 定位）；未注册前验签通过即回 code=0。
 	return &payload, nil
 }
 
