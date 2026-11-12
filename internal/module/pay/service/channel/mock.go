@@ -110,13 +110,14 @@ func (c *MockClient) ParseOrderNotify(ctx context.Context, req NotifyReq) (Order
 	switch strings.TrimSpace(body.Result) {
 	case "success":
 		return OrderNotify{
+			OutTradeNo:     outTradeNo, // 回调定位键：支付发起 extension no（ZF 单号-发起序）
 			Success:        true,
 			ChannelOrderNo: "MOCK-" + outTradeNo,
 			Price:          money.Money{}, // mock 不携带对账金额（金额以订单为准）
 			Raw:            string(req.Body),
 		}, nil
 	case "failure":
-		return OrderNotify{Success: false, ChannelOrderNo: "MOCK-" + outTradeNo, Raw: string(req.Body)}, nil
+		return OrderNotify{OutTradeNo: outTradeNo, Success: false, ChannelOrderNo: "MOCK-" + outTradeNo, Raw: string(req.Body)}, nil
 	default:
 		return OrderNotify{}, xerr.BadRequest(fmt.Sprintf("mock 回调 result 不合法：%q（期望 success/failure）", body.Result))
 	}

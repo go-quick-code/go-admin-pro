@@ -44,10 +44,10 @@ func New(cfg *config.Config, sysAPI *systemapi.Handler, infraAPI *infraapi.Handl
 	//（GET /notify/push/sse|ws）。票据即凭证；浏览器 EventSource 不能带
 	// 请求头，公开路由是设计使然（ADR 0013），推送关闭时注册为 no-op。
 	notifyAPI.RegisterPublic(api)
-	// pay（issue #134，spec §4.6 demo 回调）：demo 商户回调三端点公开可达
+	// pay（issue #134 demo 回调；PR #140 补渠道回调端点，spec §4.6）：demo
+	// 商户回调三端点与渠道支付回调 /pay/channel-notify/:channelCode 公开可达
 	//（无登录、挂 IP 限速照社交回调先例、不记访问日志——公开组在 protected
-	// 组外，结构使然）。渠道回调端点 /pay/channel-notify/:channelCode 随
-	// 真实渠道实现工单追加注册（SPI 已定形，暂无 Client）。
+	// 组外，结构使然）。退款/转账渠道回调随真实渠道实现工单追加（§10）。
 	payAPI.RegisterPublic(api)
 
 	// 换票端点（POST /notify/push/ticket）：只需登录，不挂操作日志——

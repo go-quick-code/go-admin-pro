@@ -221,7 +221,9 @@ func (s *Service) CreateRefund(ctx context.Context, req *dto.RefundCreateReq, us
 			return tx.UpdateRefundResult(ctx, tenantID, out.ID, model.RefundStatusFail, "MOCK_FAIL", "模拟退款失败", resp.Raw)
 		default:
 			// 处理中（异步渠道预留）：退款单停 0 待处理，等渠道回调后走
-			// refundSuccessTx（channel-notify 端点随真实渠道实现承接）。
+			// refundSuccessTx。渠道回调端点 /pay/channel-notify/:channelCode
+			// 已实现但仅承接支付回调（spec §4.6）；退款渠道回调随真实渠道
+			// 实现另立工单承接（SPI 的 ParseRefundNotify 成对动作，§10）。
 			return nil
 		}
 		return nil
