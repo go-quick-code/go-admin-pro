@@ -7,6 +7,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
 )
 
@@ -113,6 +114,20 @@ func (r *Repository) FindPendingExtensionByID(ctx context.Context, orderID int64
 		return nil, notFound(err)
 	}
 	return &row, nil
+}
+
+// FindExtensionsByNoGlobal 按发起单号 + 渠道码全局查支付发起（公开渠道回调
+// /pay/channel-notify/:channelCode 的定位原语：回调报文不带租户字段，经
+// tenant.Skip 反查后从行派生租户执行，同 FindDemoOrderByPayOrderIDGlobal
+// 先例）。no 在 (tenant_id, no) 唯一键下跨租户可重号：命中多行即单号撞号
+// （真实渠道回调需带应用定位字段），调用方拒绝猜测按联动失败处理；命中 0 行
+// 表示回调定位的发起不存在。
+func (r *Repository) FindExtensionsByNoGlobal(ctx context.Context, channelCode, no string) ([]model.OrderExtension, error) {
+	var list []model.OrderExtension
+	err := tenant.Skip(r.db.WithContext(ctx)).
+		Where("no = ? AND channel_code = ?", no, channelCode).
+		Find(&list).Error
+	return list, err
 }
 
 // ClaimOrderSuccess 订单状态认领（支付成功入账函数的最终裁决，spec §4.2）：

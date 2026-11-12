@@ -162,8 +162,8 @@
 - **转账**：`POST /pay/transfer/create`、`GET /pay/transfer/page`、`GET /pay/transfer/:id`、`GET /pay/transfer/export-excel`。
 - **回调通知**：`GET /pay/notify-task/page`、`GET /pay/notify-task/:id`（含日志）。
 - **钱包**：`GET /pay/wallet/page`（管理）、`GET /pay/wallet/my`、`GET /pay/wallet-transaction/page`（管理）、`GET /pay/wallet-transaction/my`、`GET /pay/wallet-transaction/export-excel`。
-- **充值**：`POST /pay/wallet-recharge/create`（本人）、`GET /pay/wallet-recharge/page`（管理）、`GET /pay/wallet-recharge/my`、套餐 CRUD `/pay/wallet-recharge-package`。
-- **示例**：`POST /pay/demo-order/create`、`GET /pay/demo-order/page`、`PUT /pay/demo-order/:id/refund`、`POST /pay/demo-withdraw/create`、`GET /pay/demo-withdraw/page`、`PUT /pay/demo-withdraw/:id/approve`；mock 触发 `POST /pay/mock/notify`。
+- **充值**：`POST /pay/wallet-recharge/create`（本人）、`GET /pay/wallet-recharge/page`（管理）、`GET /pay/wallet-recharge/my`、套餐 CRUD `/pay/wallet-recharge-package`、`GET /pay/wallet-recharge-package/list`（自助充值面板数据源）。
+- **示例**：`POST /pay/demo-order/create`、`GET /pay/demo-order/page`、`PUT /pay/demo-order/:id/refund`、`GET /pay/demo-order/spus`（示例订单页商品字典数据源）、`POST /pay/demo-withdraw/create`、`GET /pay/demo-withdraw/page`、`PUT /pay/demo-withdraw/:id/approve`；mock 触发 `POST /pay/mock/notify`。
 - **公开端点**：`POST /pay/channel-notify/:channelCode`、`POST /pay/demo/notify/order`、`POST /pay/demo/notify/refund`、`POST /pay/demo/notify/transfer`（demo 回调三端点验 `Pay-Signature`）。
 
 ## 6. 前端页面

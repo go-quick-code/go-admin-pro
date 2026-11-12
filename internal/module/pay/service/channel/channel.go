@@ -107,8 +107,13 @@ type OrderResp struct {
 	Content     string // qrcode 内容或跳转 URL（预留）
 }
 
-// OrderNotify 渠道支付回调解析结果（验签 + 解析）。
+// OrderNotify 渠道支付回调解析结果（验签 + 解析）。OutTradeNo 是回调报文
+// 回传的商户单号（渠道回调端点 /pay/channel-notify/:channelCode 的定位键，
+// 概念等价芋道 PayOrderNotifyResp.outTradeNo）：v1 mock 回调为支付发起
+// extension no（ZF 单号-发起序，与 /pay/mock/notify 构造的回调原文一致）；
+// 真实渠道回传其下单时接收的商户单号，定位字段随渠道实现扩展。
 type OrderNotify struct {
+	OutTradeNo     string
 	Success        bool
 	ChannelOrderNo string
 	ChannelUserID  string

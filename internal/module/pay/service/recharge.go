@@ -317,15 +317,14 @@ func (s *Service) CreateRecharge(ctx context.Context, req *dto.RechargeCreateReq
 		// 同事务挂支付订单（spec §4.7）：ZF 单号事务内发放；merchant_order_id
 		// 幂等键取充值单派生号；notify_url 取应用 order_notify_url 快照；
 		// expire_time 服务端设定（同 #133 下单口径）。
-		key := dateKey(s.businessNow())
-		seq, err := tx.NextSequenceValue(ctx, tenantID, SeqOrder, key)
+		no, err := s.nextNoInTx(ctx, tx, tenantID, SeqOrder, NoPrefixOrder)
 		if err != nil {
 			return err
 		}
 		expireTime := s.businessNow().Add(orderExpireDuration)
 		order = &model.Order{
 			AppID:           app.ID,
-			No:              formatNo(NoPrefixOrder, key, seq),
+			No:              no,
 			MerchantOrderID: fmt.Sprintf("%s%d", RechargeMerchantOrderPrefix, recharge.ID),
 			UserID:          p.UserID,
 			UserType:        model.WalletUserTypeAdmin,

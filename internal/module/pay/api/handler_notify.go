@@ -13,18 +13,23 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 )
 
-// handler_notify.go 是回调通知域的 HTTP 入口（issue #134，spec §5/§4.6 demo 回调）：
+// handler_notify.go 是回调通知域的 HTTP 入口（issue #134，spec §5/§4.6 demo
+// 回调；PR #140 F1 补渠道回调端点）：
 //   - 管理端 GET /pay/notify-task/page|:id 挂 pay:notify-task:query（交易单据
 //     append-only，无写入端点，spec §4.10）；
 //   - demo 商户回调三端点（POST /pay/demo/notify/order|refund|transfer）是
 //     公开路由（RegisterPublic，无登录；IP 限速照社交回调先例；公开端点不记
 //     访问日志——router 结构使然）：验签 Pay-Signature → 解析 → 业务联动扩展点
-//     → 业务码信封应答。
+//     → 业务码信封应答；
+//   - 渠道支付回调 POST /pay/channel-notify/:channelCode（spec §4.6，仅承接
+//     支付回调——退款/转账渠道回调随真实渠道实现另立工单）：公开可达同挂 IP
+//     限速与 1MB 请求体上限；渠道码 → Client ∧ 平台启用（否则 404）→ 渠道
+//     验签解析（失败 4xx）→ 支付成功入账（幂等认领）→ 业务码信封应答。
 //
-// demo 端点应答语义与商户回调 job 的响应语义闭环（spec §4.5）：
-//   - 验签失败 → HTTP 4xx（任务 22 请求失败）；
-//   - 验签通过且处理成功 → HTTP 200 {"code":0}（任务 10 成功）；
-//   - 联动扩展点报错 → HTTP 200 {"code":500,...}（任务 21 继续重试）。
+// 公开端点应答语义与商户回调 job 的响应语义闭环（spec §4.5）：
+//   - 验签/解析失败 → HTTP 4xx（任务 22 请求失败）；
+//   - 处理成功 → HTTP 200 {"code":0}（任务 10 成功）；
+//   - 联动失败 → HTTP 200 {"code":500,...}（任务 21 继续重试）。
 
 // demoNotifyIPLimit 是 demo 回调端点按客户端 IP 的限速阈值：每分钟 60 次
 // （照社交回调 publicIPLimit 先例）。进程内单实例语义，多实例部署由反代层另配。
@@ -43,14 +48,20 @@ func demoNotifyLimiter() *ratelimit.Limiter {
 }
 
 // RegisterPublic 注册 pay 模块公开接口（#134 接入 internal/router 预留的槽位）：
-// demo 商户回调三端点。无登录（验签即身份）、挂 IP 限速、不记访问日志
-// （公开组不在 router 的 protected 组内，结构使然，spec §4.6）。
+// demo 商户回调三端点 + 渠道支付回调端点（PR #140 F1，spec §4.6）。无登录
+// （验签即身份）、挂 IP 限速、不记访问日志（公开组不在 router 的 protected
+// 组内，结构使然，spec §4.6）。
 func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	demo := rg.Group("/pay/demo/notify")
 	demo.Use(h.limitDemoIP())
 	demo.POST("/"+service.DemoNotifyKindOrder, h.DemoNotifyOrder)
 	demo.POST("/"+service.DemoNotifyKindRefund, h.DemoNotifyRefund)
 	demo.POST("/"+service.DemoNotifyKindTransfer, h.DemoNotifyTransfer)
+	// 渠道支付回调（spec §4.6：渠道码在路径，未实现/停用渠道 404）：
+	// 限速与请求体上限照 demo 回调同款先例。
+	channelNotify := rg.Group("/pay/channel-notify")
+	channelNotify.Use(h.limitDemoIP())
+	channelNotify.POST("/:channelCode", h.ChannelNotify)
 }
 
 // limitDemoIP 按客户端 IP 固定窗口限速（超限 429，照社交回调先例）。
@@ -104,6 +115,45 @@ func (h *Handler) handleDemoNotify(c *gin.Context, kind string) {
 	default:
 		// 业务联动失败：HTTP 200 + 非 0 业务码（回调任务转 21 继续重试，
 		// spec §4.5 响应语义；摘要进 pay_notify_log 供排查）。
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": truncateMsg(err.Error())})
+	}
+}
+
+// ---------- 渠道支付回调端点（公开，spec §4.6，PR #140 F1） ----------
+
+// ChannelNotify 渠道支付回调（POST /pay/channel-notify/:channelCode，公开）：
+// 渠道码 → Client ∧ 平台启用（未实现/停用渠道 404，spec §4.6）→ 渠道验签解析
+// （失败 4xx，验签在渠道 Client 内）→ 支付成功入账（幂等认领，重复回调不双
+// 入账/不双建任务）→ 业务码信封应答（语义同 demo 商户回调端点；在途回调任务
+// 的重试分类由商户回调 job 闭环，spec §4.5）。
+//
+// 仅承接支付（order）回调：退款/转账渠道回调随真实渠道实现另立工单（SPI 的
+// ParseRefundNotify / 异步转账回调成对承接，spec §4.6/§10）。
+func (h *Handler) ChannelNotify(c *gin.Context) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, demoNotifyBodyLimit))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "msg": "读取请求体失败"})
+		return
+	}
+	result, err := h.svc.ChannelNotifyOrder(c.Request.Context(), c.Param("channelCode"), body)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "成功", "data": gin.H{
+			"outTradeNo":     result.OutTradeNo,
+			"channelOrderNo": result.ChannelOrderNo,
+			"success":        result.Success,
+			"claimed":        result.Claimed,
+		}})
+	case errors.Is(err, service.ErrChannelNotifyUnknownChannel):
+		// 未实现/停用渠道 404（spec §4.6）：同答不区分实现/启停差异。
+		c.JSON(http.StatusNotFound, gin.H{"code": http.StatusNotFound, "msg": service.ErrChannelNotifyUnknownChannel.Error()})
+	case errors.Is(err, service.ErrChannelNotifyPayloadInvalid):
+		// 验签/解析失败 4xx（spec §4.6）：文案随渠道实现（即面向回调方的
+		// 报文错误说明），不泄内部信息。
+		c.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "msg": err.Error()})
+	default:
+		// 定位/联动失败：HTTP 200 + 非 0 业务码（同 demo 端点语义——回调方
+		// 可重试；在途回调任务由商户回调 job 分类器转 21 继续，spec §4.5）。
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": truncateMsg(err.Error())})
 	}
 }

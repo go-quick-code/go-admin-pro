@@ -152,15 +152,14 @@ func (s *Service) applyWalletChangeTx(ctx context.Context, tx *payrepo.Repositor
 	}
 	// 5) LS 流水号：pay_sequence 事务内发放（tx 为绑定事务的 Repository，
 	//    发放与流水落库同事务）。日期键取一次口径，避免跨日翻转错位。
-	key := dateKey(s.businessNow())
-	no, err := tx.NextSequenceValue(ctx, tenantID, SeqWalletTransaction, key)
+	no, err := s.nextNoInTx(ctx, tx, tenantID, SeqWalletTransaction, NoPrefixWalletTransaction)
 	if err != nil {
 		return nil, err
 	}
 	// 6) 流水（append-only）：正入负出 + 变动后结存快照。
 	out := &model.WalletTransaction{
 		TenantID: tenantID,
-		No:       formatNo(NoPrefixWalletTransaction, key, no),
+		No:       no,
 		WalletID: walletID,
 		BizType:  ch.BizType,
 		BizID:    ch.BizID,
@@ -242,11 +241,13 @@ func (s *Service) ListMyWalletTransactions(ctx context.Context, req *dto.WalletT
 	if wallet == nil {
 		return []model.WalletTransaction{}, 0, nil
 	}
+	page := web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize}
+	page.Normalize()
 	return s.listWalletTransactions(ctx, payrepo.WalletTransactionFilter{
 		WalletID: wallet.ID,
 		BizType:  req.BizType,
 		No:       req.No,
-	}, web.PageQuery{PageNo: req.PageNo, PageSize: req.PageSize})
+	}, page)
 }
 
 // ---------- 管理端（权限码 pay:wallet:query，spec §4.11/§7） ----------
@@ -282,9 +283,10 @@ func (s *Service) ListWalletTransactions(ctx context.Context, req *dto.WalletTra
 	}, page)
 }
 
-// listWalletTransactions 是管理端/自助端共用的流水分页实现（校验+归一化后）。
+// listWalletTransactions 是管理端/自助端共用的流水分页实现（校验+归一化后）：
+// 两个入口各自 Normalize 一次后调用（重复 Normalize 幂等无害，但此前管理端
+// 归一化两次——PR #140 F4 收敛为各入口一次）。
 func (s *Service) listWalletTransactions(ctx context.Context, filter payrepo.WalletTransactionFilter, page web.PageQuery) ([]model.WalletTransaction, int64, error) {
-	page.Normalize()
 	return s.repo.ListWalletTransactions(ctx, filter, page.Offset(), page.PageSize)
 }
 

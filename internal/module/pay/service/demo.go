@@ -165,15 +165,14 @@ func (s *Service) CreateDemoOrder(ctx context.Context, req *dto.DemoOrderCreateR
 		// 同事务挂支付订单（spec §4.2 金额服务端定：字典价）：ZF 单号事务内
 		// 发放；notify_url 取应用 order_notify_url 快照；expire_time 服务端
 		// 设定（同 #133/#136 挂单口径）。
-		key := dateKey(s.businessNow())
-		seq, err := tx.NextSequenceValue(ctx, tenantID, SeqOrder, key)
+		no, err := s.nextNoInTx(ctx, tx, tenantID, SeqOrder, NoPrefixOrder)
 		if err != nil {
 			return err
 		}
 		expireTime := s.businessNow().Add(orderExpireDuration)
 		payOrder = &model.Order{
 			AppID:           app.ID,
-			No:              formatNo(NoPrefixOrder, key, seq),
+			No:              no,
 			MerchantOrderID: fmt.Sprintf("%s%d", DemoMerchantOrderPrefix, order.ID),
 			UserID:          p.UserID,
 			UserType:        model.WalletUserTypeAdmin,

@@ -120,6 +120,10 @@ const payTimeLayout = "2006-01-02 15:04:05"
 // payAssertBusinessTime 校验导出日期单元格的墙上时间与分页 JSON 一致：
 // DSN loc 由 app.timezone（业务时区，ADR 0006）注入，DB 扫描出的 time.Time
 // 已按业务时区解释，NativeDates 原样保留墙上时间。
+// created_at 列为 datetime(3)：亚秒部分在 Excel 侧经 excelize 浮点天数往返
+// 按显示格式四舍五入、JSON RFC3339 文本侧被布局截断——两侧展示可能相差
+// 1 秒（纯显示口径差异，非时区/精度缺陷），断言按 ±1s 容差比较；时区错乱
+// （如 UTC 偏移 8 小时）仍必然命中断言。
 func payAssertBusinessTime(t *testing.T, env *testutil.IntegrationEnv, phase, cell, jsonTime string) {
 	t.Helper()
 	loc := env.Config.Location()
@@ -131,9 +135,13 @@ func payAssertBusinessTime(t *testing.T, env *testutil.IntegrationEnv, phase, ce
 	if err != nil {
 		t.Fatalf("%s：分页 JSON 时间 %q 解析失败: %v", phase, jsonTime, err)
 	}
-	dbWall := dbTime.In(loc).Format(payTimeLayout)
-	if excelWall.Format(payTimeLayout) != dbWall {
-		t.Fatalf("%s：导出日期 %q 与业务时区墙上时间 %q 不一致", phase, cell, dbWall)
+	diff := excelWall.Sub(dbTime)
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > time.Second {
+		t.Fatalf("%s：导出日期 %q 与业务时区墙上时间 %q 相差超过 1 秒（%s）",
+			phase, cell, dbTime.In(loc).Format(payTimeLayout), diff)
 	}
 }
 

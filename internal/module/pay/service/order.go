@@ -15,6 +15,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
@@ -35,13 +36,18 @@ import (
 //     → 渠道 Order。wallet 渠道同事务扣减（唯一入账入口 biz=3）→ 支付成功
 //     入账；mock 渠道订单停在待支付。
 //   - 支付成功入账函数（paymentSuccessTx）三条路径共用：wallet 发起 / mock
-//     模拟回调 / 未来真实渠道回调——状态认领 UPDATE ... WHERE status=0（0 行 =
+//     模拟回调 / 渠道回调——状态认领 UPDATE ... WHERE status=0（0 行 =
 //     已处理，幂等成功返回）→ success_time → extension 置成功 → 建回调任务
 //     （type=1，max_notify_times=9）。函数内不做任何余额变动（wallet 扣减在
 //     渠道 Order 内，mock/真实渠道资金外部到账）。
 //   - mock 触发 POST /pay/mock/notify：不公开（登录 + 订单归属本人 + 渠道为
 //     mock，防代他人确认支付，spec §4.6）；成功分支走与真实渠道回调完全相同
 //     的解析 → 入账 → 建任务链路。
+//   - 渠道回调 POST /pay/channel-notify/:channelCode（spec §4.6 公开端点）：
+//     渠道码 → Client ∧ 平台启用（否则 404）→ 渠道验签解析（失败 4xx）→
+//     成功走支付成功入账函数（幂等）、失败置发起失败；定位键 = 回调回传的
+//     outTradeNo（v1 mock 即发起 extension no）。仅承接支付回调，退款/转账
+//     渠道回调随真实渠道实现另立工单（§10）。
 //
 // 越权防线（spec §4.11）：自助端点只挂登录，服务层强制 user_id 归属过滤；
 // 管理端点挂 pay:order:query（管理页不设 owner 行级数据权限，租户内全量可见）。
@@ -111,8 +117,7 @@ func (s *Service) CreateOrder(ctx context.Context, req *dto.OrderCreateReq, user
 	err = s.repo.Transaction(ctx, func(tx *payrepo.Repository) error {
 		// ZF 单号：pay_sequence 事务内发放（spec §4.9），客户端提交的 no
 		// 不存在入口（DTO 不收）。
-		key := dateKey(s.businessNow())
-		seq, err := tx.NextSequenceValue(ctx, tenantID, SeqOrder, key)
+		no, err := s.nextNoInTx(ctx, tx, tenantID, SeqOrder, NoPrefixOrder)
 		if err != nil {
 			return err
 		}
@@ -123,7 +128,7 @@ func (s *Service) CreateOrder(ctx context.Context, req *dto.OrderCreateReq, user
 		expireTime := s.businessNow().Add(orderExpireDuration)
 		out = &model.Order{
 			AppID:           app.ID,
-			No:              formatNo(NoPrefixOrder, key, seq),
+			No:              no,
 			MerchantOrderID: merchantOrderID,
 			UserID:          p.UserID,
 			UserType:        model.WalletUserTypeAdmin,
@@ -513,6 +518,105 @@ func (s *Service) MockNotifyOrder(ctx context.Context, req *dto.MockNotifyReq) (
 		return nil, err
 	}
 	return s.repo.FindOrderByID(ctx, req.OrderID)
+}
+
+// ---------- 渠道支付回调（POST /pay/channel-notify/:channelCode，公开，spec §4.6） ----------
+
+// ErrChannelNotifyUnknownChannel 是渠道回调端点的 404 哨兵（spec §4.6
+// 「未实现/停用渠道 404」）：注册表无 Client 与平台停用同答不区分（不泄露
+// 渠道实现/启停差异）。
+var ErrChannelNotifyUnknownChannel = errors.New("渠道回调端点不存在")
+
+// ErrChannelNotifyPayloadInvalid 是回调验签/解析失败的哨兵（spec §4.6
+// 「验签失败 4xx」）：验签在渠道 Client.ParseOrderNotify 内完成，解析拒绝
+// 一律经本哨兵翻译为 4xx。
+var ErrChannelNotifyPayloadInvalid = errors.New("回调验签或报文无效")
+
+// ChannelNotifyResult 渠道支付回调的处理结果（HTTP 应答体构造用）。
+type ChannelNotifyResult struct {
+	OutTradeNo     string // 回调定位的支付发起单号（ZF 单号-发起序）
+	ChannelOrderNo string // 渠道回执单号
+	Success        bool   // 回调声明的支付结果
+	Claimed        bool   // true = 本次认领入账；false = 幂等重放跳过 / 失败结论
+}
+
+// ChannelNotifyOrder 渠道支付回调服务端入口（spec §4.6 公开端点，PR #140 F1）：
+// 渠道码 → 注册表 Client ∧ 平台 pay_channel 启用（否则 404）→ 渠道验签解析
+// （验签在 Client 内；拒绝 → 4xx）→ 按 outTradeNo 定位支付发起 → 成功走支付
+// 成功入账函数（wallet 发起 / mock 模拟回调 / 渠道回调三路共用的
+// paymentSuccessTx，状态认领幂等——重复回调不双入账/不双建任务）→ 失败结论
+// 置发起失败（同 mock 模拟回调失败分支口径）。应答语义同 demo 商户回调端点：
+// 成功 code 0；定位/联动失败回非 0 业务码信封（回调方可重试）。
+//
+// 本端点只承接支付（order）回调：退款/转账渠道回调随真实渠道实现另立工单
+// （SPI 的 ParseRefundNotify / 异步转账回调成对承接，spec §4.6/§10）。
+//
+// 定位语义（v1 即 mock 语义，演练与真实渠道同一解析链路）：回调 outTradeNo =
+// 支付发起 extension no（ZF 单号-发起序，/pay/mock/notify 构造的回调原文同
+// 源）；报文不带租户字段，全局反查后从行派生租户执行（同 demo 联动先例）。
+// 单号 (tenant_id,no) 唯一键跨租户可重号：命中多行拒绝猜测按联动失败处理，
+// 真实渠道接入时以渠道携带的应用定位字段收紧。
+func (s *Service) ChannelNotifyOrder(ctx context.Context, code string, body []byte) (*ChannelNotifyResult, error) {
+	client := s.channelRegistry().Get(code)
+	if client == nil {
+		// 注册表无 Client（未实现渠道或未知码）：404（spec §4.6）。
+		return nil, ErrChannelNotifyUnknownChannel
+	}
+	rows, err := s.repo.ListChannelsByCodes(ctx, []string{code})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 || rows[0].Status != model.StatusEnable {
+		// 平台停用：404（spec §4.6——注册表命中也以平台启用状态为准）。
+		return nil, ErrChannelNotifyUnknownChannel
+	}
+	notify, err := client.ParseOrderNotify(ctx, channel.NotifyReq{Body: body})
+	if err != nil {
+		// 验签/解析失败 4xx（spec §4.6）：渠道解析错误文案即面向回调方，
+		// 哨兵包装供 HTTP 层分支（%w 保 errors.Is 链）。
+		return nil, fmt.Errorf("%w：%w", ErrChannelNotifyPayloadInvalid, err)
+	}
+	outTradeNo := strings.TrimSpace(notify.OutTradeNo)
+	exts, err := s.repo.FindExtensionsByNoGlobal(ctx, code, outTradeNo)
+	if err != nil {
+		return nil, err
+	}
+	if len(exts) != 1 {
+		// 定位失败（发起不存在 / 单号跨租户撞号拒绝猜测）：联动失败——HTTP
+		// 层回业务失败信封（同 demo 端点语义，回调方可重试）。
+		return nil, fmt.Errorf("回调定位支付发起失败：out_trade_no=%s 命中 %d 条", outTradeNo, len(exts))
+	}
+	ext := &exts[0]
+	ctx, tenantID, err := guardTenantContext(tenant.WithTenantID(ctx, ext.TenantID))
+	if err != nil {
+		return nil, err
+	}
+	order, err := s.repo.FindOrderByID(ctx, ext.OrderID)
+	if err != nil {
+		return nil, err
+	}
+	if order == nil {
+		// 发起与订单同事务落库，行缺失属数据异常：联动失败交回调重试排查。
+		return nil, fmt.Errorf("支付发起 %s 关联的订单 %d 不存在", ext.No, ext.OrderID)
+	}
+	out := &ChannelNotifyResult{OutTradeNo: ext.No, ChannelOrderNo: notify.ChannelOrderNo, Success: notify.Success}
+	err = s.repo.Transaction(ctx, func(tx *payrepo.Repository) error {
+		if notify.Success {
+			claimed, err := s.paymentSuccessTx(ctx, tx, tenantID, order, ext, notify.ChannelOrderNo, notify.ChannelUserID, notify.Raw)
+			if err != nil {
+				return err
+			}
+			out.Claimed = claimed
+			return nil
+		}
+		// 失败结论：置发起失败（同 mock 模拟回调失败分支口径），订单不动、
+		// 无任务；失败是合法回调结论，应答 code 0（渠道无需重试）。
+		return tx.UpdateExtensionResult(ctx, tenantID, ext.ID, model.ExtensionStatusFail, "CHANNEL_FAIL", "渠道回调支付失败", notify.Raw)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ---------- 管理端（权限码 pay:order:query，spec §4.11/§7） ----------
