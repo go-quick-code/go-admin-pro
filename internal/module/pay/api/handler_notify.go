@@ -23,7 +23,9 @@ import (
 //     → 业务码信封应答；
 //   - 渠道支付回调 POST /pay/channel-notify/:channelCode（spec §4.6，仅承接
 //     支付回调——退款/转账渠道回调随真实渠道实现另立工单）：公开可达同挂 IP
-//     限速与 1MB 请求体上限；渠道码 → Client ∧ 平台启用（否则 404）→ 渠道
+//     限速与 1MB 请求体上限；渠道码 → Client ∧ 平台启用 ∧ PublicNotifyCallback
+//     （否则 404——三种情况同答不区分：未实现渠道 / 停用渠道 / 不承接公开
+//     回调的渠道，即无验签能力的 mock/wallet，PR #140 安全审查 P1）→ 渠道
 //     验签解析（失败 4xx）→ 支付成功入账（幂等认领）→ 业务码信封应答。
 //
 // 公开端点应答语义与商户回调 job 的响应语义闭环（spec §4.5）：
@@ -64,10 +66,17 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	channelNotify.POST("/:channelCode", h.ChannelNotify)
 }
 
-// limitDemoIP 按客户端 IP 固定窗口限速（超限 429，照社交回调先例）。
+// limitDemoIP 按直连对端地址（c.RemoteIP()）固定窗口限速（超限 429，照社交
+// 回调先例）。限速键刻意不用 c.ClientIP()：仓库未配置 SetTrustedProxies 时
+// gin 默认信任任意来源，ClientIP() 会采信请求方可随意伪造的 X-Forwarded-For，
+// 每请求轮换 XFF 即可无限开新桶（PR #140 安全审查 P3-2）。
+//
+// 部署注意（已知权衡）：反代之后所有客户端共享直连对端（反代 IP）一个桶——
+// 对 demo/notify 这类公开演练端点可接受；全局代理信任拓扑（SetTrustedProxies
+// + 按跳数取真实来源）属部署级决策，不在本差异内收敛。
 func (h *Handler) limitDemoIP() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if h.demoLimiter != nil && !h.demoLimiter.Allow(c.ClientIP()) {
+		if h.demoLimiter != nil && !h.demoLimiter.Allow(c.RemoteIP()) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": http.StatusTooManyRequests, "msg": "请求过于频繁，请稍后重试"})
 			return
 		}
@@ -122,9 +131,11 @@ func (h *Handler) handleDemoNotify(c *gin.Context, kind string) {
 // ---------- 渠道支付回调端点（公开，spec §4.6，PR #140 F1） ----------
 
 // ChannelNotify 渠道支付回调（POST /pay/channel-notify/:channelCode，公开）：
-// 渠道码 → Client ∧ 平台启用（未实现/停用渠道 404，spec §4.6）→ 渠道验签解析
+// 渠道码 → Client ∧ 平台启用 ∧ PublicNotifyCallback（未实现/停用/不承接公开
+// 回调的渠道同答 404，spec §4.6 + PR #140 安全审查 P1）→ 渠道验签解析
 // （失败 4xx，验签在渠道 Client 内）→ 支付成功入账（幂等认领，重复回调不双
-// 入账/不双建任务）→ 业务码信封应答（语义同 demo 商户回调端点；在途回调任务
+// 入账/不双建任务；失败结论经条件认领只改写处理中发起）→ 业务码信封应答
+// （哨兵文案不回显内部单号/计数；语义同 demo 商户回调端点；在途回调任务
 // 的重试分类由商户回调 job 闭环，spec §4.5）。
 //
 // 仅承接支付（order）回调：退款/转账渠道回调随真实渠道实现另立工单（SPI 的

@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -442,8 +443,10 @@ func TestIntegrationPayNotifyFailClosed(t *testing.T) {
 	}
 
 	// 注入密钥后同一任务自动恢复投递（无需人工干预；fail-closed 只把
-	// next_notify_time 推进一个间隔，回拨后下一轮即恢复）。
+	// next_notify_time 推进一个间隔，回拨后下一轮即恢复）。放行清单同生产
+	// 装配口径注入（htptest 商户是环回地址，PR #140 安全审查 P2 守卫需要）。
 	svc.SetNotifyHMACKey(env.Config.Pay.NotifyHMACKey)
+	svc.SetNotifySSRFPrivateAllow(env.Config.Pay.NotifySSRFPrivateAllow)
 	payBackdateTask(t, env, taskID)
 	if _, err := svc.RunNotifyRetry(context.Background()); err != nil {
 		t.Fatalf("补配密钥后执行失败: %v", err)
@@ -461,6 +464,127 @@ type stubTenantLister struct{ ids []int64 }
 
 func (s stubTenantLister) ListEnabledTenantIDs(ctx context.Context) ([]int64, error) {
 	return s.ids, nil
+}
+
+// TestIntegrationPayNotifySSRFRefusal 出站回调 SSRF 防护拒发（PR #140 安全
+// 审查 P2）：notify_url 解析到链路本地（云元数据 169.254.169.254）/RFC1918
+// 私网时拒发——fail-closed 同密钥缺失口径：不发送、不消耗重试次数、任务保持
+// 待重试、next_notify_time 推进一个间隔、记日志（摘要含拦截原因）。
+func TestIntegrationPayNotifySSRFRefusal(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	_, metaTask := payMockPaySuccess(t, env, admin,
+		payCreateAppWithNotifyURL(t, env, admin, "notify-ssrf-meta-app", "http://169.254.169.254/latest/meta-data/").AppKey,
+		"MO-NOTIFY-SSRF-META", "1.00")
+	_, rfc1918Task := payMockPaySuccess(t, env, admin,
+		payCreateAppWithNotifyURL(t, env, admin, "notify-ssrf-rfc1918-app", "http://10.1.2.3:9000/notify").AppKey,
+		"MO-NOTIFY-SSRF-RFC", "1.00")
+
+	// 独立 Service：密钥已配置（拦截只能来自地址守卫），无放行清单。
+	svc := payservice.New(payrepo.New(env.App.DB))
+	svc.SetLocation(env.Config.Location())
+	svc.SetNotifyHMACKey(env.Config.Pay.NotifyHMACKey)
+	svc.SetTenantLister(stubTenantLister{ids: []int64{1}})
+	result, err := svc.RunNotifyRetry(context.Background())
+	if err != nil {
+		t.Fatalf("SSRF 拒发不应报错: %v", err)
+	}
+	if result.FailClosed != 2 || result.Executed != 0 {
+		t.Fatalf("应 fail-closed 拒发 2 次且不执行发送，实际 %+v", result)
+	}
+	for _, taskID := range []int64{metaTask, rfc1918Task} {
+		task := payTaskRow(t, env, taskID)
+		if payNum(task["status"]) != 0 || payNum(task["notifyTimes"]) != 0 {
+			t.Fatalf("任务 %d 应保持 0 且不消耗次数：%v", taskID, task)
+		}
+		if raw, ok := task["nextNotifyTime"].(time.Time); !ok || time.Until(raw) <= 0 {
+			t.Fatalf("任务 %d 的 next_notify_time 应被推进到未来，实际 %v", taskID, task["nextNotifyTime"])
+		}
+		logs := payNotifyLogs(t, env, taskID)
+		if len(logs) != 1 || payNum(logs[0]["status"]) != 22 {
+			t.Fatalf("任务 %d 应记 1 条 status=22 拦截日志：%v", taskID, logs)
+		}
+		if !strings.Contains(payStr(logs[0]["response"]), "SSRF") {
+			t.Fatalf("拦截日志摘要应说明 SSRF 原因：%q", payStr(logs[0]["response"]))
+		}
+	}
+}
+
+// TestIntegrationPayNotifySSRFAllowanceRestores 放行清单恢复投递（configs
+// pay.notify-ssrf-private-allow）：环回地址无清单拒发；配置 ["127.0.0.1"]
+// 后同一任务自动恢复（fail-closed 只推进一个间隔，回拨后下一轮即投递）。
+func TestIntegrationPayNotifySSRFAllowanceRestores(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":0,"msg":"success"}`})
+	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-ssrf-allow-app", merchant.srv.URL+"/pay/notify")
+	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-SSRF-ALLOW", "1.00")
+
+	svc := payservice.New(payrepo.New(env.App.DB))
+	svc.SetLocation(env.Config.Location())
+	svc.SetNotifyHMACKey(env.Config.Pay.NotifyHMACKey)
+	svc.SetTenantLister(stubTenantLister{ids: []int64{1}})
+	if result, err := svc.RunNotifyRetry(context.Background()); err != nil || result.FailClosed != 1 || result.Executed != 0 {
+		t.Fatalf("环回地址无放行清单应拒发: %+v %v", result, err)
+	}
+	if got := merchant.count(); got != 0 {
+		t.Fatalf("拒发时不应有请求，实际 %d 次", got)
+	}
+
+	svc.SetNotifySSRFPrivateAllow([]string{"127.0.0.1"})
+	payBackdateTask(t, env, taskID)
+	if _, err := svc.RunNotifyRetry(context.Background()); err != nil {
+		t.Fatalf("补配放行清单后执行失败: %v", err)
+	}
+	if got := merchant.count(); got != 1 {
+		t.Fatalf("放行后应完成投递，实际 %d 次", got)
+	}
+	if payNum(payTaskRow(t, env, taskID)["status"]) != 10 {
+		t.Fatal("放行后任务应投递成功（10）")
+	}
+}
+
+// TestIntegrationPayNotifyRedirectNotFollowed 出站客户端禁跟随重定向（PR
+// #140 安全审查 P2）：3xx 应答原样返回 → 非 2xx → 任务 22（标准语义，消耗
+// 一次尝试），Location 指向的地址不被访问——重定向不能绕过 POST 前的地址
+// 安全校验。
+func TestIntegrationPayNotifyRedirectNotFollowed(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	var targetHits int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&targetHits, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", target.URL+"/hop")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-redirect-app", redirector.URL)
+	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-REDIRECT", "1.00")
+
+	svc := payservice.New(payrepo.New(env.App.DB))
+	svc.SetLocation(env.Config.Location())
+	svc.SetNotifyHMACKey(env.Config.Pay.NotifyHMACKey)
+	svc.SetNotifySSRFPrivateAllow(env.Config.Pay.NotifySSRFPrivateAllow)
+	svc.SetTenantLister(stubTenantLister{ids: []int64{1}})
+	if _, err := svc.RunNotifyRetry(context.Background()); err != nil {
+		t.Fatalf("执行失败: %v", err)
+	}
+	if n := atomic.LoadInt32(&targetHits); n != 0 {
+		t.Fatalf("重定向目标不应被访问，实际 %d 次", n)
+	}
+	task := payTaskRow(t, env, taskID)
+	if payNum(task["status"]) != 22 {
+		t.Fatalf("3xx 应按非 2xx 分类为 22，实际 %v", task["status"])
+	}
+	if payNum(task["notifyTimes"]) != 1 {
+		t.Fatalf("重定向响应应消耗一次尝试（标准 22 语义），实际 %v", task["notifyTimes"])
+	}
 }
 
 // ---------- demo 商户回调端点（公开路由，spec §4.6 demo 回调） ----------

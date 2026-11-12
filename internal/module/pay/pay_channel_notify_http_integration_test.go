@@ -1,17 +1,20 @@
 //go:build integration
 
 // pay 渠道回调端点 HTTP 集成测试（PR #140 F1，docs/pay-mvp-spec.md §4.6 渠道
-// 回调端点 + §8.2 公开端点行）：真实 router + 真实 MySQL。
+// 回调端点 + §8.2 公开端点行；PR #140 安全审查 P1 收敛后重制）：真实 router +
+// 真实 MySQL。
 //
 // 覆盖 POST /pay/channel-notify/:channelCode：
-//   - 公开可达（无登录头，公开组在 protected 组外）；
-//   - 未实现渠道（平台启用但注册表无 Client）404、未知渠道码 404；
-//   - 停用渠道（mock 经平台管理端停用）404；
+//   - 404 门（spec §4.6 三种同答 404：未实现渠道 / 平台停用渠道 / 渠道不承接
+//     公开回调 PublicNotifyCallback=false——mock 与 wallet 无验签能力，公开端
+//     点对其 404，匿名与登录同答，防伪造回调代他人确认支付）；
 //   - 解析失败（非 JSON / 缺 outTradeNo / 非法 result）4xx，订单不动；
-//   - 成功全链路：mock 报文 → 订单 10 → 回调任务创建 → 重放幂等（不双建任务）；
-//   - 定位失败（未知发起单号）业务失败信封 200 + code 500；
-//   - 失败回调：extension 置失败、订单保持待支付、无任务；
-//   - IP 限速（照 demo 回调先例，每分钟 60 次）。
+//   - 成功全链路（经测试注册的「可公开承接回调」渠道替身，SetRegistry seam）：
+//     报文 → 订单 10 → 回调任务创建 → 重放幂等（不双建任务）；定位失败信封
+//     200 + code 500 且不回显内部单号（单号枚举 oracle 收敛）；
+//   - 失败回调状态谓词：成功回调之后的失败回调不得改写已成功的发起/订单
+//     （条件认领只影响处理中状态）；
+//   - IP 限速（直连对端地址为键，伪造 XFF 不换桶；照 demo 回调先例 60/min）。
 package pay_test
 
 import (
@@ -20,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	"github.com/go-quick-code/go-admin-pro/internal/testutil"
 )
 
@@ -27,10 +31,38 @@ import (
 // 语义），返回 HTTP 状态与响应体原文。
 func postChannelNotify(t *testing.T, env *testutil.IntegrationEnv, channelCode, body string) (int, string) {
 	t.Helper()
+	return postChannelNotifyHeader(t, env, channelCode, body, "")
+}
+
+// postChannelNotifyHeader 带伪造 X-Forwarded-For 的渠道回调请求（伪造 XFF
+// 的限速键轮换攻击用，PR #140 安全审查 P3-2）。
+func postChannelNotifyHeader(t *testing.T, env *testutil.IntegrationEnv, channelCode, body, xff string) (int, string) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, env.APIPrefixURL("/pay/channel-notify/"+channelCode), strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("构造渠道回调请求: %v", err)
 	}
+	if xff != "" {
+		req.Header.Set("X-Forwarded-For", xff)
+	}
+	return doChannelNotify(t, req)
+}
+
+// postChannelNotifyAuth 带登录态的渠道回调请求（登录态 404 同答断言用——
+// 公开端点不以登录换承接能力）。
+func postChannelNotifyAuth(t *testing.T, env *testutil.IntegrationEnv, channelCode, body, token string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, env.APIPrefixURL("/pay/channel-notify/"+channelCode), strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("构造渠道回调请求: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return doChannelNotify(t, req)
+}
+
+// doChannelNotify 发出已构造的请求并读响应体原文。
+func doChannelNotify(t *testing.T, req *http.Request) (int, string) {
+	t.Helper()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("请求渠道回调端点: %v", err)
@@ -46,6 +78,35 @@ func postChannelNotify(t *testing.T, env *testutil.IntegrationEnv, channelCode, 
 		}
 	}
 	return resp.StatusCode, string(buf)
+}
+
+// publicNotifyFakeClient 是测试用「可公开承接回调」的渠道替身（SetRegistry
+// seam，同 payReplaceMockClient 先例）：解析行为委托 mock 渠道（outTradeNo/
+// result 报文同源），仅 PublicNotifyCallback 置 true——模拟未来真实渠道
+// （具备验签能力）在公开端点的承接形态。
+type publicNotifyFakeClient struct {
+	*channel.MockClient
+}
+
+// PublicNotifyCallback 测试替身声明可公开承接回调。
+func (c *publicNotifyFakeClient) PublicNotifyCallback() bool { return true }
+
+// payRegisterPublicNotifyFake 用「可公开承接回调」的 mock 替身替换注册表
+// （成功链路用例的公开端点承接方；wallet 保持生产实现）。
+func payRegisterPublicNotifyFake(t *testing.T, env *testutil.IntegrationEnv) {
+	t.Helper()
+	mockClient, err := channel.NewMockClient("")
+	if err != nil {
+		t.Fatalf("构造 mock 渠道: %v", err)
+	}
+	walletClient, err := channel.NewWalletClient("", env.App.Pay, env.App.Pay, env.App.Pay)
+	if err != nil {
+		t.Fatalf("构造 wallet 渠道: %v", err)
+	}
+	registry := channel.NewRegistry()
+	registry.Register(&publicNotifyFakeClient{MockClient: mockClient})
+	registry.Register(walletClient)
+	env.App.Pay.SetRegistry(registry)
 }
 
 // payLatestExtensionNo 查订单最近一次支付发起的 extension no（mock 回调报文
@@ -73,8 +134,8 @@ func payPendingMockOrder(t *testing.T, env *testutil.IntegrationEnv, admin, appK
 }
 
 // TestIntegrationPayChannelNotifyUnknownChannel 未实现渠道 404（spec §4.6
-// 「未实现/停用渠道 404」）：wx_pub 平台启用（管理端改状态）但注册表无
-// Client → 404；未知渠道码（非 14 常量）→ 404。
+// 404 门第一分支）：wx_pub 平台启用（管理端改状态）但注册表无 Client → 404；
+// 未知渠道码（非 14 常量）→ 404。
 func TestIntegrationPayChannelNotifyUnknownChannel(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	admin := env.Login(t, "admin", "123456")
@@ -95,8 +156,9 @@ func TestIntegrationPayChannelNotifyUnknownChannel(t *testing.T) {
 	}
 }
 
-// TestIntegrationPayChannelNotifyDisabledChannel 停用渠道 404（spec §4.6）：
-// mock 有 Client 但平台管理端停用后 → 404（注册表命中也要查平台启用状态）。
+// TestIntegrationPayChannelNotifyDisabledChannel 停用渠道 404（spec §4.6
+// 404 门第二分支）：mock 有 Client 但平台管理端停用后 → 404（注册表命中也要
+// 查平台启用状态）。
 func TestIntegrationPayChannelNotifyDisabledChannel(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	admin := env.Login(t, "admin", "123456")
@@ -114,12 +176,45 @@ func TestIntegrationPayChannelNotifyDisabledChannel(t *testing.T) {
 	}
 }
 
+// TestIntegrationPayChannelNotifyNotPubliclyCallable 不承接公开回调的渠道
+// 404（spec §4.6 404 门第三分支，PR #140 安全审查 P1）：mock/wallet 无验签
+// 能力（PublicNotifyCallback=false），公开端点对其同答 404——匿名与登录态
+// 一致（防伪造回调代他人确认支付，spec §4.6「mock 触发不公开」不被公开路径
+// 绕过）。生产注册表原样（mock/wallet 均注册且平台启用）。
+func TestIntegrationPayChannelNotifyNotPubliclyCallable(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+
+	// 确保 mock/wallet 平台启用（种子默认启用；显式置位隔离启停差异——
+	// 本用例验证的是第三分支而非停用分支）。
+	for _, code := range []string{"mock", "wallet"} {
+		id := channelIDByCode(t, env, admin, code)
+		status, api := env.Request(t, http.MethodPut, fmt.Sprintf("/pay/channel/%d", id), admin, map[string]any{"status": 0})
+		mustOK(t, "启用 "+code, status, api)
+	}
+
+	body := `{"outTradeNo":"ZF202601010001-1","result":"success"}`
+	// 匿名：mock 与 wallet 均 404。
+	for _, code := range []string{"mock", "wallet"} {
+		httpStatus, respBody := postChannelNotify(t, env, code, body)
+		if httpStatus != http.StatusNotFound {
+			t.Fatalf("渠道 %s 不承接公开回调应 404，实际 HTTP %d %s", code, httpStatus, respBody)
+		}
+	}
+	// 登录态同答 404（公开端点不以登录换承接能力）。
+	httpStatus, respBody := postChannelNotifyAuth(t, env, "mock", body, admin)
+	if httpStatus != http.StatusNotFound {
+		t.Fatalf("登录态对 mock 渠道回调应同答 404，实际 HTTP %d %s", httpStatus, respBody)
+	}
+}
+
 // TestIntegrationPayChannelNotifyParseFailure 解析失败 4xx（spec §4.6
-// 「验签失败 4xx」的 mock 对应——ParseOrderNotify 拒绝即 4xx）：非 JSON、
+// 「验签失败 4xx」的替身对应——ParseOrderNotify 拒绝即 4xx）：非 JSON、
 // 缺 outTradeNo、非法 result；订单保持待支付、不建任务。
 func TestIntegrationPayChannelNotifyParseFailure(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	admin := env.Login(t, "admin", "123456")
+	payRegisterPublicNotifyFake(t, env)
 	orderID, extNo := payPendingMockOrder(t, env, admin, "cnfail-app", "MO-CNFAIL", "1.00")
 
 	cases := []struct {
@@ -143,13 +238,15 @@ func TestIntegrationPayChannelNotifyParseFailure(t *testing.T) {
 	}
 }
 
-// TestIntegrationPayChannelNotifySuccessChain 成功全链路（spec §4.6）：mock
-// 报文 → 订单 10 → 回调任务创建；重放同一报文幂等（仍 code 0、任务不双建、
-// 订单不变）——支付成功入账函数的状态认领是幂等裁决；未知发起单号 → 业务失败
-// 信封（200 + code 500，联动失败语义同 demo 端点）。
+// TestIntegrationPayChannelNotifySuccessChain 成功全链路（spec §4.6，经测试
+// 注册的「可公开承接回调」替身）：报文 → 订单 10 → 回调任务创建；重放同一
+// 报文幂等（仍 code 0、任务不双建、订单不变）——支付成功入账函数的状态认领
+// 是幂等裁决；未知发起单号 → 业务失败信封（200 + code 500，联动失败语义同
+// demo 端点）且不回显内部单号（单号枚举 oracle 收敛，PR #140 安全审查 P1）。
 func TestIntegrationPayChannelNotifySuccessChain(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	admin := env.Login(t, "admin", "123456")
+	payRegisterPublicNotifyFake(t, env)
 	orderID, extNo := payPendingMockOrder(t, env, admin, "cnok-app", "MO-CNOK", "7.50")
 
 	successBody := fmt.Sprintf(`{"outTradeNo":%q,"result":"success"}`, extNo)
@@ -179,18 +276,24 @@ func TestIntegrationPayChannelNotifySuccessChain(t *testing.T) {
 	assertOrderStatus(t, env, orderID, 10, "重放回调订单应保持 10")
 
 	// 未知发起单号：定位失败 → 业务失败信封（200 + code 500，回调方可重试）。
-	httpStatus, respBody = postChannelNotify(t, env, "mock", `{"outTradeNo":"ZF202601099999-9","result":"success"}`)
+	unknownNo := "ZF202601099999-9"
+	httpStatus, respBody = postChannelNotify(t, env, "mock", fmt.Sprintf(`{"outTradeNo":%q,"result":"success"}`, unknownNo))
 	if httpStatus != http.StatusOK || !strings.Contains(respBody, `"code":500`) {
 		t.Fatalf("未知发起单号应 200 code 500，实际 HTTP %d %s", httpStatus, respBody)
 	}
+	// 哨兵文案不回显内部单号（「命中 N 条」计数与单号枚举 oracle 收敛）。
+	if strings.Contains(respBody, unknownNo) || strings.Contains(respBody, "命中") {
+		t.Fatalf("联动失败信封不应回显内部单号/计数，实际 %s", respBody)
+	}
 }
 
-// TestIntegrationPayChannelNotifyFailureResult 失败回调（mock 报文
-// result=failure）：extension 置失败、订单保持待支付、不建任务；应答仍
-// code 0（失败是合法回调结论，渠道无需重试）。
+// TestIntegrationPayChannelNotifyFailureResult 失败回调（报文
+// result=failure，替身承接）：extension 置失败、订单保持待支付、不建任务；
+// 应答仍 code 0（失败是合法回调结论，渠道无需重试）。
 func TestIntegrationPayChannelNotifyFailureResult(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	admin := env.Login(t, "admin", "123456")
+	payRegisterPublicNotifyFake(t, env)
 	orderID, extNo := payPendingMockOrder(t, env, admin, "cnfailres-app", "MO-CNFAILRES", "2.00")
 
 	body := fmt.Sprintf(`{"outTradeNo":%q,"result":"failure"}`, extNo)
@@ -211,10 +314,45 @@ func TestIntegrationPayChannelNotifyFailureResult(t *testing.T) {
 	}
 }
 
+// TestIntegrationPayChannelNotifyFailureAfterSuccess 失败回调状态谓词（PR
+// #140 安全审查 P1）：成功回调入账后再来同一发起的失败回调——已成功的
+// 订单/发起不得被改写（条件认领只影响处理中 0 状态），任务不双建、回调
+// 结果不改写成功事实。
+func TestIntegrationPayChannelNotifyFailureAfterSuccess(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	admin := env.Login(t, "admin", "123456")
+	payRegisterPublicNotifyFake(t, env)
+	orderID, extNo := payPendingMockOrder(t, env, admin, "cnpred-app", "MO-CNPRED", "3.00")
+
+	successBody := fmt.Sprintf(`{"outTradeNo":%q,"result":"success"}`, extNo)
+	httpStatus, respBody := postChannelNotify(t, env, "mock", successBody)
+	if httpStatus != http.StatusOK || !strings.Contains(respBody, `"code":0`) {
+		t.Fatalf("成功回调应 200 code 0，实际 HTTP %d %s", httpStatus, respBody)
+	}
+
+	// 同一发起的失败回调：不得改写已成功事实。
+	httpStatus, respBody = postChannelNotify(t, env, "mock", fmt.Sprintf(`{"outTradeNo":%q,"result":"failure"}`, extNo))
+	if httpStatus != http.StatusOK || !strings.Contains(respBody, `"code":0`) {
+		t.Fatalf("迟到的失败回调应幂等 code 0，实际 HTTP %d %s", httpStatus, respBody)
+	}
+	assertOrderStatus(t, env, orderID, 10, "失败回调不得改写已成功订单")
+	var extStatus int8
+	if err := env.DB.Raw("SELECT status FROM pay_order_extension WHERE order_id = ? ORDER BY id DESC LIMIT 1", orderID).Scan(&extStatus).Error; err != nil {
+		t.Fatalf("查支付发起状态: %v", err)
+	}
+	if extStatus != 10 {
+		t.Fatalf("失败回调不得把已成功的发起改写为失败，实际 %d", extStatus)
+	}
+	if tasks := payNotifyTasks(t, env, orderID); len(tasks) != 1 {
+		t.Fatalf("失败回调不应再建任务，实际 %d 条", len(tasks))
+	}
+}
+
 // TestIntegrationPayChannelNotifyRateLimit IP 限速（照 demo 回调先例，每分钟
-// 60 次）：窗口内第 61 次起 429。
+// 60 次；替身承接方）：窗口内第 61 次起 429。
 func TestIntegrationPayChannelNotifyRateLimit(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	payRegisterPublicNotifyFake(t, env)
 	var saw429 bool
 	for i := 1; i <= 61; i++ {
 		status, _ := postChannelNotify(t, env, "mock", `{"outTradeNo":"ZF-RATELIMIT-1","result":"success"}`)
@@ -225,5 +363,24 @@ func TestIntegrationPayChannelNotifyRateLimit(t *testing.T) {
 	}
 	if !saw429 {
 		t.Fatal("窗口内第 61 次起应触发 429 限速")
+	}
+}
+
+// TestIntegrationPayChannelNotifyRateLimitForgedXFF 限速键不可被伪造
+// X-Forwarded-For 轮换（PR #140 安全审查 P3-2）：限速键取直连对端地址
+// （c.RemoteIP()），每请求轮换伪造 XFF 不应获得新限速桶——61 次内必现 429。
+func TestIntegrationPayChannelNotifyRateLimitForgedXFF(t *testing.T) {
+	env := testutil.NewIntegrationEnv(t)
+	payRegisterPublicNotifyFake(t, env)
+	var saw429 bool
+	for i := 1; i <= 61; i++ {
+		status, _ := postChannelNotifyHeader(t, env, "mock", `{"outTradeNo":"ZF-XFF-1","result":"success"}`, fmt.Sprintf("203.0.113.%d", i))
+		if status == http.StatusTooManyRequests {
+			saw429 = true
+			break
+		}
+	}
+	if !saw429 {
+		t.Fatal("轮换伪造 X-Forwarded-For 不应获得新限速桶：窗口内第 61 次起应 429")
 	}
 }

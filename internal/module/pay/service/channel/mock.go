@@ -82,6 +82,12 @@ func NewMockClient(configJSON string) (*MockClient, error) {
 // Code 渠道码。
 func (c *MockClient) Code() string { return CodeMock }
 
+// PublicNotifyCallback mock 渠道不承接公开回调（PR #140 安全审查 P1）：
+// ParseOrderNotify 只解析 JSON 不验任何签名（报文构造见 /pay/mock/notify），
+// 公开端点承接等于匿名者可认领任意在途 mock 订单——mock 回调触发保持登录 +
+// 本人端点（spec §4.6「mock 触发不公开，防代他人确认支付」）。
+func (c *MockClient) PublicNotifyCallback() bool { return false }
+
 // Order 统一下单：mock 渠道不动资金，订单停在待支付等「模拟回调」触发
 // （spec §4.2：displayMode=none）。
 func (c *MockClient) Order(ctx context.Context, req OrderReq) (OrderResp, error) {

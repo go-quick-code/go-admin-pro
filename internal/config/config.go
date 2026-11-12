@@ -39,6 +39,13 @@ type PayConfig struct {
 	// 引导配置。缺省 demo（spec §7 演示数据每租户播种 app_key=demo 且绑定
 	// mock/wallet），部署可覆盖为自有应用。
 	RechargeAppKey string `mapstructure:"recharge-app-key"`
+	// NotifySSRFPrivateAllow 是商户回调出站地址受保护网段的放行清单
+	// （PR #140 安全审查 P2）：条目为主机名 / IP 字面量或 CIDR（如
+	// "10.0.0.0/8"）。回调 job 对解析到环回/私网/链路本地/未指定网段的
+	// notify_url 默认拒发（fail-closed），清单内放行。生产必须留空（内网
+	// 拓扑不应出现在公开可配的回调地址白名单）；dev 缺省放行本机环回
+	// （run-demo 链路与集成测试的 httptest 商户端点）。
+	NotifySSRFPrivateAllow []string `mapstructure:"notify-ssrf-private-allow"`
 }
 
 // PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。
@@ -75,6 +82,12 @@ const DefaultTimezone = "Asia/Shanghai"
 // 提供便利）。app.env 非 dev/test 时，空密钥或该值（以及仓库/文档中出现过的
 // 其他可预测默认值）会直接拒绝启动，见 validateJWTSecret（PR #39 审查 P2）。
 const DefaultDevJWTSecret = "go-admin-pro-dev-secret"
+
+// DefaultDevPayNotifyHMACKey 是 dev/test 环境的 pay 回调 HMAC 缺省密钥
+// （configs/config.yaml pay.notify-hmac-key 同值，PR #140 安全审查 P3-3）：
+// 仅为本地开发与集成测试提供便利。app.env 非 dev/test 时空值或该值会直接
+// 拒绝启动，见 validatePayNotifyHMACKey（与 validateJWTSecret 同型）。
+const DefaultDevPayNotifyHMACKey = "go-admin-pro-pay-notify-dev-key"
 
 // insecureJWTSecrets 是已知可预测的 JWT 密钥：非 dev/test 环境一律拒绝，
 // 避免生产部署照抄示例配置后被伪造 token。
@@ -198,7 +211,10 @@ func (c *Config) validate() error {
 	}
 	c.loc = loc
 	c.Database.DSN = ApplyDSNLoc(c.Database.DSN, c.App.Timezone)
-	return c.validateJWTSecret()
+	if err := c.validateJWTSecret(); err != nil {
+		return err
+	}
+	return c.validatePayNotifyHMACKey()
 }
 
 // validateJWTSecret 拒绝非 dev/test 环境使用空密钥或已知默认密钥：
@@ -213,6 +229,25 @@ func (c *Config) validateJWTSecret() error {
 	}
 	if _, insecure := insecureJWTSecrets[secret]; insecure {
 		return fmt.Errorf("jwt.secret 使用了已知默认值：app.env=%q 时必须在配置文件或 GAP_JWT_SECRET 中覆盖为唯一强密钥", c.App.Env)
+	}
+	return nil
+}
+
+// validatePayNotifyHMACKey 拒绝非 dev/test 环境使用空密钥或已知默认密钥
+// （PR #140 安全审查 P3-3，与 validateJWTSecret 同型）：demo 回调三端点与
+// 商户回调 job 共用该密钥验签，生产照抄示例配置等于对任何读过仓库的人关掉
+// 签名认证。本地开发/测试保留默认值，生产必须显式配置唯一强密钥
+// （配置或 GAP_PAY_NOTIFY_HMAC_KEY）。
+func (c *Config) validatePayNotifyHMACKey() error {
+	if isLocalEnv(c.App.Env) {
+		return nil
+	}
+	key := strings.TrimSpace(c.Pay.NotifyHMACKey)
+	if key == "" {
+		return fmt.Errorf("pay.notify-hmac-key 不能为空：app.env=%q 时必须在配置文件或 GAP_PAY_NOTIFY_HMAC_KEY 中设置唯一强密钥", c.App.Env)
+	}
+	if key == DefaultDevPayNotifyHMACKey {
+		return fmt.Errorf("pay.notify-hmac-key 使用了已知默认值：app.env=%q 时必须在配置文件或 GAP_PAY_NOTIFY_HMAC_KEY 中覆盖为唯一强密钥", c.App.Env)
 	}
 	return nil
 }

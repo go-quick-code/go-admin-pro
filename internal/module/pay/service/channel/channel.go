@@ -195,6 +195,13 @@ type TransferResp struct {
 type Client interface {
 	// Code 渠道码（14 常量之一）；注册表以此为主键。
 	Code() string
+	// PublicNotifyCallback 报告渠道是否可在公开渠道回调端点
+	// （POST /pay/channel-notify/:channelCode）承接支付回调：仅当回调报文
+	// 具备服务端可验证的验签能力（真实渠道签名）才可公开承接；无验签能力
+	// 的渠道（mock 演练报文、wallet 同步完成无回调）必须置 false——公开端点
+	// 对其 404，否则匿名者可伪造报文认领任意在途订单（PR #140 安全审查
+	// P1，spec §4.6「mock 触发不公开」的渠道维度收口）。
+	PublicNotifyCallback() bool
 	// Order 统一下单，返回展示模式（none 等回调 / qrcode|url 预留）。
 	Order(ctx context.Context, req OrderReq) (OrderResp, error)
 	// ParseOrderNotify 验签并解析支付回调，产出成功/失败与渠道单号。

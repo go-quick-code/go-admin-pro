@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"time"
 
 	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
@@ -58,9 +59,15 @@ type Service struct {
 	// 商户回调 POST 的 Pay-Signature 签名与 demo 回调端点验签共用；空值拒发/
 	// 拒验（fail-closed）。装配期 SetNotifyHMACKey 注入。
 	notifyHMACKey string
-	// notifyHTTPClient 是回调 job 的出站 HTTP 客户端（10s 超时、1MB 上限，
-	// 照 socialHTTP 先例）。New 时创建。
+	// notifyHTTPClient 是回调 job 的出站 HTTP 客户端（10s 超时、1MB 上限、
+	// 禁跟随重定向，照 socialHTTP 先例 + PR #140 安全审查 P2）。New 时创建。
 	notifyHTTPClient *notifyHTTP
+	// ssrfAllowHosts / ssrfAllowPrefixes 是出站回调地址受保护网段的放行清单
+	// （PR #140 安全审查 P2，configs pay.notify-ssrf-private-allow，装配期
+	// SetNotifySSRFPrivateAllow 注入）：host/IP 字面量精确匹配与 CIDR 网段
+	// 两种条目。未注入（nil）= 无放行，受保护网段一律拒发（fail-closed）。
+	ssrfAllowHosts    map[string]struct{}
+	ssrfAllowPrefixes []netip.Prefix
 	// tenants 是启用租户清单来源（#134 回调/关单 job 跨租户迭代，窄接口
 	// 适配 system Service）。未注入时 job 报错拒跑（fail-closed）。
 	tenants TenantLister

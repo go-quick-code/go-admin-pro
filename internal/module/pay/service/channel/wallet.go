@@ -105,6 +105,11 @@ func NewWalletClient(configJSON string, payer WalletPayer, refunder WalletRefund
 // Code 渠道码。
 func (c *WalletClient) Code() string { return CodeWallet }
 
+// PublicNotifyCallback wallet 渠道不承接公开回调（PR #140 安全审查 P1）：
+// 同步完成无异步回调（ParseOrderNotify 恒错误），公开端点对其无可承接的
+// 合法报文——404 同答防探测。
+func (c *WalletClient) PublicNotifyCallback() bool { return false }
+
 // Order 统一下单：同事务扣减余额（唯一入账入口），成功即支付成功。
 func (c *WalletClient) Order(ctx context.Context, req OrderReq) (OrderResp, error) {
 	if err := c.payer.PayByWallet(ctx, req); err != nil {
