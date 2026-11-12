@@ -461,6 +461,9 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// 空值 job 拒发 fail-closed）与启用租户清单（job 跨租户逐租户，照公海
 	// 回收模式——system Service 直接满足 payservice.TenantLister 窄接口）。
 	paySvc.SetNotifyHMACKey(cfg.Pay.NotifyHMACKey)
+	// 出站回调 SSRF 放行清单（PR #140 安全审查 P2）：dev 缺省放行本机环回
+	// （configs pay.notify-ssrf-private-allow），生产留空即全拦。
+	paySvc.SetNotifySSRFPrivateAllow(cfg.Pay.NotifySSRFPrivateAllow)
 	paySvc.SetTenantLister(sysSvc)
 	// 充值挂单应用（issue #136，spec §4.7）：发起充值同事务挂的 pay_order
 	// 归属应用，按 pay.recharge-app-key 解析（缺省 demo，见 service 层决策）。

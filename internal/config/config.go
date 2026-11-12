@@ -39,6 +39,13 @@ type PayConfig struct {
 	// 引导配置。缺省 demo（spec §7 演示数据每租户播种 app_key=demo 且绑定
 	// mock/wallet），部署可覆盖为自有应用。
 	RechargeAppKey string `mapstructure:"recharge-app-key"`
+	// NotifySSRFPrivateAllow 是商户回调出站地址受保护网段的放行清单
+	// （PR #140 安全审查 P2）：条目为主机名 / IP 字面量或 CIDR（如
+	// "10.0.0.0/8"）。回调 job 对解析到环回/私网/链路本地/未指定网段的
+	// notify_url 默认拒发（fail-closed），清单内放行。生产必须留空（内网
+	// 拓扑不应出现在公开可配的回调地址白名单）；dev 缺省放行本机环回
+	// （run-demo 链路与集成测试的 httptest 商户端点）。
+	NotifySSRFPrivateAllow []string `mapstructure:"notify-ssrf-private-allow"`
 }
 
 // PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。

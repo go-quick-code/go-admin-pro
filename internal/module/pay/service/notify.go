@@ -13,7 +13,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/dto"
@@ -182,7 +184,16 @@ const notifyHTTPTimeout = 10 * time.Second
 const notifyHTTPBodyLimit = 1 << 20
 
 func newNotifyHTTP() *notifyHTTP {
-	return &notifyHTTP{client: &http.Client{Timeout: notifyHTTPTimeout}}
+	return &notifyHTTP{client: &http.Client{
+		Timeout: notifyHTTPTimeout,
+		// 禁跟随重定向（PR #140 安全审查 P2）：重定向不得绕过 POST 前的
+		// 地址安全校验（notifyURLGuardReason）。ErrUseLastResponse 让 3xx
+		// 应答原样返回 → 非 2xx → 任务 22（spec §4.5 标准语义），不访问
+		// Location 指向的任何地址。
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}}
 }
 
 // postJSON 发起 JSON POST（附带 header）并返回状态码与响应体：
@@ -243,6 +254,107 @@ func (s *Service) SetNotifyHMACKey(key string) {
 	s.notifyHMACKey = key
 }
 
+// SetNotifySSRFPrivateAllow 注入出站回调地址的受保护网段放行清单
+// （configs pay.notify-ssrf-private-allow，PR #140 安全审查 P2）：条目为
+// 主机名 / IP 字面量（精确匹配，大小写不敏感）或 CIDR（netip.Prefix）。
+// 非法条目丢弃并记日志（宁可少放行不可误放行）。生产建议留空——默认只放行
+// dev 配置里的本机环回（run-demo 链路与集成测试的 httptest 商户端点）。
+func (s *Service) SetNotifySSRFPrivateAllow(entries []string) {
+	s.ssrfAllowHosts = make(map[string]struct{}, len(entries))
+	s.ssrfAllowPrefixes = nil
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(e); err == nil {
+			s.ssrfAllowPrefixes = append(s.ssrfAllowPrefixes, prefix.Masked())
+			continue
+		}
+		if ip, err := netip.ParseAddr(e); err == nil {
+			s.ssrfAllowHosts[ip.String()] = struct{}{}
+			continue
+		}
+		s.ssrfAllowHosts[strings.ToLower(e)] = struct{}{}
+	}
+}
+
+// notifyURLGuardReason 出站回调地址安全校验（PR #140 安全审查 P2）：返回空串
+// 表示放行，非空为拒绝原因（进 pay_notify_log 摘要，供运维排查放行配置）。
+//
+// 规则：scheme 白名单 http/https；主机名经 net.LookupIP 解析后任一 IP 落
+// 环回/私网（RFC1918 + ULA）/链路本地（169.254.0.0/16 含云元数据
+// 169.254.169.254）/未指定网段，且不在放行清单（host 精确匹配或 CIDR）内 →
+// 拒绝；解析失败同样拒绝（fail-closed）。
+//
+// 残余风险（记录取舍）：本守卫是「解析后校验」，实际 POST 时标准库会重新
+// 解析主机名，存在 DNS rebinding 的 TOCTOU 窗口（校验时解析公网、连接时
+// 解析私网）。v1 接受该残余风险——解析检查 + 禁重定向已收敛主要攻击面
+// （元数据/私网直连与 3xx 跳板），接入真实渠道时再评估固定解析结果拨号
+// （pinned-dial）方案。
+func (s *Service) notifyURLGuardReason(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return "回调地址无法解析（fail-closed 拒发）"
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Sprintf("回调地址 scheme %q 不在白名单（仅 http/https）", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "回调地址缺少主机名"
+	}
+	if _, ok := s.ssrfAllowHosts[strings.ToLower(host)]; ok {
+		return ""
+	}
+	var ips []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	} else {
+		ips, err = net.LookupIP(host)
+		if err != nil {
+			return fmt.Sprintf("回调地址主机 %q 解析失败（fail-closed 拒发）", host)
+		}
+	}
+	for _, ip := range ips {
+		addr, ok := netip.AddrFromSlice(ip)
+		if !ok {
+			continue
+		}
+		addr = addr.Unmap()
+		if !notifyProtectedIP(addr) {
+			continue
+		}
+		if s.notifyAllowIP(addr) {
+			continue
+		}
+		return fmt.Sprintf("回调地址主机 %q 解析到受保护网段 %s（私网/环回/链路本地默认拦截，如需放行配置 pay.notify-ssrf-private-allow）", host, addr)
+	}
+	return ""
+}
+
+// notifyProtectedIP 报告地址是否落在默认拦截的受保护网段：环回 / 私网
+// （IsPrivate：RFC1918 + fc00::/7 ULA）/ 链路本地单播（169.254.0.0/16 含
+// 云厂商元数据 169.254.169.254、fe80::/10）/ 未指定地址。
+func notifyProtectedIP(addr netip.Addr) bool {
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsUnspecified()
+}
+
+// notifyAllowIP 报告地址是否被放行清单覆盖（IP 字面量条目精确匹配或 CIDR
+// 包含；host 条目对解析结果 IP 的匹配在 SetNotifySSRFPrivateAllow 归一化后
+// 同样落到字符串比对）。
+func (s *Service) notifyAllowIP(addr netip.Addr) bool {
+	if _, ok := s.ssrfAllowHosts[addr.String()]; ok {
+		return true
+	}
+	for _, prefix := range s.ssrfAllowPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
 // SetNotifyPayloadEnricher 注册任务类型的报文详情扩展（#135 退款 / #136 转账
 // 在装配处追加；后注册覆盖先注册）。type=1 支付的内置实现见 enrichPaymentPayload。
 func (s *Service) SetNotifyPayloadEnricher(taskType int8, fn NotifyPayloadEnricher) {
@@ -266,7 +378,7 @@ type NotifyRetryResult struct {
 	Tenants    int   // 扫过的租户数
 	Executed   int64 // 实际发送次数（认领成功的执行）
 	Success    int64 // 其中任务转 10 成功的次数
-	FailClosed int64 // 密钥缺失拒发的次数
+	FailClosed int64 // fail-closed 拒发的次数（密钥缺失 / 回调地址被 SSRF 防护拦截）
 }
 
 // RunNotifyRetry 是商户回调重试任务入口（系统级动作，不依赖调用方租户上下文
@@ -339,16 +451,21 @@ func notifyNextIntervalSeconds(attempt int) int {
 // executeNotifyTask 执行单个回调任务（spec §4.5）：
 //  1. 密钥缺失 → 拒发（fail-closed）：条件推进 next_notify_time（不计次数、
 //     不改状态）+ 记日志；0 行 = 并发方已处理；
-//  2. 构造报文（任务基础字段 + 类型扩展详情）；
-//  3. 条件认领（notify_times+1、last_execute_time、next_notify_time 预推进到
+//  2. 回调地址安全校验不过（scheme 非白名单 / 解析到受保护网段，PR #140
+//     安全审查 P2）→ 同 fail-closed 口径拒发：不发送、不消耗重试次数、推进
+//     一个间隔 + 记日志（放行清单补配后自动恢复）；
+//  3. 构造报文（任务基础字段 + 类型扩展详情）；
+//  4. 条件认领（notify_times+1、last_execute_time、next_notify_time 预推进到
 //     本次失败后的重试点）——0 行 = 已被并发方认领，跳过不重发；
-//  4. POST JSON（header 带 Pay-Signature = HMAC-SHA256(rawBody, 密钥)）；
-//  5. 响应分类（10/21/22）→ 第 9 次失败改写 20 彻底失败 → 回写终态 + 追加日志。
+//  5. POST JSON（header 带 Pay-Signature = HMAC-SHA256(rawBody, 密钥)，
+//     禁跟随重定向）；
+//  6. 响应分类（10/21/22）→ 第 9 次失败改写 20 彻底失败 → 回写终态 + 追加日志。
 func (s *Service) executeNotifyTask(ctx context.Context, task *paymodel.NotifyTask, now time.Time) (executed, success, failClosed int64, err error) {
 	tenantID := tenant.ID(ctx)
-	if s.notifyHMACKey == "" {
+	failClosedRefuse := func(reason string) (int64, int64, int64, error) {
 		// fail-closed（spec §4.5 照阿里云 endpoint 先例）：不发送、不消耗
-		// 重试次数，任务保持待重试并在下个间隔重查（密钥补配后自动恢复）。
+		// 重试次数，任务保持待重试并在下个间隔重查（密钥/放行清单补配后
+		// 自动恢复）。条件更新兼作并发互斥（后到者 0 行不重复记日志）。
 		next := now.Add(time.Duration(notifyNextIntervalSeconds(task.NotifyTimes+1)) * time.Second)
 		rows, err := s.repo.AdvanceNotifyTaskFailClosed(ctx, tenantID, task.ID, next, now)
 		if err != nil {
@@ -360,12 +477,18 @@ func (s *Service) executeNotifyTask(ctx context.Context, task *paymodel.NotifyTa
 		if err := s.repo.InsertNotifyLog(ctx, &paymodel.NotifyLog{
 			TaskID:      task.ID,
 			NotifyTimes: task.NotifyTimes,
-			Response:    "服务端回调密钥未配置，拒发（fail-closed）",
+			Response:    reason,
 			Status:      paymodel.NotifyTaskStatusRequestFail,
 		}); err != nil {
 			return 0, 0, 0, err
 		}
 		return 0, 0, 1, nil
+	}
+	if s.notifyHMACKey == "" {
+		return failClosedRefuse("服务端回调密钥未配置，拒发（fail-closed）")
+	}
+	if reason := s.notifyURLGuardReason(task.NotifyURL); reason != "" {
+		return failClosedRefuse("回调地址被 SSRF 防护拦截，拒发（fail-closed）：" + reason)
 	}
 
 	raw, err := s.buildNotifyPayload(ctx, task)
