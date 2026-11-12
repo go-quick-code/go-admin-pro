@@ -162,8 +162,30 @@ function goPay(row: any) {
   })
 }
 
+// 金额展示辅助（ADR 0007：金额字符串承载，前端不做浮点运算）：解析走纯数字
+// 字符串拆「分」，减法是分值整数减（decimal(12,2) 分值上限 999999999999 远小
+// 于 2^53，整数精确），格式化按两位小数回拼——确认弹窗的「未退余额」不再经
+// Number() 浮点减法。退款的权威金额由服务端计算（金额快照进退款单）。
+function parseCents(text: unknown): number {
+  const m = /^(-)?(\d+)(?:\.(\d{1,2}))?$/.exec(String(text ?? '').trim())
+  if (!m) return 0
+  const whole = parseInt(m[2], 10)
+  const frac = m[3] ? parseInt(m[3].padEnd(2, '0'), 10) : 0
+  return (m[1] ? -1 : 1) * (whole * 100 + frac)
+}
+
+function formatCents(cents: number): string {
+  const sign = cents < 0 ? '-' : ''
+  const abs = Math.abs(cents)
+  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`
+}
+
+function remainingPrice(price: unknown, refundPrice: unknown): string {
+  return formatCents(parseCents(price) - parseCents(refundPrice))
+}
+
 async function doRefund(row: any) {
-  const remaining = (Number(row.price) - Number(row.refundPrice)).toFixed(2)
+  const remaining = remainingPrice(row.price, row.refundPrice)
   const confirmed = await ElMessageBox.confirm(
     `将原路全额退回该订单未退余额 ${remaining} 元（实付 ${row.price}，已退 ${row.refundPrice}），成功后经回调链路联动退款状态。`,
     '发起示例退款',
