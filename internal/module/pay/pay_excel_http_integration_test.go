@@ -123,7 +123,7 @@ const payTimeLayout = "2006-01-02 15:04:05"
 // created_at 列为 datetime(3)：亚秒部分在 Excel 侧经 excelize 浮点天数往返
 // 按显示格式四舍五入、JSON RFC3339 文本侧被布局截断——两侧展示可能相差
 // 1 秒（纯显示口径差异，非时区/精度缺陷），断言按 ±1s 容差比较；时区错乱
-//（如 UTC 偏移 8 小时）仍必然命中断言。
+// （如 UTC 偏移 8 小时）仍必然命中断言。
 func payAssertBusinessTime(t *testing.T, env *testutil.IntegrationEnv, phase, cell, jsonTime string) {
 	t.Helper()
 	loc := env.Config.Location()

@@ -49,7 +49,7 @@ func demoNotifyLimiter() *ratelimit.Limiter {
 
 // RegisterPublic 注册 pay 模块公开接口（#134 接入 internal/router 预留的槽位）：
 // demo 商户回调三端点 + 渠道支付回调端点（PR #140 F1，spec §4.6）。无登录
-//（验签即身份）、挂 IP 限速、不记访问日志（公开组不在 router 的 protected
+// （验签即身份）、挂 IP 限速、不记访问日志（公开组不在 router 的 protected
 // 组内，结构使然，spec §4.6）。
 func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	demo := rg.Group("/pay/demo/notify")

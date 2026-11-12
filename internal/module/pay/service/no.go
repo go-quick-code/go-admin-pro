@@ -72,8 +72,8 @@ func (s *Service) nextNo(ctx context.Context, bizType, prefix string) (string, e
 // nextNoInTx 在传入事务的 pay_sequence 上发放下一个单号（spec §4.9 的统一
 // 形状：dateKey(businessNow) → tx.NextSequenceValue → formatNo）：日期键在
 // 事务内取一次口径，避免跨日翻转错位；序号发放与调用方的单据落库同事务
-//（tx 为 payrepo.Transaction 绑定事务的 Repository 或 s.repo 本体）。写路径
-//（订单/退款/转账/钱包流水/充值挂单/示例挂单）与事务外发放入口 nextNo 共用。
+// （tx 为 payrepo.Transaction 绑定事务的 Repository 或 s.repo 本体）。写路径
+// （订单/退款/转账/钱包流水/充值挂单/示例挂单）与事务外发放入口 nextNo 共用。
 func (s *Service) nextNoInTx(ctx context.Context, tx *payrepo.Repository, tenantID int64, bizType, prefix string) (string, error) {
 	key := dateKey(s.businessNow())
 	seq, err := tx.NextSequenceValue(ctx, tenantID, bizType, key)

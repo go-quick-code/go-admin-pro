@@ -120,7 +120,7 @@ func (r *Repository) FindPendingExtensionByID(ctx context.Context, orderID int64
 // /pay/channel-notify/:channelCode 的定位原语：回调报文不带租户字段，经
 // tenant.Skip 反查后从行派生租户执行，同 FindDemoOrderByPayOrderIDGlobal
 // 先例）。no 在 (tenant_id, no) 唯一键下跨租户可重号：命中多行即单号撞号
-//（真实渠道回调需带应用定位字段），调用方拒绝猜测按联动失败处理；命中 0 行
+// （真实渠道回调需带应用定位字段），调用方拒绝猜测按联动失败处理；命中 0 行
 // 表示回调定位的发起不存在。
 func (r *Repository) FindExtensionsByNoGlobal(ctx context.Context, channelCode, no string) ([]model.OrderExtension, error) {
 	var list []model.OrderExtension

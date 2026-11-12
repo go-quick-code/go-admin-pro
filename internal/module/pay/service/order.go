@@ -549,7 +549,7 @@ type ChannelNotifyResult struct {
 // 成功 code 0；定位/联动失败回非 0 业务码信封（回调方可重试）。
 //
 // 本端点只承接支付（order）回调：退款/转账渠道回调随真实渠道实现另立工单
-//（SPI 的 ParseRefundNotify / 异步转账回调成对承接，spec §4.6/§10）。
+// （SPI 的 ParseRefundNotify / 异步转账回调成对承接，spec §4.6/§10）。
 //
 // 定位语义（v1 即 mock 语义，演练与真实渠道同一解析链路）：回调 outTradeNo =
 // 支付发起 extension no（ZF 单号-发起序，/pay/mock/notify 构造的回调原文同
