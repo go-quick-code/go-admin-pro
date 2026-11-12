@@ -140,3 +140,57 @@ export function pageMyRecharges(params: any) {
 export function pageRecharges(params: any) {
   return request.get('/pay/wallet-recharge/page', { params }) as Promise<any>
 }
+
+// ---------- 转账单（issue #137） ----------
+// 发起转账（消费方服务端端点，登录；同 #133 下单契约——幂等/渠道校验后端
+// 收口，wallet 渠道 userAccount 为目标用户标识）。管理页无发起入口（示例提现
+// 审批是唯一演示发起方）。
+export function createPayTransfer(data: any) {
+  return request.post('/pay/transfer/create', data) as Promise<any>
+}
+// 转账单管理分页/详情（pay:transfer:query）：只读（资金事实 append-only，
+// spec §4.10；导出随 #138 export-excel 补种）。
+export function pagePayTransfers(params: any) {
+  return request.get('/pay/transfer/page', { params }) as Promise<any>
+}
+export function getPayTransfer(id: number) {
+  return request.get(`/pay/transfer/${id}`) as Promise<any>
+}
+
+// ---------- 示例订单（issue #137） ----------
+// 演示商品字典（登录即可）：示例下单表单的商品选择数据源（名称/金额服务端
+// 字典定，请求只收 spuId，spec §3.5/§4.2）。
+export function listDemoSPUs() {
+  return request.get('/pay/demo-order/spus') as Promise<any>
+}
+// 创建示例订单（登录）：返回挂单定位（appKey + merchantOrderId）供跳收银台。
+export function createDemoOrder(data: { spuId: number }) {
+  return request.post('/pay/demo-order/create', data) as Promise<any>
+}
+// 示例订单分页（pay:demo-order:query）。
+export function pageDemoOrders(params: any) {
+  return request.get('/pay/demo-order/page', { params }) as Promise<any>
+}
+// 发起退款（登录 + 本人订单）：全额退未退余额，成功经 #134 回调链路联动。
+export function refundDemoOrder(id: number, reason?: string) {
+  return request.put(`/pay/demo-order/${id}/refund`, { reason }) as Promise<any>
+}
+
+// ---------- 示例提现（issue #137） ----------
+// 申请提现（登录）：user_account/user_name 服务端取登录主体。
+export function createDemoWithdraw(data: { subject: string; price: string }) {
+  return request.post('/pay/demo-withdraw/create', data) as Promise<any>
+}
+// 示例提现分页（pay:demo-withdraw:query）。
+export function pageDemoWithdraws(params: any) {
+  return request.get('/pay/demo-withdraw/page', { params }) as Promise<any>
+}
+// 审批（pay:demo-withdraw:approve）：创建转账单（wallet 渠道入账申请人钱包），
+// 转账成功经 #134 回调链路联动提现单 10。
+export function approveDemoWithdraw(id: number) {
+  return request.put(`/pay/demo-withdraw/${id}/approve`) as Promise<any>
+}
+// 关闭（pay:demo-withdraw:close）：仅等待状态且未发起转账可关，置 20。
+export function closeDemoWithdraw(id: number) {
+  return request.put(`/pay/demo-withdraw/${id}/close`) as Promise<any>
+}
