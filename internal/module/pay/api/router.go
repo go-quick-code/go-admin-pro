@@ -38,6 +38,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	walletTx := rg.Group("/pay/wallet-transaction")
 	walletTx.GET("/my", h.PageMyWalletTransactions)
 	walletTx.GET("/page", h.perm("pay:wallet:query"), h.PageWalletTransactions)
+	// 流水导出（#138，spec §4.12/§7）：权限码随钱包码对 pay:wallet:export。
+	walletTx.GET("/export-excel", h.perm("pay:wallet:export"), h.ExportWalletTransactions)
 
 	// 订单与收银台（issue #133，spec §5/§4.2/§4.11）：下单/收银台/submit/mock
 	// 触发只挂登录（自助端点，user_id 归属过滤在 service 层强制）；mock 触发
@@ -48,6 +50,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	order.POST("/create", h.CreateOrder)
 	order.POST("/submit", h.SubmitOrder)
 	order.GET("/page", h.perm("pay:order:query"), h.PageOrders)
+	order.GET("/export-excel", h.perm("pay:order:export"), h.ExportOrders)
 	order.GET("/:id", h.perm("pay:order:query"), h.GetOrder)
 
 	// 退款（issue #135，spec §5/§4.4/§4.11）：发起只挂登录（消费方服务端
@@ -57,6 +60,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	refund := rg.Group("/pay/refund")
 	refund.POST("/create", h.CreateRefund)
 	refund.GET("/page", h.perm("pay:refund:query"), h.PageRefunds)
+	refund.GET("/export-excel", h.perm("pay:refund:export"), h.ExportRefunds)
 	refund.GET("/:id", h.perm("pay:refund:query"), h.GetRefund)
 
 	cashier := rg.Group("/pay/cashier")
@@ -91,6 +95,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	recharge.POST("/create", h.CreateRecharge)
 	recharge.GET("/my", h.PageMyRecharges)
 	recharge.GET("/page", h.perm("pay:wallet-recharge:query"), h.PageRecharges)
+	// 充值单导出（#138，spec §4.12）：管理端列表导出（自助「我的充值」不在
+	// 导出清单，spec §4.12 只做五个管理列表）。
+	recharge.GET("/export-excel", h.perm("pay:wallet-recharge:export"), h.ExportRecharges)
 
 	// 转账（issue #137，spec §5/§4.8/§4.11）：发起只挂登录（消费方服务端
 	// 自助端点，同 #133 下单契约——幂等/渠道校验在 service 层收口）；管理端
@@ -99,6 +106,7 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	transfer := rg.Group("/pay/transfer")
 	transfer.POST("/create", h.CreateTransfer)
 	transfer.GET("/page", h.perm("pay:transfer:query"), h.PageTransfers)
+	transfer.GET("/export-excel", h.perm("pay:transfer:export"), h.ExportTransfers)
 	transfer.GET("/:id", h.perm("pay:transfer:query"), h.GetTransfer)
 
 	// 示例订单（issue #137，spec §5/§6/§4.11）：创建/字典/退款只挂登录

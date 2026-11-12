@@ -7,6 +7,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"gorm.io/gorm"
 )
 
 // refund.go 是退款单的数据访问原语与查询（issue #135，
@@ -118,8 +119,8 @@ func (r *Repository) CountRefundsByAppID(ctx context.Context, appID int64) (int6
 	return total, err
 }
 
-// ListRefunds 按筛选分页查询退款单（管理端，固定 id DESC，spec §5）。
-func (r *Repository) ListRefunds(ctx context.Context, f RefundFilter, offset, limit int) ([]model.Refund, int64, error) {
+// refundQuery 组装退款单筛选查询（分页与导出共用同一谓词，租户插件自动隔离）。
+func (r *Repository) refundQuery(ctx context.Context, f RefundFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.Refund{})
 	if f.No != "" {
 		q = q.Where("no = ?", f.No)
@@ -142,6 +143,12 @@ func (r *Repository) ListRefunds(ctx context.Context, f RefundFilter, offset, li
 	if f.Status != nil {
 		q = q.Where("status = ?", *f.Status)
 	}
+	return q
+}
+
+// ListRefunds 按筛选分页查询退款单（管理端，固定 id DESC，spec §5）。
+func (r *Repository) ListRefunds(ctx context.Context, f RefundFilter, offset, limit int) ([]model.Refund, int64, error) {
+	q := r.refundQuery(ctx, f)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -151,4 +158,14 @@ func (r *Repository) ListRefunds(ctx context.Context, f RefundFilter, offset, li
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// ListAllRefunds 按筛选查询全部退款单（Excel 导出用，不分页；排序与列表一致
+// id DESC，#138 spec §4.12）。行数无上限：与 CRM/ERP ListAll 同口径。
+func (r *Repository) ListAllRefunds(ctx context.Context, f RefundFilter) ([]model.Refund, error) {
+	var list []model.Refund
+	if err := r.refundQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
 }

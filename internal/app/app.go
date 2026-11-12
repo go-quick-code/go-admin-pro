@@ -468,7 +468,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// HandleDemoNotify 回写 pay_demo_order/pay_demo_withdraw 状态（严格
 	// kind↔type 校验、DataID 定位消费行派生租户、非 demo 行幂等应答）。
 	paySvc.SetDemoNotifyHandler(paySvc.HandleDemoNotify)
-	payAPI := payapi.New(paySvc, sysAPI.RequirePermission)
+	payAPI := payapi.New(paySvc, sysAPI.RequirePermission, cfg.Location())
 
 	// 商户回调重试任务（issue #134，spec §4.5/§7）：系统级 handler（跨租户
 	// 逐租户，照公海回收模式），infra_job 种子默认行每分钟一次。扫描到期任务

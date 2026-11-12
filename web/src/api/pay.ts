@@ -1,5 +1,27 @@
 import request from '@/utils/request'
 
+// ---------- Excel 导出（issue #138，spec §4.12） ----------
+// 五个管理列表导出返回 xlsx 二进制（responseType: blob），复用列表筛选与
+// 租户隔离口径；权限码 pay:<entity>:export（后端 403 由拦截器提示）。
+function downloadExcel(path: string, params?: Record<string, any>) {
+  return request.get(path, { params, responseType: 'blob' }) as Promise<any>
+}
+export function exportPayOrders(params?: Record<string, any>) {
+  return downloadExcel('/pay/order/export-excel', params)
+}
+export function exportPayRefunds(params?: Record<string, any>) {
+  return downloadExcel('/pay/refund/export-excel', params)
+}
+export function exportPayTransfers(params?: Record<string, any>) {
+  return downloadExcel('/pay/transfer/export-excel', params)
+}
+export function exportWalletTransactions(params?: Record<string, any>) {
+  return downloadExcel('/pay/wallet-transaction/export-excel', params)
+}
+export function exportPayRecharges(params?: Record<string, any>) {
+  return downloadExcel('/pay/wallet-recharge/export-excel', params)
+}
+
 // ---------- 支付应用（租户级） ----------
 export function pageApps(params: any) {
   return request.get('/pay/app/page', { params }) as Promise<any>

@@ -7,6 +7,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
+	"gorm.io/gorm"
 )
 
 // recharge.go 是充值域的数据访问原语与查询（issue #136，
@@ -184,9 +185,8 @@ func (r *Repository) FailRechargeRefund(ctx context.Context, tenantID, id int64)
 	return res.RowsAffected, res.Error
 }
 
-// ListRecharges 分页查询充值单（管理端固定 id DESC；自助端传 walletID 过滤
-// 本人充值单，归属过滤在 service 层强制，spec §4.11）。
-func (r *Repository) ListRecharges(ctx context.Context, f RechargeFilter, offset, limit int) ([]model.WalletRecharge, int64, error) {
+// rechargeQuery 组装充值单筛选查询（分页与导出共用同一谓词，租户插件自动隔离）。
+func (r *Repository) rechargeQuery(ctx context.Context, f RechargeFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.WalletRecharge{})
 	if f.WalletID > 0 {
 		q = q.Where("wallet_id = ?", f.WalletID)
@@ -197,6 +197,13 @@ func (r *Repository) ListRecharges(ctx context.Context, f RechargeFilter, offset
 	if f.PayStatus != nil {
 		q = q.Where("pay_status = ?", *f.PayStatus)
 	}
+	return q
+}
+
+// ListRecharges 分页查询充值单（管理端固定 id DESC；自助端传 walletID 过滤
+// 本人充值单，归属过滤在 service 层强制，spec §4.11）。
+func (r *Repository) ListRecharges(ctx context.Context, f RechargeFilter, offset, limit int) ([]model.WalletRecharge, int64, error) {
+	q := r.rechargeQuery(ctx, f)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -206,6 +213,29 @@ func (r *Repository) ListRecharges(ctx context.Context, f RechargeFilter, offset
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// ListAllRecharges 按筛选查询全部充值单（Excel 导出用，不分页；排序与列表一致
+// id DESC，#138 spec §4.12）。行数无上限：与 CRM/ERP ListAll 同口径。
+func (r *Repository) ListAllRecharges(ctx context.Context, f RechargeFilter) ([]model.WalletRecharge, error) {
+	var list []model.WalletRecharge
+	if err := r.rechargeQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// FindRechargePackagesByIDs 按 ID 批量查充值套餐（导出套餐名称列解析），
+// 不存在的 ID 不在返回里。
+func (r *Repository) FindRechargePackagesByIDs(ctx context.Context, ids []int64) ([]model.WalletRechargePackage, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []model.WalletRechargePackage
+	if err := r.db.WithContext(ctx).Find(&rows, ids).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // ---------- 充值单视图装配（appKey/orderNo 回填，我的充值页发起退款与收银台跳转） ----------

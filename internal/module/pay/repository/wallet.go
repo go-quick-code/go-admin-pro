@@ -172,8 +172,8 @@ func (r *Repository) FindWalletByID(ctx context.Context, id int64) (*model.Walle
 	return &row, nil
 }
 
-// ListWallets 分页查询钱包（固定 id DESC，spec §5）。
-func (r *Repository) ListWallets(ctx context.Context, f WalletFilter, offset, limit int) ([]model.Wallet, int64, error) {
+// walletQuery 组装钱包筛选查询（分页共用谓词，租户插件自动隔离）。
+func (r *Repository) walletQuery(ctx context.Context, f WalletFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.Wallet{})
 	if f.UserID > 0 {
 		q = q.Where("user_id = ?", f.UserID)
@@ -181,6 +181,27 @@ func (r *Repository) ListWallets(ctx context.Context, f WalletFilter, offset, li
 	if f.UserType != nil {
 		q = q.Where("user_type = ?", *f.UserType)
 	}
+	return q
+}
+
+// walletTransactionQuery 组装钱包流水筛选查询（分页与导出共用同一谓词）。
+func (r *Repository) walletTransactionQuery(ctx context.Context, f WalletTransactionFilter) *gorm.DB {
+	q := r.db.WithContext(ctx).Model(&model.WalletTransaction{})
+	if f.WalletID > 0 {
+		q = q.Where("wallet_id = ?", f.WalletID)
+	}
+	if f.BizType != nil {
+		q = q.Where("biz_type = ?", *f.BizType)
+	}
+	if f.No != "" {
+		q = q.Where("no = ?", f.No)
+	}
+	return q
+}
+
+// ListWallets 分页查询钱包（固定 id DESC，spec §5）。
+func (r *Repository) ListWallets(ctx context.Context, f WalletFilter, offset, limit int) ([]model.Wallet, int64, error) {
+	q := r.walletQuery(ctx, f)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -194,16 +215,7 @@ func (r *Repository) ListWallets(ctx context.Context, f WalletFilter, offset, li
 
 // ListWalletTransactions 分页查询钱包流水（固定 id DESC，spec §5）。
 func (r *Repository) ListWalletTransactions(ctx context.Context, f WalletTransactionFilter, offset, limit int) ([]model.WalletTransaction, int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.WalletTransaction{})
-	if f.WalletID > 0 {
-		q = q.Where("wallet_id = ?", f.WalletID)
-	}
-	if f.BizType != nil {
-		q = q.Where("biz_type = ?", *f.BizType)
-	}
-	if f.No != "" {
-		q = q.Where("no = ?", f.No)
-	}
+	q := r.walletTransactionQuery(ctx, f)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -213,4 +225,14 @@ func (r *Repository) ListWalletTransactions(ctx context.Context, f WalletTransac
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// ListAllWalletTransactions 按筛选查询全部钱包流水（Excel 导出用，不分页；排序
+// 与列表一致 id DESC，#138 spec §4.12）。行数无上限：与 CRM/ERP ListAll 同口径。
+func (r *Repository) ListAllWalletTransactions(ctx context.Context, f WalletTransactionFilter) ([]model.WalletTransaction, error) {
+	var list []model.WalletTransaction
+	if err := r.walletTransactionQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
 }

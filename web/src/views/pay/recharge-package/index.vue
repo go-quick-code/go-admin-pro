@@ -9,6 +9,16 @@
       perm-prefix="pay:wallet-recharge-package"
       title="充值套餐"
     >
+      <template #toolbar>
+        <!-- 充值单导出（issue #138，spec §4.12）：充值单管理列表无独立页面
+            （#136 只建 822/823 两页），导出按钮随 822 菜单挂本页工具栏
+           （pay:wallet-recharge:export 显隐；导出对象是充值单，非套餐）。 -->
+        <ExcelActions
+          title="充值单"
+          export-perm="pay:wallet-recharge:export"
+          :export-action="exportPayRecharges"
+        />
+      </template>
       <template #cell-payPrice="{ row }">
         <span class="amount">{{ row.payPrice }}</span>
       </template>
@@ -34,6 +44,7 @@
 
 <script setup lang="ts">
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { formatTime, statusOptions } from '@/utils/format'
 import {
   pageRechargePackages,
@@ -41,11 +52,14 @@ import {
   createRechargePackage,
   updateRechargePackage,
   deleteRechargePackage,
+  exportPayRecharges,
 } from '@/api/pay'
 
 // 充值套餐页（issue #136，spec §6/§7 菜单 822）：档位 CRUD（name/pay_price/
 // bonus_price/status）。金额一律十进制字符串（后端 money 只接受 JSON 字符串，
 // 精度不经 float）；快照语义见页内提示（spec 验收：改套餐不影响已建单）。
+// 充值单导出（issue #138，spec §4.12）：管理端充值单列表导出入口挂本页
+//（按钮 seed 8225 挂 822 菜单；自助「我的充值」不在导出清单内）。
 
 const columns = [
   { prop: 'id', label: 'ID', width: 80 },
