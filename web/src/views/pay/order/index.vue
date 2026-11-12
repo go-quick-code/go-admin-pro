@@ -3,6 +3,7 @@
     <!-- 支付订单页（issue #133，spec §6）：只读列表（append-only，spec §4.10
         ——无新增/编辑/删除按钮）；行点击打开详情抽屉（含最近一次发起 extension）。 -->
     <ProTable
+      ref="tableRef"
       :columns="columns"
       :search-items="searchItems"
       :api="api"
@@ -10,6 +11,15 @@
       title="支付订单"
       @row-click="openDetail"
     >
+      <template #toolbar>
+        <!-- 导出（issue #138，spec §4.12）：复用列表筛选口径，pay:order:export 显隐。 -->
+        <ExcelActions
+          title="支付订单"
+          export-perm="pay:order:export"
+          :export-action="exportPayOrders"
+          :export-params="exportParams"
+        />
+      </template>
       <template #cell-status="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
@@ -62,13 +72,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { useUserStore } from '@/stores/user'
 import { formatTime } from '@/utils/format'
-import { pagePayOrders, getPayOrder } from '@/api/pay'
+import { pagePayOrders, getPayOrder, exportPayOrders } from '@/api/pay'
 
 // 支付订单页（issue #133，spec §4.10/§6）：交易单据 append-only 只读列表，
 // 详情抽屉展示订单与最近一次发起 extension（一次支付尝试一条）。
 // 状态对齐芋道枚举：0 待支付 / 10 成功 / 20 已退款 / 30 已关闭。
+// 导出（issue #138，spec §4.12）：工具栏「导出」复用列表筛选口径。
 
 const userStore = useUserStore()
 const canQuery = computed(() => userStore.hasPerm('pay:order:query'))
@@ -122,6 +134,14 @@ const searchItems = [
 ]
 
 const api = { page: pagePayOrders }
+
+const tableRef = ref()
+
+// 导出参数：取当前列表筛选（分页参数与空值由 ExcelActions 剔除）。
+function exportParams() {
+  const q = tableRef.value?.query || {}
+  return { no: q.no, merchantOrderId: q.merchantOrderId, channelCode: q.channelCode, status: q.status }
+}
 
 // ---------- 详情抽屉 ----------
 const detailVisible = ref(false)

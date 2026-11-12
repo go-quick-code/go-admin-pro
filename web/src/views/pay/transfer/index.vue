@@ -4,6 +4,7 @@
         ——无新增/编辑/删除按钮；导出随 #138）；行点击打开详情抽屉
         （含关联应用信息）。 -->
     <ProTable
+      ref="tableRef"
       :columns="columns"
       :search-items="searchItems"
       :api="api"
@@ -11,6 +12,15 @@
       title="转账单"
       @row-click="openDetail"
     >
+      <template #toolbar>
+        <!-- 导出（issue #138，spec §4.12）：复用列表筛选口径，pay:transfer:export 显隐。 -->
+        <ExcelActions
+          title="转账单"
+          export-perm="pay:transfer:export"
+          :export-action="exportPayTransfers"
+          :export-params="exportParams"
+        />
+      </template>
       <template #cell-status="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
@@ -59,9 +69,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { useUserStore } from '@/stores/user'
 import { formatTime } from '@/utils/format'
-import { pagePayTransfers, getPayTransfer } from '@/api/pay'
+import { pagePayTransfers, getPayTransfer, exportPayTransfers } from '@/api/pay'
 
 // 转账单页（issue #137，spec §4.8/§6）：交易单据 append-only 只读列表，
 // 详情抽屉展示转账单与关联应用。状态：0 等待 / 5 进行中 / 10 成功 / 20 关闭。
@@ -109,6 +120,14 @@ const searchItems = [
 ]
 
 const api = { page: pagePayTransfers }
+
+const tableRef = ref()
+
+// 导出参数：取当前列表筛选（分页参数与空值由 ExcelActions 剔除）。
+function exportParams() {
+  const q = tableRef.value?.query || {}
+  return { no: q.no, merchantTransferId: q.merchantTransferId, channelCode: q.channelCode, status: q.status }
+}
 
 // ---------- 详情抽屉 ----------
 const detailVisible = ref(false)

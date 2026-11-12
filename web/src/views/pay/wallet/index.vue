@@ -63,6 +63,16 @@
         @size-change="loadFlows"
         @current-change="loadFlows"
       />
+      <!-- 流水导出（issue #138，spec §4.12）：导出当前钱包流水，pay:wallet:export
+          显隐（spec §7 流水导出挂钱包权限码对）。 -->
+      <div class="flow-actions">
+        <ExcelActions
+          title="钱包流水"
+          export-perm="pay:wallet:export"
+          :export-action="exportWalletTransactions"
+          :export-params="flowExportParams"
+        />
+      </div>
     </el-drawer>
   </div>
 </template>
@@ -70,13 +80,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { useUserStore } from '@/stores/user'
 import { formatTime } from '@/utils/format'
-import { pageWallets, pageWalletTransactions } from '@/api/pay'
+import { pageWallets, pageWalletTransactions, exportWalletTransactions } from '@/api/pay'
 
 // 钱包管理页（issue #132，spec §6）：钱包列表 + 流水抽屉。钱包与流水只读
 //（无新增/编辑/删除：余额变动只走后端唯一入账入口 spec §4.3，钱包不可删
 // spec §4.10）；业务类型 1 充值/2 充值退款/3 支付/4 支付退款/5 余额调整/6 转账。
+// 流水导出（issue #138，spec §4.12）：抽屉内按当前钱包导出（pay:wallet:export）。
 
 const userStore = useUserStore()
 const canQuery = computed(() => userStore.hasPerm('pay:wallet:query'))
@@ -170,6 +182,11 @@ async function loadFlows() {
     flowLoading.value = false
   }
 }
+
+// 流水导出参数：当前抽屉钱包（全量不分页，分页参数由 ExcelActions 剔除）。
+function flowExportParams() {
+  return { walletId: wallet.value?.id }
+}
 </script>
 
 <style scoped>
@@ -179,6 +196,12 @@ async function loadFlows() {
 
 .pager {
   margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.flow-actions {
+  margin-top: 12px;
+  display: flex;
   justify-content: flex-end;
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/database"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
+	"gorm.io/gorm"
 )
 
 // transfer.go 是转账单的数据访问原语与查询（issue #137，
@@ -105,8 +106,8 @@ func (r *Repository) CountTransfersByAppID(ctx context.Context, appID int64) (in
 	return total, err
 }
 
-// ListTransfers 按筛选分页查询转账单（管理端，固定 id DESC，spec §5）。
-func (r *Repository) ListTransfers(ctx context.Context, f TransferFilter, offset, limit int) ([]model.Transfer, int64, error) {
+// transferQuery 组装转账单筛选查询（分页与导出共用同一谓词，租户插件自动隔离）。
+func (r *Repository) transferQuery(ctx context.Context, f TransferFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.Transfer{})
 	if f.No != "" {
 		q = q.Where("no = ?", f.No)
@@ -123,6 +124,12 @@ func (r *Repository) ListTransfers(ctx context.Context, f TransferFilter, offset
 	if f.Status != nil {
 		q = q.Where("status = ?", *f.Status)
 	}
+	return q
+}
+
+// ListTransfers 按筛选分页查询转账单（管理端，固定 id DESC，spec §5）。
+func (r *Repository) ListTransfers(ctx context.Context, f TransferFilter, offset, limit int) ([]model.Transfer, int64, error) {
+	q := r.transferQuery(ctx, f)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -132,4 +139,14 @@ func (r *Repository) ListTransfers(ctx context.Context, f TransferFilter, offset
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// ListAllTransfers 按筛选查询全部转账单（Excel 导出用，不分页；排序与列表一致
+// id DESC，#138 spec §4.12）。行数无上限：与 CRM/ERP ListAll 同口径。
+func (r *Repository) ListAllTransfers(ctx context.Context, f TransferFilter) ([]model.Transfer, error) {
+	var list []model.Transfer
+	if err := r.transferQuery(ctx, f).Order("id DESC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
 }

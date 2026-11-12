@@ -3,6 +3,7 @@
     <!-- 退款单页（issue #135，spec §6）：只读列表（append-only，spec §4.10
         ——无新增/编辑/删除按钮）；行点击打开详情抽屉（含关联订单信息）。 -->
     <ProTable
+      ref="tableRef"
       :columns="columns"
       :search-items="searchItems"
       :api="api"
@@ -10,6 +11,15 @@
       title="退款单"
       @row-click="openDetail"
     >
+      <template #toolbar>
+        <!-- 导出（issue #138，spec §4.12）：复用列表筛选口径，pay:refund:export 显隐。 -->
+        <ExcelActions
+          title="退款单"
+          export-perm="pay:refund:export"
+          :export-action="exportPayRefunds"
+          :export-params="exportParams"
+        />
+      </template>
       <template #cell-status="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
       </template>
@@ -66,9 +76,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import ProTable from '@/components/ProTable.vue'
+import ExcelActions from '@/components/ExcelActions.vue'
 import { useUserStore } from '@/stores/user'
 import { formatTime } from '@/utils/format'
-import { pagePayRefunds, getPayRefund } from '@/api/pay'
+import { pagePayRefunds, getPayRefund, exportPayRefunds } from '@/api/pay'
 
 // 退款单页（issue #135，spec §4.4/§6）：交易单据 append-only 只读列表，
 // 详情抽屉展示退款单与关联订单（原路退回：渠道/实付以订单为准）。
@@ -127,6 +138,14 @@ const searchItems = [
 ]
 
 const api = { page: pagePayRefunds }
+
+const tableRef = ref()
+
+// 导出参数：取当前列表筛选（分页参数与空值由 ExcelActions 剔除）。
+function exportParams() {
+  const q = tableRef.value?.query || {}
+  return { no: q.no, merchantRefundId: q.merchantRefundId, channelCode: q.channelCode, status: q.status }
+}
 
 // ---------- 详情抽屉 ----------
 const detailVisible = ref(false)
