@@ -174,3 +174,27 @@ func (c *MockClient) Refund(ctx context.Context, req RefundReq) (RefundResp, err
 	}
 	return RefundResp{Status: RefundStatusSuccess, ChannelRefundNo: notify.ChannelRefundNo, Raw: notify.Raw}, nil
 }
+
+// mockTransferBody 是 mock 转账的模拟回执原文（转账无 Parse*Notify 动作——
+// v1 同步完成，原文仅作 channel_notify_data 落库演练）。
+type mockTransferBody struct {
+	OutTransferNo string `json:"outTransferNo"`
+	Result        string `json:"result"` // 恒 success（spec §4.8 模拟成功）
+}
+
+// Transfer 发起转账（issue #137，spec §4.8）：mock 渠道不动资金，模拟成功
+// （spec §4.8 仅「模拟成功」，无失败分支——与 refund 的 refundResult 两分支
+// 不同：转账失败分支无承接场景，演示链路里转账失败即发起异常，保持最小实现；
+// 决策记录见包内 mock.go 头注释与 TransferDecision）。渠道回执
+// MOCK-<ZZ 单号>，原文落 pay_transfer.channel_notify_data。
+func (c *MockClient) Transfer(ctx context.Context, req TransferReq) (TransferResp, error) {
+	raw, err := json.Marshal(mockTransferBody{OutTransferNo: req.OutTransferNo, Result: "success"})
+	if err != nil {
+		return TransferResp{}, err
+	}
+	return TransferResp{
+		Status:            TransferStatusSuccess,
+		ChannelTransferNo: "MOCK-" + req.OutTransferNo,
+		Raw:               string(raw),
+	}, nil
+}

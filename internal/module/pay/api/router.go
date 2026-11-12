@@ -91,4 +91,34 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	recharge.POST("/create", h.CreateRecharge)
 	recharge.GET("/my", h.PageMyRecharges)
 	recharge.GET("/page", h.perm("pay:wallet-recharge:query"), h.PageRecharges)
+
+	// 转账（issue #137，spec §5/§4.8/§4.11）：发起只挂登录（消费方服务端
+	// 自助端点，同 #133 下单契约——幂等/渠道校验在 service 层收口）；管理端
+	// 分页/详情挂 pay:transfer:query（交易单据 append-only 无写入端点之外的
+	// 入口，spec §4.10；导出随 #138 export-excel 补 pay:transfer:export）。
+	transfer := rg.Group("/pay/transfer")
+	transfer.POST("/create", h.CreateTransfer)
+	transfer.GET("/page", h.perm("pay:transfer:query"), h.PageTransfers)
+	transfer.GET("/:id", h.perm("pay:transfer:query"), h.GetTransfer)
+
+	// 示例订单（issue #137，spec §5/§6/§4.11）：创建/字典/退款只挂登录
+	//（「demo 创建」自助端点，本人校验在 service 层强制——非本人 403）；
+	// 分页挂 pay:demo-order:query。发起支付走 GET /pay/cashier/order +
+	// POST /pay/order/submit（本人订单校验收口在 cashier/submit）。
+	demoOrder := rg.Group("/pay/demo-order")
+	demoOrder.POST("/create", h.CreateDemoOrder)
+	demoOrder.GET("/page", h.perm("pay:demo-order:query"), h.PageDemoOrders)
+	demoOrder.GET("/spus", h.ListDemoSPUs)
+	demoOrder.PUT("/:id/refund", h.RefundDemoOrder)
+
+	// 示例提现（issue #137，spec §5/§6/§4.8）：申请只挂登录（自助端点，
+	// user_account 服务端取登录主体）；分页挂 pay:demo-withdraw:query；审批/
+	// 关闭挂独立权限码 pay:demo-withdraw:approve|close（spec §6 操作按钮走
+	// 独立权限码；close 为 spec §5 未列的页面实际授予端点，决策记录见
+	// service/demo.go 头注释）。
+	demoWithdraw := rg.Group("/pay/demo-withdraw")
+	demoWithdraw.POST("/create", h.CreateDemoWithdraw)
+	demoWithdraw.GET("/page", h.perm("pay:demo-withdraw:query"), h.PageDemoWithdraws)
+	demoWithdraw.PUT("/:id/approve", h.perm("pay:demo-withdraw:approve"), h.ApproveDemoWithdraw)
+	demoWithdraw.PUT("/:id/close", h.perm("pay:demo-withdraw:close"), h.CloseDemoWithdraw)
 }

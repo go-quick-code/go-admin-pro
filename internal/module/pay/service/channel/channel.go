@@ -1,9 +1,11 @@
 // Package channel 是 pay 的渠道 SPI 与注册表（docs/pay-mvp-spec.md §4.1），
-// 概念等价芋道 PayClient：统一下单、支付回调解析、退款、退款回调解析四个动作。
+// 概念等价芋道 PayClient：统一下单、支付回调解析、退款、退款回调解析四个
+// 动作 + 转账（#137 以 Transfer 发起动作增补，见 TransferDecision）。
 //
-// v1 实现 mock 与 wallet 两个渠道（#133 定形）；14 个渠道码常量全部保留为
-// 概念（对齐芋道枚举），微信/支付宝实现待商户资源另立工单（ADR 0021）。
-// 补渠道实现不改本 SPI：实现 Client 后在装配处 Register 即可。
+// v1 实现 mock 与 wallet 两个渠道（#133 定形，#135/#137 补退款/转账）；
+// 14 个渠道码常量全部保留为概念（对齐芋道枚举），微信/支付宝实现待商户
+// 资源另立工单（ADR 0021）。补渠道实现不改本 SPI：实现 Client 后在装配处
+// Register 即可。
 //
 // 「渠道未实现」（#133 生效）：注册表中无 Client 的渠道（wx_*/alipay_*）
 // 在应用绑定渠道与 submit 处一律 409——渠道码常量仍是唯一合法码源
@@ -152,9 +154,39 @@ type NotifyReq struct {
 	Body []byte
 }
 
-// Client 是渠道 SPI（概念等价芋道 PayClient 四动作 + 渠道码自述）。
-// 实现为各渠道的多态结构（walletConfig{}、mockConfig{}），配置 JSON 存
-// pay_channel.config，由渠道实现自行反序列化。
+// TransferResp.Status 取值（字符串形态对齐芋道；v1 两渠道同步完成用 10，
+// 异步渠道（微信/支付宝商家转账）pending 等转账回调）。
+const (
+	TransferStatusPending = "0"  // 处理中（转账单停 0 等待，等渠道回调）
+	TransferStatusSuccess = "10" // 成功（wallet/mock 同步转账成功）
+	TransferStatusFail    = "20" // 失败（v1 无失败分支：mock 模拟成功，wallet 入账失败即发起回滚）
+)
+
+// TransferReq 转账请求（issue #137，spec §4.8；金额一律转账单快照，渠道请求
+// 不含任何客户端输入金额）。UserAccount 语义随渠道：wallet 渠道 = 目标用户
+// 标识（user_id 字符串）；未来真实渠道 = 收款账号（open_id/登录账号等）。
+type TransferReq struct {
+	OutTransferNo string // 业务转账单号（ZZ 前缀）
+	Subject       string
+	Price         money.Money // 转账金额（服务端定）
+	UserAccount   string      // 收款账号（wallet 渠道为目标用户标识）
+	UserName      string      // 收款人姓名（预留，真实渠道实名校验用）
+	BizID         int64       // 业务单据 ID（pay_transfer.id；wallet 渠道流水 biz_id 用）
+}
+
+// TransferResp 转账响应：Raw 为渠道回调原文/末次响应摘要（落
+// pay_transfer.channel_notify_data）。ChannelTransferNo 为渠道转账回执
+// （wallet 渠道 = 目标钱包流水 LS 单号——资金在本租户账本内移动，流水即回执）。
+type TransferResp struct {
+	Status            string // 0 处理中 / 10 成功 / 20 失败
+	ChannelTransferNo string
+	Raw               string
+}
+
+// Client 是渠道 SPI（概念等价芋道 PayClient 四动作 + 渠道码自述；#137 以
+// Transfer 动作扩为五动作，见 TransferDecision 注释）。实现为各渠道的多态
+// 结构（walletConfig{}、mockConfig{}），配置 JSON 存 pay_channel.config，
+// 由渠道实现自行反序列化。
 type Client interface {
 	// Code 渠道码（14 常量之一）；注册表以此为主键。
 	Code() string
@@ -166,7 +198,21 @@ type Client interface {
 	Refund(ctx context.Context, req RefundReq) (RefundResp, error)
 	// ParseRefundNotify 验签并解析退款回调。
 	ParseRefundNotify(ctx context.Context, req NotifyReq) (RefundNotify, error)
+	// Transfer 发起转账（issue #137，spec §4.8）：同步完成（wallet/mock）时
+	// Status=10；异步渠道 pending 等回调（回调解析动作随真实渠道实现追加，
+	// v1 两渠道无异步转账回调）。
+	Transfer(ctx context.Context, req TransferReq) (TransferResp, error)
 }
+
+// TransferDecision 记录 SPI 扩展决策（issue #137）：spec §4.1 将 SPI 定形为
+// 芋道 PayClient 四动作（Order/ParseOrderNotify/Refund/ParseRefundNotify），
+// 未覆盖转账（§4.8 的渠道动作在 #137 落地时 SPI 尚无承接位）。本票按「四动作
+// 的成对形态」（发起 + 回调解析）增补 Transfer 发起动作——与 Order/Refund 同构
+// 的「消费方服务端发起」入口；ParseTransferNotify 不增补：v1 两渠道转账均
+// 同步完成（wallet 入账即终态、mock 模拟成功），异步转账回调随真实渠道实现
+// 另立工单再定形。增补为接口新方法（v1 仅 mock/wallet 两实现，同票内补齐，
+// 不破坏「补渠道实现不改 SPI」——后续渠道实现 Transfer 与既有动作一并实现）。
+const TransferDecision = "SPI Transfer 动作增补（#137）：四动作成对形态 + Transfer 发起；ParseTransferNotify 留给异步渠道工单"
 
 // Registry 是渠道实现注册表：map[渠道码]Client。v1 在 #132 注册 mock 与
 // wallet；未注册（未实现）的渠道在绑定与 submit 处 409「渠道未实现」

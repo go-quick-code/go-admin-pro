@@ -154,7 +154,7 @@ func payReplaceMockClient(t *testing.T, env *testutil.IntegrationEnv, refundResu
 	if err != nil {
 		t.Fatalf("构造 %s mock 渠道: %v", refundResult, err)
 	}
-	walletClient, err := paychannel.NewWalletClient("", env.App.Pay, env.App.Pay)
+	walletClient, err := paychannel.NewWalletClient("", env.App.Pay, env.App.Pay, env.App.Pay)
 	if err != nil {
 		t.Fatalf("构造 wallet 渠道: %v", err)
 	}

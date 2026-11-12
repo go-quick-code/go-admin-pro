@@ -466,11 +466,17 @@ func (s stubTenantLister) ListEnabledTenantIDs(ctx context.Context) ([]int64, er
 // ---------- demo 商户回调端点（公开路由，spec §4.6 demo 回调） ----------
 
 // TestIntegrationPayDemoNotifyEndpoints demo 三端点：无登录可达（任务不校验
-// 登录）、伪造/缺失签名 4xx、正确签名 2xx + {"code":0}；transfer/refund 同构。
+// 登录）、伪造/缺失签名 4xx、正确签名 2xx + {"code":0}（#137 起联动已注册：
+// 报文 type 与端点种类匹配、DataID 无对应消费行 → 幂等应答不联动）；
+// kind↔type 不符 → 业务失败应答（code != 0）。
 func TestIntegrationPayDemoNotifyEndpoints(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	key := env.Config.Pay.NotifyHMACKey
-	body := []byte(`{"type":1,"status":"success","merchantOrderId":"MO-DEMO-1","dataId":42}`)
+	bodyByKind := map[string][]byte{
+		"order":    []byte(`{"type":1,"status":"success","merchantOrderId":"MO-DEMO-1","dataId":42}`),
+		"refund":   []byte(`{"type":2,"status":"success","merchantRefundId":"MR-DEMO-1","dataId":42}`),
+		"transfer": []byte(`{"type":3,"status":"success","merchantTransferId":"MT-DEMO-1","dataId":42}`),
+	}
 
 	base := env.Server.URL + env.Config.App.APIPrefix + "/pay/demo/notify"
 	post := func(path string, payload []byte, signature string) (int, string) {
@@ -500,7 +506,9 @@ func TestIntegrationPayDemoNotifyEndpoints(t *testing.T) {
 	}
 
 	for _, kind := range []string{"order", "refund", "transfer"} {
-		// 正确签名 → 200 {"code":0}（验签通过，业务联动扩展点未注册回成功）。
+		body := bodyByKind[kind]
+		// 正确签名 + 无对应消费行 → 200 {"code":0}（#137 联动注册后：非 demo
+		// 行的回调幂等应答不联动，demo 端点是商户模拟器）。
 		status, respBody := post(kind, body, notifyHMAC(key, body))
 		if status != http.StatusOK || !strings.Contains(respBody, `"code":0`) {
 			t.Fatalf("demo/%s 正确签名应 200 {\"code\":0}，实际 HTTP %d %s", kind, status, respBody)
@@ -516,7 +524,7 @@ func TestIntegrationPayDemoNotifyEndpoints(t *testing.T) {
 			t.Fatalf("demo/%s 缺失签名应 400，实际 HTTP %d", kind, status)
 		}
 		// 报文被篡改（签名仍是原文的）→ 400。
-		status, _ = post(kind, []byte(`{"type":1,"status":"success","merchantOrderId":"篡改"}`), notifyHMAC(key, body))
+		status, _ = post(kind, append(body, []byte(` `)...), notifyHMAC(key, body))
 		if status != http.StatusBadRequest {
 			t.Fatalf("demo/%s 报文篡改应 400，实际 HTTP %d", kind, status)
 		}
@@ -525,6 +533,14 @@ func TestIntegrationPayDemoNotifyEndpoints(t *testing.T) {
 		if status != http.StatusBadRequest {
 			t.Fatalf("demo/%s 非 JSON 报文应 400，实际 HTTP %d", kind, status)
 		}
+	}
+
+	// kind↔type 不符（#137 严格校验）：order 端点收到 type=2 报文 → 200 +
+	// 非 0 业务码（任务 21 重试，路由缺陷不被静默吞掉）。
+	wrong := []byte(`{"type":2,"status":"success","merchantRefundId":"MR-WRONG","dataId":42}`)
+	status, respBody := post("order", wrong, notifyHMAC(key, wrong))
+	if status != http.StatusOK || !strings.Contains(respBody, `"code":500`) {
+		t.Fatalf("order 端点收到 type=2 报文应 200 code=500，实际 HTTP %d %s", status, respBody)
 	}
 }
 
