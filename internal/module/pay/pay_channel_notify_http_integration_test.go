@@ -34,20 +34,35 @@ func postChannelNotify(t *testing.T, env *testutil.IntegrationEnv, channelCode, 
 	return postChannelNotifyHeader(t, env, channelCode, body, "")
 }
 
-// postChannelNotifyHeader 带可选 X-Forwarded-For / Authorization 头的渠道回调
-// 请求（伪造 XFF 的限速键轮换攻击与登录态 404 同答断言用）。
-func postChannelNotifyHeader(t *testing.T, env *testutil.IntegrationEnv, channelCode, body, header string) (int, string) {
+// postChannelNotifyHeader 带伪造 X-Forwarded-For 的渠道回调请求（伪造 XFF
+// 的限速键轮换攻击用，PR #140 安全审查 P3-2）。
+func postChannelNotifyHeader(t *testing.T, env *testutil.IntegrationEnv, channelCode, body, xff string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, env.APIPrefixURL("/pay/channel-notify/"+channelCode), strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("构造渠道回调请求: %v", err)
 	}
-	if xff := forgeXFF(header); xff != "" {
+	if xff != "" {
 		req.Header.Set("X-Forwarded-For", xff)
 	}
-	if header != "" && !strings.HasPrefix(header, "203.0.113.") {
-		req.Header.Set("Authorization", "Bearer "+header)
+	return doChannelNotify(t, req)
+}
+
+// postChannelNotifyAuth 带登录态的渠道回调请求（登录态 404 同答断言用——
+// 公开端点不以登录换承接能力）。
+func postChannelNotifyAuth(t *testing.T, env *testutil.IntegrationEnv, channelCode, body, token string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, env.APIPrefixURL("/pay/channel-notify/"+channelCode), strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("构造渠道回调请求: %v", err)
 	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return doChannelNotify(t, req)
+}
+
+// doChannelNotify 发出已构造的请求并读响应体原文。
+func doChannelNotify(t *testing.T, req *http.Request) (int, string) {
+	t.Helper()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("请求渠道回调端点: %v", err)
@@ -63,15 +78,6 @@ func postChannelNotifyHeader(t *testing.T, env *testutil.IntegrationEnv, channel
 		}
 	}
 	return resp.StatusCode, string(buf)
-}
-
-// forgeXFF 从 header 参数取 TEST-NET-3 伪造 XFF（"203.0.113." 前缀约定），
-// 其余值视为登录令牌——测试内不引第三参数的轻量约定。
-func forgeXFF(header string) string {
-	if strings.HasPrefix(header, "203.0.113.") {
-		return header
-	}
-	return ""
 }
 
 // publicNotifyFakeClient 是测试用「可公开承接回调」的渠道替身（SetRegistry
@@ -196,7 +202,7 @@ func TestIntegrationPayChannelNotifyNotPubliclyCallable(t *testing.T) {
 		}
 	}
 	// 登录态同答 404（公开端点不以登录换承接能力）。
-	httpStatus, respBody := postChannelNotifyHeader(t, env, "mock", body, admin)
+	httpStatus, respBody := postChannelNotifyAuth(t, env, "mock", body, admin)
 	if httpStatus != http.StatusNotFound {
 		t.Fatalf("登录态对 mock 渠道回调应同答 404，实际 HTTP %d %s", httpStatus, respBody)
 	}
