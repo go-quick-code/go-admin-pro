@@ -152,15 +152,14 @@ func (s *Service) applyWalletChangeTx(ctx context.Context, tx *payrepo.Repositor
 	}
 	// 5) LS 流水号：pay_sequence 事务内发放（tx 为绑定事务的 Repository，
 	//    发放与流水落库同事务）。日期键取一次口径，避免跨日翻转错位。
-	key := dateKey(s.businessNow())
-	no, err := tx.NextSequenceValue(ctx, tenantID, SeqWalletTransaction, key)
+	no, err := s.nextNoInTx(ctx, tx, tenantID, SeqWalletTransaction, NoPrefixWalletTransaction)
 	if err != nil {
 		return nil, err
 	}
 	// 6) 流水（append-only）：正入负出 + 变动后结存快照。
 	out := &model.WalletTransaction{
 		TenantID: tenantID,
-		No:       formatNo(NoPrefixWalletTransaction, key, no),
+		No:       no,
 		WalletID: walletID,
 		BizType:  ch.BizType,
 		BizID:    ch.BizID,

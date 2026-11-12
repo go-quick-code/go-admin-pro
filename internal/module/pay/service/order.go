@@ -117,8 +117,7 @@ func (s *Service) CreateOrder(ctx context.Context, req *dto.OrderCreateReq, user
 	err = s.repo.Transaction(ctx, func(tx *payrepo.Repository) error {
 		// ZF 单号：pay_sequence 事务内发放（spec §4.9），客户端提交的 no
 		// 不存在入口（DTO 不收）。
-		key := dateKey(s.businessNow())
-		seq, err := tx.NextSequenceValue(ctx, tenantID, SeqOrder, key)
+		no, err := s.nextNoInTx(ctx, tx, tenantID, SeqOrder, NoPrefixOrder)
 		if err != nil {
 			return err
 		}
@@ -129,7 +128,7 @@ func (s *Service) CreateOrder(ctx context.Context, req *dto.OrderCreateReq, user
 		expireTime := s.businessNow().Add(orderExpireDuration)
 		out = &model.Order{
 			AppID:           app.ID,
-			No:              formatNo(NoPrefixOrder, key, seq),
+			No:              no,
 			MerchantOrderID: merchantOrderID,
 			UserID:          p.UserID,
 			UserType:        model.WalletUserTypeAdmin,

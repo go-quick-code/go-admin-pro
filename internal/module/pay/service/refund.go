@@ -150,8 +150,7 @@ func (s *Service) CreateRefund(ctx context.Context, req *dto.RefundCreateReq, us
 
 		// TK 单号：pay_sequence 事务内发放（spec §4.9），DTO 不收 no（客户端
 		// 提交的 no 一律不采纳）。
-		key := dateKey(s.businessNow())
-		seq, err := tx.NextSequenceValue(ctx, tenantID, SeqRefund, key)
+		no, err := s.nextNoInTx(ctx, tx, tenantID, SeqRefund, NoPrefixRefund)
 		if err != nil {
 			return err
 		}
@@ -161,7 +160,7 @@ func (s *Service) CreateRefund(ctx context.Context, req *dto.RefundCreateReq, us
 		}
 		out = &model.Refund{
 			AppID:            app.ID,
-			No:               formatNo(NoPrefixRefund, key, seq),
+			No:               no,
 			OrderID:          locked.ID,
 			OrderNo:          locked.No,
 			MerchantOrderID:  locked.MerchantOrderID,

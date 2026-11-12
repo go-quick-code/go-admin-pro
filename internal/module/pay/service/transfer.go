@@ -172,8 +172,7 @@ func (s *Service) createTransferTx(ctx context.Context, tx *payrepo.Repository, 
 
 	// ZZ 单号：pay_sequence 事务内发放（spec §4.9），DTO 不收 no（客户端提交
 	// 的 no 一律不采纳）。
-	key := dateKey(s.businessNow())
-	seq, err := tx.NextSequenceValue(ctx, tenantID, SeqTransfer, key)
+	no, err := s.nextNoInTx(ctx, tx, tenantID, SeqTransfer, NoPrefixTransfer)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +193,7 @@ func (s *Service) createTransferTx(ctx context.Context, tx *payrepo.Repository, 
 	}
 	out := &model.Transfer{
 		AppID:              app.ID,
-		No:                 formatNo(NoPrefixTransfer, key, seq),
+		No:                 no,
 		MerchantTransferID: params.MerchantTransferID,
 		UserID:             targetUserID,
 		UserType:           model.WalletUserTypeAdmin,
