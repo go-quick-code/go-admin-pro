@@ -23,19 +23,45 @@
 //     同形，裸 SQL 的列清单里不加引号会被解析器拒绝（GORM 生成的语句自带
 //     引号，不受影响）。
 //
+// 信任契约：table 必须是编译期字面量（crm_sequence / erp_sequence /
+// pay_sequence），不得来自运行时输入；Next 入口按 ^[a-z0-9_]+$ 校验表名，
+// 不合法在触碰 db 之前直接返回错误——这是 fail-closed 兜底（与内层事务的
+// 第二道防线同一哲学），不给未来消费者留裸拼 SQL 的注入足枪，也不引入
+// 表名类型抽象（ADR 0022）。
+//
 // 用法：各模块 Repository 的 NextSequenceValue 是本包的薄包装（签名不变、表名
 // 各传各的），业务调用点一律经模块包装，不直调本包。
 package sequence
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 
 	"gorm.io/gorm"
 )
 
+// tableRe 限制表名为小写字母/数字/下划线（与 dbschema 的表名白名单同形，
+// 收紧为小写以匹配既有序列表命名）。
+var tableRe = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// validateTable 校验表名白名单：Next 的表名按包注释的信任契约必须是编译期
+// 字面量，本函数是入口 fail-closed 兜底，不合法直接拒绝。
+func validateTable(table string) error {
+	if !tableRe.MatchString(table) {
+		return fmt.Errorf("表名 %q 不合法：只允许小写字母、数字与下划线（^[a-z0-9_]+$），且必须是编译期字面量，不得来自运行时输入", table)
+	}
+	return nil
+}
+
 // Next 在 table 序列表的 (tenantID, bizType, dateKey) 计数行上原子发放下一个
-// 序号。db 是调用方句柄（业务事务或其绑定物，见包注释的并发语义）。
+// 序号。db 是调用方句柄（业务事务或其绑定物，见包注释的并发语义）。table
+// 须为编译期字面量并通过入口校验，不合法在触碰 db 之前直接返回错误（信任
+// 契约见包注释）。
 func Next(ctx context.Context, db *gorm.DB, table string, tenantID int64, bizType, dateKey string) (int64, error) {
+	if err := validateTable(table); err != nil {
+		return 0, err
+	}
 	var value int64
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(upsertSQL(table), tenantID, bizType, dateKey).Error; err != nil {

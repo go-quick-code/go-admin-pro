@@ -1,7 +1,7 @@
 package sequence
 
 import (
-	"strings"
+	"context"
 	"testing"
 )
 
@@ -10,7 +10,9 @@ import (
 //   - 反引号转义：last_value 与 MySQL 8 窗口函数关键字 LAST_VALUE 同形，裸 SQL
 //     的列清单里不加引号会被解析器拒绝；
 //   - 参数顺序：upsert 的三个 ? 按位置对应 tenant_id、biz_type、date_key（首行
-//     插入计 1），回读的三个 ? 顺序一致。
+//     插入计 1），回读的三个 ? 顺序一致；
+//   - 表名白名单：Next 入口按 ^[a-z0-9_]+$ 校验（fail-closed 兜底，信任契约见
+//     包注释），三张真实表名必须放行、注入形一律拒绝。
 //
 // 期望字面量取自重构前三份手写实现（crm/erp/pay 逐字节相同、仅表名不同），
 // 是独立于本包代码的已知良好来源；重构后必须与它们逐字节等价。
@@ -49,21 +51,30 @@ func TestReadSQL(t *testing.T) {
 	}
 }
 
-// TestSQLIdentifiersBackquoted 反引号转义契约：tenant_id / biz_type / date_key /
-// last_value / 表名的每一处出现都必须带反引号——字段名 last_value 与 MySQL 8
-// 窗口函数 LAST_VALUE 同形，漏一处转义裸 SQL 即被解析器拒绝。
-func TestSQLIdentifiersBackquoted(t *testing.T) {
-	for _, sql := range []string{upsertSQL("crm_sequence"), readSQL("pay_sequence")} {
-		for _, ident := range []string{"tenant_id", "biz_type", "date_key", "last_value"} {
-			bare := strings.Count(sql, ident)
-			quoted := strings.Count(sql, "`"+ident+"`")
-			if bare != quoted {
-				t.Errorf("%s：标识符 %s 有 %d 处出现、仅 %d 处带反引号（last_value 与 LAST_VALUE 同形，必须全部转义）",
-					sql, ident, bare, quoted)
-			}
+// TestValidateTable 表名白名单契约（Next 入口 guard 的纯函数部分）：只放行
+// `^[a-z0-9_]+$`——三张真实序列表必须通过；反引号、点号、大写、空串与注入形
+// 一律拒绝（表名虽约定为编译期字面量，入口仍 fail-closed，不给未来消费者留
+// 注入足枪）。
+func TestValidateTable(t *testing.T) {
+	for _, table := range []string{"crm_sequence", "erp_sequence", "pay_sequence"} {
+		if err := validateTable(table); err != nil {
+			t.Errorf("validateTable(%q) 应放行真实序列表，却报错：%v", table, err)
 		}
-		if !strings.Contains(sql, "`crm_sequence`") && !strings.Contains(sql, "`pay_sequence`") {
-			t.Errorf("%s：表名必须以反引号内插", sql)
+	}
+	for _, table := range []string{"crm`_sequence", "crm.sequence", "CRM_SEQUENCE", "", "x`); DROP"} {
+		if err := validateTable(table); err == nil {
+			t.Errorf("validateTable(%q) 应拒绝，却放行了", table)
 		}
+	}
+}
+
+// TestNextRejectsInvalidTableBeforeDB 经公开入口 Next 钉住 guard 的接线：表名
+// 不合法必须在触碰 db 之前返回错误（nil 句柄即安全——guard 失效时本测试以
+// panic 显形），而不是等内层事务拼出 SQL 才失败。
+func TestNextRejectsInvalidTableBeforeDB(t *testing.T) {
+	const injection = "x`); DROP"
+	_, err := Next(context.Background(), nil, injection, 1, "biz", "20260101")
+	if err == nil {
+		t.Fatalf("Next 对非法表名 %q 必须报错（在触碰 db 之前）", injection)
 	}
 }
