@@ -193,6 +193,17 @@ func TestGenerateEntityModuleScaffold(t *testing.T) {
 			t.Errorf("service 骨架应包含 %q", want)
 		}
 	}
+	// repository 骨架的 NextSequenceValue 必须走委托原语（spec user story 11）：
+	// 委托行与 import 任一漂移在 codegen 层即刻显形。
+	repo := files["go/internal/module/erp/repository/repository.go"]
+	for _, want := range []string{
+		`sequence.Next(ctx, r.db, "crm_sequence"`,
+		"github.com/go-quick-code/go-admin-pro/internal/pkg/sequence",
+	} {
+		if !strings.Contains(repo, want) {
+			t.Errorf("repository 骨架应包含 %q", want)
+		}
+	}
 	// 无菜单输入则不生成种子片段。
 	if _, ok := files["seed/menus.append.go"]; ok {
 		t.Error("未提供菜单输入时不应生成种子片段")
