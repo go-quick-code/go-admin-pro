@@ -45,6 +45,21 @@ func TestPermSetsConverge(t *testing.T) {
 		t.Fatalf("包内解引用失败（扫描口径出现未知形状，fail-closed——静默漏码会伪装成全绿）：%v", unresolved)
 	}
 
+	// 豁免条目前缀一次性校验（fail-closed，与整体口径一致）：时效检查与豁免
+	// 抑制都按 spec.prefix+":" 过滤，前缀拼到配置表之外（如 systen:）的条目
+	// 永不参与任何检查、静默失效——每条豁免 code 的前缀（首个冒号前）必须
+	// 命中配置表某行。有效前缀内的码拼错由下方豁免时效性检查抓住，此处只补
+	// 「前缀本身拼错」面。
+	for _, e := range permSeedOnlyExemptions {
+		prefix, _, found := strings.Cut(e.code, ":")
+		if !found {
+			t.Fatalf("豁免条目 %q 不含前缀冒号，无法归属任何前缀", e.code)
+		}
+		if !slices.ContainsFunc(permConvergenceSpecs, func(s permConvergenceSpec) bool { return s.prefix == prefix }) {
+			t.Fatalf("豁免条目 %q 前缀 %q 不在收敛检查配置表（前缀拼错的条目会静默失效，fail-closed）", e.code, prefix)
+		}
+	}
+
 	for _, spec := range permConvergenceSpecs {
 		t.Run(spec.prefix, func(t *testing.T) {
 			routeCodes := routeByPrefix[spec.prefix]
@@ -209,6 +224,11 @@ func deriveErpDocCodes(t *testing.T) map[string]struct{} {
 // permCallNames 是三个中间件注入调用名：同一 system 权限中间件经各模块
 // 注入字段名不同（system 直调 RequirePermission、crm/erp/oa/bpm/notify
 // requirePermission、pay/message/infra/codegen perm）。
+//
+// 不变量：system 中间件注入字段名（requirePermission/RequirePermission/
+// perm）若新增或改名，必须同步登记此处——零发现防呆只覆盖前缀级失效
+// （前缀下任一路由仍命中即不触发 Fatal），不覆盖逐调用名漏扫：新字段名
+// 未登记时其逐个调用点会静默漏出扫描集，routeOnly 403 缺口不被门禁发现。
 var permCallNames = map[string]struct{}{
 	"requirePermission": {},
 	"RequirePermission": {},
