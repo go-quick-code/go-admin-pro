@@ -641,8 +641,8 @@ package dto
 
 const tmplScaffoldRepository = `// Package repository 是 [[ .Module ]] 模块的 DAL 层。
 // 所有查询/写入通过租户插件自动带 tenant_id 条件（表须登记 internal/pkg/database
-// 的 TenantTables），本层不手工拼主表的租户条件；编号发放的裸 SQL 是唯一例外
-// （租户值显式入参，见 NextSequenceValue）。
+// 的 TenantTables），本层不手工拼主表的租户条件；编号发放是唯一例外
+// （委托 internal/pkg/sequence 的裸 SQL 原语，租户值显式入参，见 NextSequenceValue）。
 // （[[ .GenMark ]]的模块骨架；per-entity 文件随后续生成追加。）
 package repository
 
@@ -651,6 +651,8 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/sequence"
 )
 
 // Repository 是 [[ .Module ]] 模块的数据访问对象。
@@ -677,27 +679,9 @@ func (r *Repository) Transaction(ctx context.Context, fn func(tx *Repository) er
 }
 
 // NextSequenceValue 在 crm_sequence 的 (tenant_id, biz_type, date_key) 上原子发放下一个序号
-// （与 crm 模块同款实现：INSERT ... ON DUPLICATE KEY UPDATE 在主键行锁内自增，再同事务回读）。
-// 必须包在事务里；租户值为显式入参：裸 SQL 不经租户插件。标识符统一加反引号。
+// （薄包装；机制与并发说明见 internal/pkg/sequence，生成实体仍写 CRM 序列表）。
 func (r *Repository) NextSequenceValue(ctx context.Context, tenantID int64, bizType, dateKey string) (int64, error) {
-	var value int64
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(
-			"INSERT INTO ~crm_sequence~ (~tenant_id~, ~biz_type~, ~date_key~, ~last_value~) VALUES (?, ?, ?, 1) "+
-				"ON DUPLICATE KEY UPDATE ~last_value~ = ~last_value~ + 1",
-			tenantID, bizType, dateKey,
-		).Error; err != nil {
-			return err
-		}
-		return tx.Raw(
-			"SELECT ~last_value~ FROM ~crm_sequence~ WHERE ~tenant_id~ = ? AND ~biz_type~ = ? AND ~date_key~ = ?",
-			tenantID, bizType, dateKey,
-		).Scan(&value).Error
-	})
-	if err != nil {
-		return 0, err
-	}
-	return value, nil
+	return sequence.Next(ctx, r.db, "crm_sequence", tenantID, bizType, dateKey)
 }
 `
 

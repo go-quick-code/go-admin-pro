@@ -11,6 +11,7 @@ import (
 	"errors"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/sequence"
 	"gorm.io/gorm"
 )
 
@@ -169,37 +170,10 @@ func (r *Repository) DeleteCustomer(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Customer{}, id).Error
 }
 
-// NextSequenceValue 在 (tenantID, bizType, dateKey) 上原子发放下一个序号。
-//
-// 并发安全方案（issue #8：并发下不重号）：单条 INSERT ... ON DUPLICATE KEY UPDATE
-// 在唯一键（即主键）的行锁内完成「首行插入或自增」，并发请求在同一行上串行化；
-// 表只有这一个唯一索引，不存在多索引交叉加锁，且所有事务先取序列锁再写客户行，
-// 加锁顺序一致，无死锁环。随后在同一事务内回读该行的 last_value：
-// 本事务持有的行锁保证读到的就是本事务发放的值，不会读入并发方已发放的更大值。
-//
-// 必须包在事务里：autocommit 下 upsert 与回读之间允许并发发放，会把同一序号
-// 发给两个请求。租户值为显式入参：裸 SQL 不经租户插件。
-// 标识符统一加反引号：last_value 与 MySQL 8 窗口函数关键字 LAST_VALUE 同形，
-// 裸 SQL 的列清单里不加引号会被解析器拒绝（GORM 生成的语句自带引号，不受影响）。
+// NextSequenceValue 在 (tenantID, bizType, dateKey) 上原子发放下一个序号；机制与
+// 并发说明见 internal/pkg/sequence（唯一实现，本方法只是表名固定的薄包装）。
 func (r *Repository) NextSequenceValue(ctx context.Context, tenantID int64, bizType, dateKey string) (int64, error) {
-	var value int64
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(
-			"INSERT INTO `crm_sequence` (`tenant_id`, `biz_type`, `date_key`, `last_value`) VALUES (?, ?, ?, 1) "+
-				"ON DUPLICATE KEY UPDATE `last_value` = `last_value` + 1",
-			tenantID, bizType, dateKey,
-		).Error; err != nil {
-			return err
-		}
-		return tx.Raw(
-			"SELECT `last_value` FROM `crm_sequence` WHERE `tenant_id` = ? AND `biz_type` = ? AND `date_key` = ?",
-			tenantID, bizType, dateKey,
-		).Scan(&value).Error
-	})
-	if err != nil {
-		return 0, err
-	}
-	return value, nil
+	return sequence.Next(ctx, r.db, "crm_sequence", tenantID, bizType, dateKey)
 }
 
 // Transaction 在一个数据库事务里执行 fn，fn 收到绑定同一事务的 Repository。
