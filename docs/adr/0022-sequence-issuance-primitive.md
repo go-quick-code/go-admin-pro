@@ -9,3 +9,9 @@
 拒绝的替代：合并为一张共享序列表（要翻三个已上线迁移、动租户表登记、破坏「删模块连表删」的自包含）；原语直跑传入 db、去掉内层事务（少一层 savepoint，但 autocommit 误用从安全变静默重号，fail-open）；连 DateKey/FormatNo 一并下沉（diff 拉进 crm 四个格式函数与 seed，收益只是省几行纯展示代码）；删模块薄包装、调用点直调 pkg（侵入 crm 五处业务文件，模块 Repository 单一 DAL 入口的叙事被打破）；并发测试迁入 pkg 集成测试（要解决 pkg 级测试的表来源问题，churn 大于收益）。
 
 相关：ADR 0007（internal/pkg 值类型先例）、ADR 0015（ERP 域边界）、ADR 0018（单据内核，「第二个消费者再提升」出处）、ADR 0021（pay 范围）、GLOSSARY「序号序列」「发号」「日期键」。
+
+**提升规则补遗（2026-11-14 grill 定案，候选 C2 导出下载收口）**：
+
+- **下沉触发器泛化为两类**：① 同一并发不变量 ≥2 个消费者（正文原规则）；② **逐字节拷贝 ≥3 个消费者**。第二类的证据标准更严：必须逐字节相同或注释自认同构（C2 的三份 `sendExcel` 逐字相同，pay 拷贝注释自认「与 crm/erp 同构」），结构相似不算——「不为泛型而泛型」的旧立场继续约束后者。
+- **「格式留模块」细化**：有模块分叉风险的格式留模块（序号格式，正文立场不变）；**无分叉诱因的单值格式可随机制内聚**（C2 的 dateKey `20060102`：三份拷贝一致、无模块语义、非唯一性来源）。
+- **C2 定案**：三份逐字相同的导出下载助手（crm/erp/pay `api/excel.go` 的 `sendExcel` 与各自一份 `excelContentType`）收口为 `internal/pkg/response.SendXLSX(c *gin.Context, loc *time.Location, base, title string, data []byte)`。落点选 `response` 而非候选原建议的 `excel`：SendXLSX 是 HTTP 响应构造而非 Excel 数据转换，`response → excel` 依赖已存在（`import_excel.go`），`excel` 包保持无 gin 的纯数据包（12 个纯单测文件）。时区显式入参（handler 的 `location` 字段，pkg 不读全局配置）；三模块保留一行薄委托，32 个调用点零改动（沿用正文薄包装先例）。范围只收导出下载家族：附件下载家族（oa ×4、crm 合同附件、infra DownloadFile、dbdoc、codegen zip 的 disposition 变体）不动——是两个概念而非两段相似代码（见 GLOSSARY「导出下载」「附件下载」）；若将来统一 disposition 构造，另立候选。前端 `web/src/api/{crm,erp,pay}.ts` 三份逐字相同的 `downloadExcel` 私有函数同票收进已存在的 `web/src/utils/download.ts`。测试照正文模式：pkg 纯单测（disposition 拼接、RFC 5987 编码、dateKey、content type），三模块现有 HTTP 集成测试原样守护、不加新集成测试。
