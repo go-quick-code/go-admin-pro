@@ -1,0 +1,11 @@
+# 权限码收敛检查全库化：AST 双向比对 + 带理由豁免清单
+
+**Status**: accepted
+
+全库 9 个权限前缀（system/crm/erp/oa/pay/infra/message/bpm/notify）中只有 ERP 有收敛检查（ADR 0020 S4：AST 扫 api 包 `requirePermission("erp:...")` 字面量 ∪ doctype 注册表派生 72 码，与 seed 权限集合双向比对），其余 8 个前缀零检查。决定泛化为单一全库机制、覆盖全部 9 个前缀：一个泛化测试按 per-前缀配置表驱动，递归扫 `internal/module/` 全树非测试源码（权限码天然跨目录——`infra:codegen:*` 的路由在 codegen 包），匹配三个调用名 `requirePermission`/`RequirePermission`/`perm`（同一 system 中间件经各模块注入字段名不同）；第一参为 string 字面量直接收集，为标识符时做包内解引用——var/const 字面量赋值（`roomManage = "oa:room:manage"`）直接解析，已知派生函数白名单（`service.ManagePermission("leave")` → `oa:<resource>:manage`）按规则派生；per-前缀派生 hook 仅 erp 需要（`doctype.All()` 72 码，机制同 S4）。旧 `TestErpPermSetsConverge` 并入泛化测试，erp 成为配置表一员、无特判。比对语义分两个方向：routeOnly（路由有、seed 无）= 授予路径缺失的 403 缺口，一律修复不豁免——现库唯一一例 `pay:wallet-recharge:query`（路由挂码、前端 API 函数在、seed 无任何授予路径，#136 只建了菜单页没建按钮）随票在 822 充值套餐菜单下补授予按钮（占用已留空的 8224 槽位）；seedOnly（seed 有、路由无）按带理由豁免清单逐条裁决，初始 9 条分三类：**菜单可见性码**（挂菜单行、仅控制前端菜单树过滤、可无对应端点：`system:area:query`、`message:mail:query`）、**前端操作码**（端点登录即可或走 BPM 审批，码用于前端按钮显隐/流程定义：`bpm:task:handle`、`crm:contract:approve`、`pay:demo-order:create/refund`、`pay:demo-withdraw:create`）、**服务层可见范围码**（不挂路由守卫、由服务层数据可见范围逻辑消费：`oa:expense:manage`、`oa:attendance:manage`）。测试文件是豁免清单的唯一事实源：一条一行带理由，新增豁免必须带理由，review 逐条质询。测试纯静态（go/parser + 内存构造菜单，不碰 DB），`make test` 全库可跑。前端不纳入（沿用 ADR 0020 定案：前端码全经 perm-prefix 派生、无测试基建，留候选 04）。
+
+原因：权限码有两个腐化方向，只有双向比对能同时抓住。routeOnly 让非管理员运行时 403 而 seed 看似正常（pay 已有一例）；seedOnly 要么是永远授不到的死码，要么是权限模型的合法组成部分——菜单可见性码、前端操作码、服务层可见范围码都是芋道原版模式的延续，一律当幽灵码清掉会破坏菜单过滤与前端显隐，一律补端点则无页面需求、纯为消豁免。by-design 差异不做机制特判（按端点属性识别「自助端点」等）：模型知识埋进代码、无法逐条质询；带理由豁免清单把它显式化。判据是**码的消费方在哪**（前端菜单树 / 前端按钮 / 服务层可见范围 / 路由守卫），而不是端点有没有列表页这类表面特征。按前缀扫全树而非按模块目录：目录配置会漏跨目录码（codegen）且新增目录要登记，fail-open。做包内解引用而非只扫字面量：否则 oa 的 `manageLeave`/`roomManage` 漏报，等于逼人改掉路由经 var 挂码的写法。`perm` 是通用名，误匹配风险靠「第一参必须是目标前缀字面量」收敛，多报方向安全（暴露出来供人工裁决，不静默漏）。
+
+拒绝的替代：只泛化 7 前缀、跳过 notify（特判引入不对称，配置表驱动下顺带覆盖零成本）；按模块目录配置扫描（codegen 跨目录漏扫）；只扫字面量不解引用（oa 计算码漏报）；by-design 差异机制特判或一律删除/补端点（删码破坏菜单可见性与前端显隐，补端点无需求）；`pay:wallet-recharge:query` 路由改登录即可（管理端只读资金事实列表，自助语义不符）或路由与前端 API 函数一起删（路由已挂码、前端函数已定义，留着就是缺口）；保留旧 S4 测试并存（双机制双事实源，erp 特判化）；前端一并纳入（需解析 perm-prefix prop + ProTable 派生规则，web 无测试基建，性价比远低于后端）。
+
+相关：ADR 0020（S4 出处；「S4 已泛化为全库机制，erp 无特判」）、ADR 0019（同族收敛检查：租户表登记的「精确分区 + 差异拒绝」）、GLOSSARY「权限码收敛检查」「403 缺口」「幽灵码」「菜单可见性码」「前端操作码」「服务层可见范围码」。
