@@ -102,6 +102,7 @@ go-admin-pro
 │       ├── excel/              # Excel 导入导出与模板
 │       ├── money/              # 金额值类型（int64 分，decimal(12,2)）
 │       ├── qty/                # 数量值类型（int64 毫单位，decimal(24,3)，ADR 0017）
+│       ├── sequence/           # 序号发放原语（upsert 原子发放 + 同事务回读，ADR 0022）
 │       ├── datascope/          # 行级数据权限谓词引擎（角色范围 1–5、多角色并集）
 │       ├── quota/              # 套餐限额与用量的中性类型（system 解释，消费模块依赖窄接口）
 │       ├── push/               # 实时推送 hub 与一次性票据（SSE/WS 传输层在 notify 模块）
