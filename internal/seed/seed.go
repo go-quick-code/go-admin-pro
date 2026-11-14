@@ -174,7 +174,11 @@ func seedTenant(db *gorm.DB) error {
 	return nil
 }
 
-func seedMenus(db *gorm.DB) error {
+// baseMenus 构造基础菜单行：除 ERP 700 段（erpCoreMenus/erpDocMenus）与
+// pay 800 段（payMenus）外的全部菜单——system/infra/代码生成/CRM/OA/bpm/
+// message/notify 各段 + CRM 仪表盘。seedMenus 与权限码收敛测试共用同一
+// 事实源，路由侧一致性由 TestPermSetsConverge 双向比对兜底。
+func baseMenus() []sysmodel.Menu {
 	menus := []sysmodel.Menu{
 		menuRow(1, 0, "仪表盘", "/dashboard", "dashboard/index", "", "Odometer", 0),
 
@@ -560,6 +564,21 @@ func seedMenus(db *gorm.DB) error {
 		btnRow(6031, 603, "日志重发", "message:log:resend", 1),
 		btnRow(6032, 603, "日志删除", "message:log:delete", 2),
 	}
+	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
+	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
+	// 页面与查询按钮共用权限码 crm:dashboard:view（API 路由同码）。
+	// 菜单名与系统首页同为「仪表盘」，组件名单独设为 CrmDashboard：
+	// 前端动态路由以 componentName 作 route name，重名会让 Vue Router 告警并互相覆盖。
+	crmDashboard := menuRow(4140, 400, "仪表盘", "dashboard", "crm/dashboard/index", "crm:dashboard:view", "DataLine", 0)
+	crmDashboard.ComponentName = "CrmDashboard"
+	return append(menus,
+		crmDashboard,
+		btnRow(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
+	)
+}
+
+func seedMenus(db *gorm.DB) error {
+	menus := baseMenus()
 	// ERP 700 段：目录/统计/主数据/库存只读/结算账户（不进单据类型注册表，
 	// 见 erpCoreMenus），随后并入 12 类单据段（erpDocMenus，注册表投影）。
 	// 财务与库存敏感：内置普通角色（role id=2）默认不授予任何 ERP 菜单
@@ -570,17 +589,6 @@ func seedMenus(db *gorm.DB) error {
 	// 820 渠道配置。资金敏感：内置普通角色（role id=2）默认不授予任何
 	// pay 菜单（见 seedRoles 的 roleMenus——刻意无 800 段条目）。
 	menus = append(menus, payMenus()...)
-	// 仪表盘（issue #19）：菜单 ID 4140（4060–4070 产品、4080–4085 商机、
-	// 4100–4105 合同、4120–4124 回款已占用，grep 去重确认）。
-	// 页面与查询按钮共用权限码 crm:dashboard:view（API 路由同码）。
-	// 菜单名与系统首页同为「仪表盘」，组件名单独设为 CrmDashboard：
-	// 前端动态路由以 componentName 作 route name，重名会让 Vue Router 告警并互相覆盖。
-	crmDashboard := menuRow(4140, 400, "仪表盘", "dashboard", "crm/dashboard/index", "crm:dashboard:view", "DataLine", 0)
-	crmDashboard.ComponentName = "CrmDashboard"
-	menus = append(menus,
-		crmDashboard,
-		btnRow(4141, 4140, "仪表盘查询", "crm:dashboard:view", 1),
-	)
 	// 菜单补齐（issue #69）：按 ID 只插入缺失项，不更新、不复活已软删菜单。
 	// 旧实现「有菜单就整体跳过」会让存量库永远看不到新版本追加的菜单；
 	// Unscoped 把软删 ID 也视为已存在，避免重新插入撞主键或复活管理员删除的菜单。

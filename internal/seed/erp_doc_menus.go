@@ -43,8 +43,8 @@ const erpDocMenuParent int64 = 700
 // #88：700 dir、710–712（分类/单位/产品）+ 按钮 7101–7124；#89：720 仓库 /
 // 730 供应商 / 740 客户 + 按钮 7201–7204/7301–7304/7401–7404；#95：701 首页
 // 统计；#90：721–722 库存只读页；#94：750 结算账户。按钮 = 菜单ID×10+n
-// （grep 去重确认未占用）。权限码仍为字面量，与路由的一致性由 S4 AST
-// 双向比对兜底（erp_perm_sets_test.go）。
+// （grep 去重确认未占用）。权限码仍为字面量，与路由的一致性由全库权限码
+// 收敛检查兜底（perm_convergence_test.go，S4 泛化后的唯一收敛机制）。
 func erpCoreMenus() []sysmodel.Menu {
 	return []sysmodel.Menu{
 		dirRow(700, 0, "ERP 进销存", "/erp", "ShoppingCart", 70),
