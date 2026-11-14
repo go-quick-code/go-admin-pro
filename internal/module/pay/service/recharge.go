@@ -590,37 +590,3 @@ func (s *Service) failRechargeRefundTx(ctx context.Context, tx *payrepo.Reposito
 	}
 	return true, nil
 }
-
-// ProcessChannelRefundSuccess 是渠道退款成功回调的处理入口（真实渠道的
-// channel-notify 端点随渠道实现接入时复用；mock 同步路径经 CreateRefund 内联
-// 调用 refundSuccessTx）。开事务 → 订单行锁（先锁订单后锁钱包，与发起路径
-// 加锁序一致防死锁）→ 退款成功入账函数（认领 0 行 = 已处理，幂等返回）。
-func (s *Service) ProcessChannelRefundSuccess(ctx context.Context, refundID int64, channelRefundNo, notifyData string) (bool, error) {
-	tenantID := payTenantID(ctx)
-	if tenantID == 0 {
-		return false, xerr.Unauthorized("")
-	}
-	refund, err := s.repo.FindRefundByID(ctx, refundID)
-	if err != nil {
-		return false, err
-	}
-	if refund == nil {
-		return false, xerr.NotFound("退款单不存在")
-	}
-	claimed := false
-	err = s.repo.Transaction(ctx, func(tx *payrepo.Repository) error {
-		locked, err := tx.LockOrder(ctx, tenantID, refund.OrderID)
-		if err != nil {
-			return err
-		}
-		if locked == nil {
-			return xerr.NotFound("支付订单不存在")
-		}
-		claimed, err = s.refundSuccessTx(ctx, tx, tenantID, refund, channelRefundNo, notifyData)
-		return err
-	})
-	if err != nil {
-		return false, err
-	}
-	return claimed, nil
-}
