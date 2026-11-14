@@ -11,3 +11,7 @@ pay 按 L4 全量对齐芋道 8 域 14 表（app / channel / order / refund / tr
 拒绝的替代：把微信/支付宝实现一并写出（不可测）；pay 专属 AES 加密（破坏仓库一致性、单机收益有限）；只留 mock 渠道不建 SPI（渠道抽象是芋道 pay 的核心概念，砍掉违背概念等价）；复用 doc kernel（状态机与事务边界形态不同）；钱包挂 member 用户并顺手引入 member（范围事故，表结构 `user_id + user_type` 已零成本预留）。
 
 相关：ADR 0003（L4 全量范围策略）、ADR 0007（Money 值类型）、ADR 0010（平台级渠道/租户级日志先例）、ADR 0018（单据内核边界）。
+
+## 补遗：退款联动不建扩展点（2026-11-15，架构候选 C4）
+
+评审候选 C4 曾建议为退款成功联动镜像支付侧的 `OrderSuccessHandler` 扩展点（RefundSuccessHandler/RefundGuard）。核实后不采纳，接受现状为决策而非遗漏：退款侧的联动与守卫（发起时余额预检 409、成功处理时 mid-flight 复检→退款单终态失败）内联于 `CreateRefund`/`refundSuccessTx`，唯一受退款影响的业务是充值单（约 80 行耦合）；钱包渠道回加已经由渠道 SPI（wallet Client 的 `Refund` 实现）解耦；示例订单退款经商户回调通知消费方，pay 侧零联动。不建 seam 的理由：(1) 单一消费者，且 v1 范围内第二个消费者无路线图；(2) 镜像并非等价迁移——退款的业务性失败是**终态语义**（余额不足时退款单认领为失败、资金不动），支付侧 handler 失败是整体回滚，等价迁移需要「认领前 guard veto + 认领后 handler」两个扩展点，若连发起时 guard 一并收纳则是三个，而支付侧并无 guard 注册机制，对称性反而更差。随本决策的唯一代码动作：通用的渠道退款回调处理入口 `ProcessChannelRefundSuccess` 从 recharge.go 归位 refund.go（纯搬移；`/pay/channel-notify` 承接退款回调与 `ParseRefundNotify` 接线仍属真实渠道工单范围，见正文「异步渠道回调随真实渠道实现接入」）。重启条件：出现第二个受退款影响的业务类型（pay 内部业务，或经 app.go 装配的跨模块消费方）时，按「guard 认领前 veto（自理终态失败认领与业务回写）+ handler 认领后生效（失败即回滚）」镜像 `OrderSuccessHandler` 建 seam。
