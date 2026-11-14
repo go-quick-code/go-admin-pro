@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { downloadExcel } from '@/utils/download'
 
 // ---------- CRM 客户（issue #8 样板：后续 CRM 实体照此复制） ----------
 export function pageCustomers(params: any) {
@@ -230,16 +231,13 @@ export function getDashboardSummary() {
 // 后端在进入解析前固定 10MB / 5000 行 / 100 条错误明细上限；导入先全量校验，
 // 有错整批拒绝（HTTP 200 + code 4201，data 为 { errors, total, truncated }），
 // 页面按行号 + 列名 + 原因展示（@/components/ExcelActions.vue）。
+// 下载封装共享于 @/utils/download（spec #144 收口）。
 function uploadExcel(path: string, file: File) {
   const form = new FormData()
   form.append('file', file)
   return request.post(path, form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }) as Promise<any>
-}
-
-function downloadExcel(path: string, params?: Record<string, any>) {
-  return request.get(path, { params, responseType: 'blob' }) as Promise<any>
 }
 
 // 客户：导入 + 模板 + 导出（导出复用列表筛选与数据权限）。

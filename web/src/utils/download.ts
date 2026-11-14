@@ -2,6 +2,14 @@
 // 后端返回 xlsx 二进制并带 Content-Disposition；这里解析文件名并触发下载，
 // 拿不到文件名时用调用方给的兜底名（统一补 .xlsx 后缀）。
 
+import request from '@/utils/request'
+
+// downloadExcel 请求导出端点拿 blob 响应（交 saveBlobResponse 触发下载）；
+// 各模块 api 文件共享（spec #144：原 crm/erp/pay 三份逐字拷贝收口于此）。
+export function downloadExcel(path: string, params?: Record<string, any>) {
+  return request.get(path, { params, responseType: 'blob' }) as Promise<any>
+}
+
 // saveBlobResponse 把 axios（responseType: 'blob'）的成功响应保存为文件。
 export function saveBlobResponse(response: any, fallbackName: string) {
   saveBlobAs(response, ensureXlsxSuffix(fallbackName))
