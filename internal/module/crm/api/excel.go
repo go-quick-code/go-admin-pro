@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/excel"
@@ -21,8 +19,6 @@ import (
 // contract_excel.go / receivable_excel.go，本文件只放共享的收文件与发文件助手。
 
 const (
-	// excelContentType 是 xlsx 的 MIME 类型。
-	excelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	// importBodyMaxBytes 是 multipart 请求体上限：文件上限 10MB 加上表单开销余量。
 	importBodyMaxBytes = excel.DefaultMaxBytes + (1 << 20)
 )
@@ -59,12 +55,8 @@ func (h *Handler) receiveImportFile(c *gin.Context) (io.ReadCloser, bool) {
 
 // sendExcel 输出 xlsx 附件：ASCII 文件名兼容旧客户端，filename* 提供中文名。
 // 文件名日期键按业务时区（ADR 0006），不依赖服务器 TZ（PR #39 审查 P2）。
+// 响应构造已单点化为 response.SendXLSX（spec #144），此处仅保留一行薄委托，
+// 调用点零改动。
 func (h *Handler) sendExcel(c *gin.Context, base, title string, data []byte) {
-	dateKey := time.Now().In(h.location).Format("20060102")
-	asciiName := base + "-" + dateKey + ".xlsx"
-	chineseName := title + "-" + dateKey + ".xlsx"
-	disposition := fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`,
-		asciiName, url.PathEscape(chineseName))
-	c.Header("Content-Disposition", disposition)
-	c.Data(http.StatusOK, excelContentType, data)
+	response.SendXLSX(c, h.location, base, title, data)
 }

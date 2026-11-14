@@ -1,11 +1,9 @@
 import request from '@/utils/request'
+import { downloadExcel } from '@/utils/download'
 
 // ---------- Excel 导出（issue #138，spec §4.12） ----------
 // 五个管理列表导出返回 xlsx 二进制（responseType: blob），复用列表筛选与
 // 租户隔离口径；权限码 pay:<entity>:export（后端 403 由拦截器提示）。
-function downloadExcel(path: string, params?: Record<string, any>) {
-  return request.get(path, { params, responseType: 'blob' }) as Promise<any>
-}
 export function exportPayOrders(params?: Record<string, any>) {
   return downloadExcel('/pay/order/export-excel', params)
 }
