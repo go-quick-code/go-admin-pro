@@ -55,8 +55,9 @@ func seedPayChannels(db *gorm.DB) error {
 // dir 800 + 810 支付应用 + 811 支付订单 + 812 退款单 + 813 转账单 + 814 回调通知
 // + 820 渠道配置 + 821 钱包管理 + 822 充值套餐 + 823 我的充值 + 830 示例订单
 // + 831 示例提现 + 840 收银台；按钮 = 菜单ID×10+n（8101–8103、8115/8125/8135/
-// 8215/8225、8201、8221–8223、8301–8302、8311–8313，开工前 grep seed 去重确认
-// 未占用；813/830/831 由 #137 落地，800 段子项 sort 全量重排为菜单 ID 升序）。
+// 8215/8224/8225、8201、8221–8223、8301–8302、8311–8313，开工前 grep seed 去重
+// 确认未占用；813/830/831 由 #137 落地，800 段子项 sort 全量重排为菜单 ID 升序；
+// 8224 充值单查询由 #148 补种，占用 #136 留空的槽位）。
 //
 // Excel 导出按钮（#138，spec §4.12/§7，export 槽位 n=5）：811 订单导出
 // （pay:order:export）/ 812 退款导出（pay:refund:export）/ 813 转账导出
@@ -74,7 +75,9 @@ func seedPayChannels(db *gorm.DB) error {
 //
 // 充值套餐（822，issue #136，spec §6/§7）：管理端 CRUD 页，按钮
 // 8221 新增 / 8222 修改 / 8223 删除（pay:wallet-recharge-package:create|update|
-// delete，query 为菜单权限码）。
+// delete，query 为菜单权限码）；8224 充值单查询（#148，issue #148/ADR 0023）与
+// 8225 充值单导出（#138）挂的是充值单的 pay:wallet-recharge:* 码——充值单
+// 无独立页面，两按钮都放充值套餐页工具栏。
 //
 // 我的充值（823，issue #136，spec §4.11 自助端点）：自助页无权限码（登录即可，
 // 服务层强制本人钱包归属，同 840 收银台形态）。菜单 ID 为 #136 补充分配——
@@ -129,6 +132,11 @@ func payMenus() []sysmodel.Menu {
 		btnRow(8221, 822, "套餐新增", "pay:wallet-recharge-package:create", 1),
 		btnRow(8222, 822, "套餐修改", "pay:wallet-recharge-package:update", 2),
 		btnRow(8223, 822, "套餐删除", "pay:wallet-recharge-package:delete", 3),
+		// 充值单查询（issue #148，ADR 0023）：占用 #136 留空的 8224 槽位——
+		// 充值单管理分页路由挂 pay:wallet-recharge:query（api/router.go）而
+		// seed 无任何授予路径，是非管理员必 403 的缺口；按钮挂 822 菜单
+		//（充值单列表无独立页面，前端入口在充值套餐页工具栏，同 8225）。
+		btnRow(8224, 822, "充值单查询", "pay:wallet-recharge:query", 5),
 		// 充值单导出（#138）：充值单管理列表无独立页面（#136 只建 822/823 两页），
 		// 导出按钮挂 822 菜单、按钮放充值套餐页工具栏（导出对象是充值单）。
 		btnRow(8225, 822, "充值单导出", "pay:wallet-recharge:export", 4),
