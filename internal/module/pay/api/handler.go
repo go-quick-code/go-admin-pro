@@ -19,8 +19,8 @@ type Handler struct {
 	svc  *service.Service
 	perm PermissionMiddleware
 	// location 是业务时区（ADR 0006）：Excel 导出的文件名日期键按它划分
-	//（#138，与 crm/erp 的 sendExcel 同口径）。nil 时回退 time.Local
-	//（生产装配固定传 config.Location()）。
+	//（#138，与 crm/erp 同经 response.SendXLSX 单点收口，spec #144）。nil 时回退
+	// time.Local（生产装配固定传 config.Location()）。
 	location *time.Location
 	// demoLimiter 是 demo 商户回调端点的 IP 限速器（issue #134，照社交回调
 	// 先例）：随 Handler 实例创建，公开端点防滥用（#85 安全审计同款定位）。

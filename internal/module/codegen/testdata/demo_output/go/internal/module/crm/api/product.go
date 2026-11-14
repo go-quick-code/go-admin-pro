@@ -88,7 +88,8 @@ func (h *Handler) RegisterProductRoutes(rg *gin.RouterGroup) {
 	product.DELETE("/:id", h.requirePermission("crm:product:delete"), h.DeleteProduct)
 
 	// 导入导出接线位（生成器只留位，不产出实现）：接线参考 internal/module/crm 的
-	// 手写实现与 internal/pkg/excel，并补上对应的 Import/Export handler。
+	// 手写实现——导出侧调单点 helper internal/pkg/response.SendXLSX（spec #144），
+	// 导入侧用 internal/pkg/excel，并补上对应的 Import/Export handler。
 	//	product.POST("/import", h.requirePermission("crm:product:import"), h.ImportProduct)
 	//	product.GET("/export", h.requirePermission("crm:product:export"), h.ExportProduct)
 	//	product.GET("/import-template", h.requirePermission("crm:product:import"), h.ImportProductTemplate)

@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { downloadExcel } from '@/utils/download'
 
 // ---------- ERP 产品分类（issue #88，docs/erp-mvp-spec.md §5） ----------
 // GET list 全量返回扁平列表，树组装在前端（spec §5，与 CRM 的 /tree 端点刻意不同）。
@@ -55,10 +56,8 @@ export function deleteProduct(id: number) {
 }
 
 // ---------- Excel 导出（issue #88，spec §4.11：ERP 只导出不导入） ----------
-// 导出返回 xlsx 二进制（responseType: blob），复用列表筛选与数据权限口径。
-function downloadExcel(path: string, params?: Record<string, any>) {
-  return request.get(path, { params, responseType: 'blob' }) as Promise<any>
-}
+// 导出返回 xlsx 二进制（responseType: blob），复用列表筛选与数据权限口径；
+// 下载封装共享于 @/utils/download（spec #144 收口）。
 export function exportProductCategories() {
   return downloadExcel('/erp/product-category/export-excel')
 }
