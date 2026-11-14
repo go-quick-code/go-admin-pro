@@ -9,3 +9,7 @@
 拒绝的替代：只泛化 7 前缀、跳过 notify（特判引入不对称，配置表驱动下顺带覆盖零成本）；按模块目录配置扫描（codegen 跨目录漏扫）；只扫字面量不解引用（oa 计算码漏报）；by-design 差异机制特判或一律删除/补端点（删码破坏菜单可见性与前端显隐，补端点无需求）；`pay:wallet-recharge:query` 路由改登录即可（管理端只读资金事实列表，自助语义不符）或路由与前端 API 函数一起删（路由已挂码、前端函数已定义，留着就是缺口）；保留旧 S4 测试并存（双机制双事实源，erp 特判化）；前端一并纳入（需解析 perm-prefix prop + ProTable 派生规则，web 无测试基建，性价比远低于后端）。
 
 相关：ADR 0020（S4 出处；「S4 已泛化为全库机制，erp 无特判」）、ADR 0019（同族收敛检查：租户表登记的「精确分区 + 差异拒绝」）、GLOSSARY「权限码收敛检查」「403 缺口」「幽灵码」「菜单可见性码」「前端操作码」「服务层可见范围码」。
+
+## 补遗：实施终态（2026-11-15）
+
+正文「初始 9 条三类」为设计时裁决；实施扫描另暴露 7 条代码注释已写明 by-design 的既有差异，随本票补入后终态为 **16 条四类**——新增第四类**服务层组合校验码**（`oa:calendar:public`、`crm:customer:release`、`crm:customer:transfer`、`crm:follow-up:update`、`crm:follow-up:delete`），另补前端操作码 `oa:document:upload` 与服务层可见范围码 `oa:document:manage`；GLOSSARY「权限」节相应补第七词。豁免清单唯一事实源为 `internal/seed/perm_convergence_test.go` 的 `permSeedOnlyExemptions`（一条一行带理由，review 逐条质询）。本补遗记录实施裁决，最终以维护者合并裁决为准；不接受时的回收路径 = revert 4ca475d 与本补遗。
