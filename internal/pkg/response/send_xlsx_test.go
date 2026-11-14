@@ -111,6 +111,22 @@ func TestSendXLSXControlCharsEscaped(t *testing.T) {
 	}
 }
 
+// TestSendXLSXBaseQuoteVerbatim 钉住 base 含双引号的现状契约（安全审查 H3）：
+// filename="%s" 不做引号转义，引号原样进引号内——与重构前三份手写实现的
+// fmt.Sprintf 格式逐字节等价；防止未来「好心加转义」静默改变格式。该风险
+// 由 SendXLSX doc 的编译期常量不变量（调用点纪律）拦截，本测试只钉行为。
+func TestSendXLSXBaseQuoteVerbatim(t *testing.T) {
+	c, w := newXlsxContext()
+	response.SendXLSX(c, time.UTC, `he"quo`, "标题", []byte("x"))
+
+	disposition := w.Header().Get("Content-Disposition")
+	dateKey := time.Now().In(time.UTC).Format("20060102")
+	want := `attachment; filename="he"quo-` + dateKey + `.xlsx"; filename*=UTF-8''%E6%A0%87%E9%A2%98-` + dateKey + `.xlsx`
+	if disposition != want {
+		t.Errorf("base 含引号应原样嵌入（未转义，与重构前逐字节等价）：\n got  %s\n want %s", disposition, want)
+	}
+}
+
 // TestSendXLSXNilLocationPanics loc == nil 直接 panic（fail-closed）：装配期编程
 // 错误显性化，而非静默用错时区（正常运行不可达——应用时区启动校验保证非 nil）。
 func TestSendXLSXNilLocationPanics(t *testing.T) {
