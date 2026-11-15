@@ -7,7 +7,7 @@
 1. **路由挂载**：模块 api 包实现 `RegisterProtected(rg *gin.RouterGroup)`（必需）；有公开端点再实现 `RegisterPublic`，有换票流再实现 `RegisterStream`（可选能力，router 按接口探测）。`internal/app/app.go` 把 handler append 进 `router.New` 的注册器列表——列表顺序即受保护组注册顺序；前缀与既有模块互不冲突即可，组序不影响路由匹配。
 2. **演示种子**：新建 `internal/seed/<name>_demo.go`，`func init() { seed.RegisterDemo(seed.DemoOrder<Name>, seed<Name>Demo) }`；order 常量集中声明在 `seed.go`（步进 10），撞序号 init panic。只依赖基础种子的模块顺序无关；有依赖的写进常量注释（先例：OA 必须在 CRM 后——依赖演示组织 sales1/sales2/manager）。
 
-漏接路由不会编译报错（签名不强制注册，ADR 0024 有论证）：兜底网是集成套件的**前缀在场测试**（`internal/testutil`）——每个模块前缀在 `engine.Routes()` 里必须 ≥1 条，缺一家即红。
+漏接路由不会编译报错（签名不强制注册，ADR 0024 有论证）：兜底网是集成套件的**前缀在场测试**（`internal/testutil`）——每个模块前缀在 `engine.Routes()` 里必须 ≥1 条，缺一家即红。该网只防 `internal/testutil/routes_test.go` 里 prefixes 列表登记过的前缀：新模块接线时必须同步把自己的前缀 append 进该列表，不进列表即对新模块不设防。
 
 ## 手抄（逐项，各有兜底）
 
