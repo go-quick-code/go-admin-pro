@@ -130,11 +130,10 @@ var demoSeeds []demoSeed
 // error，且装配 bug 应在每个 import seed 的构建里立即触发，含 seed 关闭的
 // prod 构建），消息点名两个撞号方并含 order 值，不让任何一方被静默吞掉。
 func RegisterDemo(order int, fn func(*gorm.DB) error) {
-	name := demoFuncName(fn)
 	for i, existing := range demoSeeds {
 		if existing.order == order {
 			panic(fmt.Sprintf("seed: 演示种子 order %d 冲突：%s 与 %s（DemoOrder 常量步进 10 取号，撞号即接线 bug）",
-				order, demoFuncName(existing.fn), name))
+				order, demoFuncName(existing.fn), demoFuncName(fn)))
 		}
 		if existing.order > order {
 			demoSeeds = append(demoSeeds, demoSeed{})
@@ -148,6 +147,8 @@ func RegisterDemo(order int, fn func(*gorm.DB) error) {
 
 // demoFuncName 返回 fn 的短名（最后一个点之后的部分），用于撞序号 panic
 // 点名撞号双方——全名形如 go-admin-pro/internal/seed.seedCRMDemo。
+// 只在撞序号 panic 分支调用（走 reflect + FuncForPC），常规注册路径不付
+// 反射开销。
 func demoFuncName(fn func(*gorm.DB) error) string {
 	full := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
 	if i := strings.LastIndexByte(full, '.'); i >= 0 {
