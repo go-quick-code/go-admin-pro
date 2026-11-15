@@ -43,6 +43,7 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/iploc"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/jwt"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/push"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"github.com/go-quick-code/go-admin-pro/internal/router"
 	"github.com/go-quick-code/go-admin-pro/internal/seed"
 	"gorm.io/gorm"
@@ -195,23 +196,6 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	apiLogWriter := infraservice.NewAPILogWriter(infraRepo, infraservice.APILogWriterConfig{})
 	apiLogWriter.Run()
 
-	// 注册访问日志清理任务（spec §4.6.7）：handlerName 为 cleanAccessLogs，
-	// 种子默认行每日 03:00 启用（保留期 access-log.retention-days，默认 30，
-	// handler_param 可填天数覆盖）。清理跨租户执行（tenant.Skip，见 infra
-	// repository），属系统级处理器：只有平台租户管理员可操作。
-	scheduler.RegisterSystem("cleanAccessLogs", func(ctx context.Context, param string) error {
-		days := 0
-		if v, err := strconv.Atoi(strings.TrimSpace(param)); err == nil {
-			days = v
-		}
-		cleaned, err := infraSvc.CleanAccessLogsBefore(ctx, days)
-		if err != nil {
-			return err
-		}
-		slog.Info("access log cleanup job finished", "cleaned", cleaned)
-		return nil
-	})
-
 	sysAPI := systemapi.New(sysSvc, socialSvc, sensitiveSvc, cfg)
 
 	// CRM 模块：数据范围解析复用 system Service（datascope 引擎宿主）。
@@ -243,22 +227,6 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	crmSvc.SetContractFileStore(contractFileStore{infra: infraSvc})
 	// 附件 URL 走鉴权下载端点（PR #39 审查 P2）：拼装地址需要 HTTP API 前缀。
 	crmSvc.SetAPIPrefix(cfg.App.APIPrefix)
-
-	// 注册公海自动回收任务（issue #14）：handlerName 为 recyclePoolCustomers，
-	// 种子默认行已按暂停状态写入（启用前请确认各租户公海配置，见 internal/seed
-	// 的 seedJobs 注释）。回收是系统级动作：handler 忽略 job 所属租户上下文，
-	// 由 crm service 以 tenant.Skip 列出启用租户后逐租户执行。
-	//
-	// 系统级注册（PR #39 审查 P0）：普通租户管理员即使持 super_admin（"*"）
-	// 也不能创建/运行该 handler，否则可经 infra_job 触发跨租户公海回收。
-	scheduler.RegisterSystem(crmservice.RecycleJobHandlerName, func(ctx context.Context, param string) error {
-		result, err := crmSvc.RunPoolRecycle(ctx)
-		if err != nil {
-			return err
-		}
-		slog.Info("pool auto-recycle job finished", "tenants", result.Tenants, "recycled", result.Recycled)
-		return nil
-	})
 
 	// Excel 导入的日期解析统一使用应用业务时区（ADR 0006：只经 cfg.Location() 获取）。
 	crmAPI := crmapi.New(crmSvc, sysAPI.RequirePermission, cfg.Location())
@@ -404,34 +372,6 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	bpmSvc.RegisterBusinessHandler(oaservice.LeaveApprovalBusinessType, oaSvc)
 	bpmSvc.RegisterBusinessHandler(oaservice.ExpenseApprovalBusinessType, oaservice.NewExpenseApprovalHandler(oaSvc))
 
-	// 考勤日结果任务（issue #61，spec §4.10）：系统级 handler（跨租户迭代，
-	// tenant.Skip 列启用租户后逐租户派生），infra_job 种子默认行每天 01:00。
-	// handler_param 可填 YYYY-MM-DD 回填指定日期；留空取业务时区前一日。
-	scheduler.RegisterSystem(oaservice.AttendanceDailyResultHandlerName, func(ctx context.Context, param string) error {
-		summary, err := oaSvc.RunDailyAttendanceResult(ctx, param)
-		if err != nil {
-			return err
-		}
-		slog.Info("attendance daily result job finished",
-			"date", summary.Date, "tenants", summary.Tenants, "users", summary.Users)
-		return nil
-	})
-
-	// 会议提醒任务（issue #57，spec §4.11）：系统级 handler（跨租户迭代），
-	// infra_job 种子默认行每 5 分钟一次。扫描 (now, now+15m] 内开始的有效
-	// 未提醒预约，条件更新 reminded_at 认领后向预约人写 meeting_reminder
-	// 通知（只发一次）。handler_param 可填 YYYY-MM-DD HH:mm:ss 固定「现在」
-	// （测试/回放）；留空取业务时区当前时间。
-	scheduler.RegisterSystem(oaservice.RoomBookingReminderHandlerName, func(ctx context.Context, param string) error {
-		summary, err := oaSvc.RunRoomBookingReminders(ctx, param)
-		if err != nil {
-			return err
-		}
-		slog.Info("room booking reminder job finished",
-			"now", summary.Now, "tenants", summary.Tenants, "sent", summary.Sent)
-		return nil
-	})
-
 	infraAPI := infraapi.New(infraSvc, cfg, sysAPI.RequirePermission, apiLogWriter)
 	codegenAPI := codegen.NewHandler(codegen.New(db), sysAPI.RequirePermission)
 
@@ -477,33 +417,121 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	paySvc.SetDemoNotifyHandler(paySvc.HandleDemoNotify)
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission, cfg.Location())
 
-	// 商户回调重试任务（issue #134，spec §4.5/§7）：系统级 handler（跨租户
-	// 逐租户，照公海回收模式），infra_job 种子默认行每分钟一次。扫描到期任务
-	//（status IN (0,21,22) 且 next_notify_time 到期）POST 商户回调地址，
-	// 报文带 Pay-Signature（HMAC-SHA256(rawBody, pay.notify-hmac-key)）；
-	// 条件更新认领防重发（同任务双触发只执行一次）；密钥缺失拒发（fail-closed）。
-	scheduler.RegisterSystem(payservice.NotifyRetryJobHandlerName, func(ctx context.Context, param string) error {
-		result, err := paySvc.RunNotifyRetry(ctx)
-		if err != nil {
-			return err
-		}
-		slog.Info("pay notify retry job finished",
-			"tenants", result.Tenants, "executed", result.Executed, "success", result.Success, "failClosed", result.FailClosed)
-		return nil
-	})
+	// 定时任务绑定表（ADR 0024 补遗）：键 = 处理器名常量（与 seed.JobSpecs
+	// 引用同一常量，处理器名没有第二处字面量），值 = 执行闭包——业务服务在
+	// 装配期已就绪，闭包体自原装配点逐字迁移；demoJob 闭包自 JobScheduler
+	// 构造函数移入（构造函数只管调度机制，不再自注册处理器）。
+	jobBindings := map[string]infraservice.HandlerFunc{
+		// 演示任务：非系统级，任何租户可建任务行（租户可见性零变化）。
+		infraservice.DemoJobHandlerName: func(ctx context.Context, param string) error {
+			slog.Info("demo job executed", "tenant", tenant.ID(ctx), "param", param)
+			return nil
+		},
+		// 访问日志清理（spec §4.6.7）：种子默认行每日 03:00 启用（保留期
+		// access-log.retention-days，默认 30，handler_param 可填天数覆盖）。
+		// 清理跨租户执行（tenant.Skip，见 infra repository），属系统级处理器：
+		// 只有平台租户管理员可操作。
+		infraservice.CleanAccessLogsJobHandlerName: func(ctx context.Context, param string) error {
+			days := 0
+			if v, err := strconv.Atoi(strings.TrimSpace(param)); err == nil {
+				days = v
+			}
+			cleaned, err := infraSvc.CleanAccessLogsBefore(ctx, days)
+			if err != nil {
+				return err
+			}
+			slog.Info("access log cleanup job finished", "cleaned", cleaned)
+			return nil
+		},
+		// 公海自动回收（issue #14）：种子默认行已按暂停状态写入（启用前请
+		// 确认各租户公海配置，见 internal/seed/job.go 规格注释）。回收是
+		// 系统级动作：handler 忽略 job 所属租户上下文，由 crm service 以
+		// tenant.Skip 列出启用租户后逐租户执行。
+		//
+		// 系统级处理器（PR #39 审查 P0）：普通租户管理员即使持 super_admin（"*"）
+		// 也不能创建/运行该 handler，否则可经 infra_job 触发跨租户公海回收。
+		crmservice.RecycleJobHandlerName: func(ctx context.Context, param string) error {
+			result, err := crmSvc.RunPoolRecycle(ctx)
+			if err != nil {
+				return err
+			}
+			slog.Info("pool auto-recycle job finished", "tenants", result.Tenants, "recycled", result.Recycled)
+			return nil
+		},
+		// 考勤日结果任务（issue #61，spec §4.10）：系统级 handler（跨租户迭代，
+		// tenant.Skip 列启用租户后逐租户派生），infra_job 种子默认行每天 01:00。
+		// handler_param 可填 YYYY-MM-DD 回填指定日期；留空取业务时区前一日。
+		oaservice.AttendanceDailyResultHandlerName: func(ctx context.Context, param string) error {
+			summary, err := oaSvc.RunDailyAttendanceResult(ctx, param)
+			if err != nil {
+				return err
+			}
+			slog.Info("attendance daily result job finished",
+				"date", summary.Date, "tenants", summary.Tenants, "users", summary.Users)
+			return nil
+		},
+		// 会议提醒任务（issue #57，spec §4.11）：系统级 handler（跨租户迭代），
+		// infra_job 种子默认行每 5 分钟一次。扫描 (now, now+15m] 内开始的有效
+		// 未提醒预约，条件更新 reminded_at 认领后向预约人写 meeting_reminder
+		// 通知（只发一次）。handler_param 可填 YYYY-MM-DD HH:mm:ss 固定「现在」
+		// （测试/回放）；留空取业务时区当前时间。
+		oaservice.RoomBookingReminderHandlerName: func(ctx context.Context, param string) error {
+			summary, err := oaSvc.RunRoomBookingReminders(ctx, param)
+			if err != nil {
+				return err
+			}
+			slog.Info("room booking reminder job finished",
+				"now", summary.Now, "tenants", summary.Tenants, "sent", summary.Sent)
+			return nil
+		},
+		// 商户回调重试任务（issue #134，spec §4.5/§7）：系统级 handler（跨租户
+		// 逐租户，照公海回收模式），infra_job 种子默认行每分钟一次。扫描到期任务
+		//（status IN (0,21,22) 且 next_notify_time 到期）POST 商户回调地址，
+		// 报文带 Pay-Signature（HMAC-SHA256(rawBody, pay.notify-hmac-key)）；
+		// 条件更新认领防重发（同任务双触发只执行一次）；密钥缺失拒发（fail-closed）。
+		payservice.NotifyRetryJobHandlerName: func(ctx context.Context, param string) error {
+			result, err := paySvc.RunNotifyRetry(ctx)
+			if err != nil {
+				return err
+			}
+			slog.Info("pay notify retry job finished",
+				"tenants", result.Tenants, "executed", result.Executed, "success", result.Success, "failClosed", result.FailClosed)
+			return nil
+		},
+		// 订单超时关闭任务（issue #134，spec §7）：系统级 handler（跨租户迭代），
+		// infra_job 种子默认行每 5 分钟一次。扫描过期待支付订单（status=0 且
+		// expire_time < now）条件更新置 30 已关闭；已支付/已关闭不受影响。
+		payservice.OrderTimeoutCloseJobHandlerName: func(ctx context.Context, param string) error {
+			result, err := paySvc.RunOrderTimeoutClose(ctx)
+			if err != nil {
+				return err
+			}
+			slog.Info("pay order timeout close job finished",
+				"tenants", result.Tenants, "closed", result.Closed)
+			return nil
+		},
+	}
 
-	// 订单超时关闭任务（issue #134，spec §7）：系统级 handler（跨租户迭代），
-	// infra_job 种子默认行每 5 分钟一次。扫描过期待支付订单（status=0 且
-	// expire_time < now）条件更新置 30 已关闭；已支付/已关闭不受影响。
-	scheduler.RegisterSystem(payservice.OrderTimeoutCloseJobHandlerName, func(ctx context.Context, param string) error {
-		result, err := paySvc.RunOrderTimeoutClose(ctx)
-		if err != nil {
-			return err
+	// 按规格注册执行闭包（ADR 0024 补遗）：规格与绑定以同一常量为键——
+	// 先 fail-closed 校验绑定齐全（键缺失或值为 nil 都算缺失：nil 执行体
+	// 会在 cron 首触发时 panic，须在装配期拦截；缺绑定即拒启，纯函数检查
+	// 由 app 包单测覆盖），再按规格 System 标志分派普通/系统级注册。
+	// System 标志逐条对应重构前现状（demoJob=false、其余 6 条=true）：租户
+	// 可见性过滤与调度二次防线读同一张系统级注册表，行为不变。孤儿绑定
+	//（绑定无规格）与规格外直注（如 cleanLogs 的「注册-不种子」）都不校验——
+	// 后者是合法状态（管理员按需建任务行）。
+	if missing := missingJobBindings(seed.JobSpecs, jobBindings); len(missing) > 0 {
+		return nil, fmt.Errorf("定时任务规格缺少执行绑定：%s（装配处 jobBindings 补齐，ADR 0024 补遗）",
+			strings.Join(missing, ", "))
+	}
+	for _, spec := range seed.JobSpecs {
+		fn := jobBindings[spec.HandlerName]
+		if spec.System {
+			scheduler.RegisterSystem(spec.HandlerName, fn)
+		} else {
+			scheduler.Register(spec.HandlerName, fn)
 		}
-		slog.Info("pay order timeout close job finished",
-			"tenants", result.Tenants, "closed", result.Closed)
-		return nil
-	})
+	}
 
 	// 模块注册（ADR 0024）：Backbone 三个受保护组中间件由装配处填充——Auth 与
 	// OperateLog 归 system、AccessLog 归 infra；次序（Auth → AccessLog →
@@ -547,6 +575,23 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	scheduler.Start(context.Background())
 
 	return &App{Config: cfg, DB: db, Engine: engine, Scheduler: scheduler, BPM: bpmSvc, CRM: crmSvc, Message: messageSvc, Social: socialSvc, PushHub: pushHub, Notify: notifySvc, Pay: paySvc, APILog: apiLogWriter}, nil
+}
+
+// missingJobBindings 返回规格清单中没有装配绑定的处理器名名单（按规格次序，
+// 便于与 JobSpecs 对照）：绑定表键缺失或值为 nil 都算缺失——键存在校验拦不住
+// 手写 X: nil 的 map 字面量，nil 执行体要到 cron 首触发才 panic。任一条缺失都
+// 意味着对应任务行启用后 cron 触发会报「未注册的任务处理器」，属接线 bug——
+// app.New 据此拒绝启动（fail-closed，ADR 0024 补遗；先例：演示种子撞序号
+// init panic、ADR 0019 VerifyTenantTables 拒启）。孤儿绑定（绑定无规格）与
+// 规格外直注（如 cleanLogs 的「注册-不种子」）是合法状态，不在检查范围。
+func missingJobBindings(specs []seed.JobSpec, bindings map[string]infraservice.HandlerFunc) []string {
+	var missing []string
+	for _, spec := range specs {
+		if bindings[spec.HandlerName] == nil {
+			missing = append(missing, spec.HandlerName)
+		}
+	}
+	return missing
 }
 
 // payChannelRegistry 装配渠道 SPI 注册表（issue #133 支付 / #135 退款 /

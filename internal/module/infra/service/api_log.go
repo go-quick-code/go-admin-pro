@@ -265,8 +265,13 @@ func (s *Service) ClearAPILogs(ctx context.Context) error {
 	return s.repo.ClearAPILogs(ctx)
 }
 
-// CleanAccessLogsBefore 清理指定天数之前的访问日志，供 cleanAccessLogs 系统
-// 级定时任务调用（每日 03:00，spec §4.6.7）。days 非正时取配置保留期
+// CleanAccessLogsJobHandlerName 是访问日志清理处理器名：常量是处理器名的
+// 单一出处（ADR 0024 补遗），seed 规格与装配绑定引用同一常量。系统级处理器
+// （清理跨租户执行，只有平台租户可操作）；执行闭包在装配处绑定。
+const CleanAccessLogsJobHandlerName = "cleanAccessLogs"
+
+// CleanAccessLogsBefore 清理指定天数之前的访问日志，供 CleanAccessLogsJobHandlerName
+// 系统级定时任务调用（每日 03:00，spec §4.6.7）。days 非正时取配置保留期
 // （access-log.retention-days，默认 30）；定时任务也可传 handler_param 覆盖。
 func (s *Service) CleanAccessLogsBefore(ctx context.Context, days int) (int64, error) {
 	if days <= 0 {
