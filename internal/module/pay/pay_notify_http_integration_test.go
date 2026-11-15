@@ -242,6 +242,8 @@ func TestIntegrationPayNotifyRetrySuccess(t *testing.T) {
 //   - 每次执行追加日志（append-only，notify_times 递增）。
 func TestIntegrationPayNotifyRetrySemantics(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200, 500, 200}, []string{
 		`{"code":1001,"msg":"订单不存在"}`,
@@ -326,6 +328,8 @@ func assertRetryIn(t *testing.T, env *testutil.IntegrationEnv, dialed time.Time,
 // 之后不再发送（扫描守卫 + 状态不在 (0,21,22)）；日志 9 行。
 func TestIntegrationPayNotifyRetryNineFailures(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":500,"msg":"商户处理失败"}`})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-nine-app", merchant.srv.URL+"/pay/notify")
@@ -411,6 +415,8 @@ func TestIntegrationPayNotifyRetryConcurrentClaim(t *testing.T) {
 // 不发送、不消耗重试次数、任务保持待重试、next_notify_time 推进、记日志。
 func TestIntegrationPayNotifyFailClosed(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":0,"msg":"success"}`})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-fc-app", merchant.srv.URL+"/pay/notify")
@@ -533,6 +539,8 @@ func TestIntegrationPayNotifySSRFRefusal(t *testing.T) {
 // 后同一任务自动恢复（fail-closed 只推进一个间隔，回拨后下一轮即投递）。
 func TestIntegrationPayNotifySSRFAllowanceRestores(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":0,"msg":"success"}`})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-ssrf-allow-app", merchant.srv.URL+"/pay/notify")
@@ -762,6 +770,8 @@ func TestIntegrationPayNotifyDemoE2E(t *testing.T) {
 // 跨租户 404。
 func TestIntegrationPayNotifyTaskAdmin(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200, 200}, []string{
 		`{"code":1001,"msg":"失败"}`, `{"code":0,"msg":"success"}`,
@@ -849,6 +859,8 @@ func TestIntegrationPayNotifyTaskAdmin(t *testing.T) {
 // → 30 已关闭；已支付/已关闭不受影响；未到期不动。
 func TestIntegrationPayOrderTimeoutClose(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry / 每 5 分钟 payOrderTimeoutClose tick 会与本测试拨钟窗抢任务（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	appRow := payCreateApp(t, env, admin, "timeout-app")
 	payBindChannels(t, env, admin, appRow.ID, []string{"mock", "wallet"})

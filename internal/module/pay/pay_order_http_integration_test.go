@@ -260,6 +260,8 @@ func TestIntegrationPayOrderCreateIdempotent(t *testing.T) {
 // 可区分）+ 重复 submit 新 extension + 金额服务端定（submit 不收金额）。
 func TestIntegrationPayCashierAndSubmitMatrix(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry / 每 5 分钟 payOrderTimeoutClose tick 会与本测试拨钟窗抢任务（各 env 调度器独立，测试显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	appRow := payCreateApp(t, env, admin, "cashier-app")
 	payBindChannels(t, env, admin, appRow.ID, []string{"mock", "wallet"})
@@ -292,6 +294,7 @@ func TestIntegrationPayCashierAndSubmitMatrix(t *testing.T) {
 	// （submit 先查状态后查过期，文案可区分）。
 	expireDial := time.Now().Add(3 * time.Hour)
 	expirePrev := payservice.SetBusinessClock(func() time.Time { return expireDial })
+	t.Cleanup(func() { payservice.SetBusinessClock(expirePrev) })
 	status, api = paySubmit(t, env, admin, orderID, "mock")
 	if status != http.StatusConflict {
 		t.Fatalf("过期订单 submit 应 409，实际 HTTP %d code %d msg %q", status, api.Code, api.Msg)
@@ -352,10 +355,13 @@ func TestIntegrationPayCashierAndSubmitMatrix(t *testing.T) {
 	}
 
 	// 已关闭 409：status=30 唯一写点是超时关单 job（job-only，ADR 0021 补遗）
-	// ——拨时钟越过 expire（创建 +2h）→ Execute 真 job → 复原时钟。
+	// ——拨时钟越过 expire（创建 +2h）→ Execute 真 job → 复原时钟。注意 Execute
+	// 是租户级全局：会顺带关闭本矩阵此前的待支付过期单（order2），已核实后续
+	// 断言不依赖其状态。
 	order3 := payCreateOrder(t, env, admin, appRow.AppKey, "MO-CLOSED", "30.00")
 	closeDial := time.Now().Add(3 * time.Hour)
 	closePrev := payservice.SetBusinessClock(func() time.Time { return closeDial })
+	t.Cleanup(func() { payservice.SetBusinessClock(closePrev) })
 	env.App.Scheduler.Execute(inframodel.Job{TenantID: 1, HandlerName: payservice.OrderTimeoutCloseJobHandlerName})
 	payservice.SetBusinessClock(closePrev)
 	assertOrderStatus(t, env, payOrderID(t, order3), 30, "超时关单 job 应关闭订单")
