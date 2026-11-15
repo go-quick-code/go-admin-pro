@@ -9,3 +9,13 @@
 拒绝的替代：DI 框架（既有决策否决，反射/容器与本仓显式装配哲学冲突）；router 保留 system/infra/notify 三个模块 import 的最小变体（保留特判层级，换票流组照样硬编码 notifyAPI，「装配层具名知道每个模块」的痛点只解决四分之三）；保留 5 个函数变量只删 guard-if（两处手抄仍在）；撞序号 Run 时报错（prod seed 关闭时永远静默）；全量路由 golden 快照（与 per-module 路由 golden、ADR 0023 权限码扫描重叠，每次合法路由变更都要维护快照）；JobSpecs 顺路吸收（放大回归面，C8 另立候选）。
 
 相关：ADR 0019（集中登记先例——tenant_tables 因此不纳入本次分散化）、ADR 0023（前缀在场测试的姊妹网：源码层权限码扫描）、ADR 0020（erp 路由树 golden，per-module 网先例）、GLOSSARY「装配」节「模块注册器」、`docs/agents/new-module.md`（剩余手抄步骤清单）、候选 C8（JobSpecs，未取消）。
+
+## 补遗：任务规格投影（2026-11-15，架构候选 C8）
+
+正文留下的伏笔（「JobSpecs 不随本次顺路吸收——留给候选 C8」）就此收口。定时任务此前一个 job 三处手抄：装配处的 `RegisterSystem` 闭包（handler 名 5 处常量 2 处字面量、cron 以注释复述）、`seedJobs` 种子行（handler 名全字面量、cron/状态/备注唯一真源）、seed_test 的 `assertJobStatus` 手抄断言（issue #63 零值回归网）。决定引入 metadata-only 任务规格：seed 包声明 JobSpec（处理器名/显示名/cron/默认种子状态/备注/是否系统级）与 7 条规格清单，处理器名全部引用模块常量（demoJob 常量从 `NewJobScheduler` 外提、cleanAccessLogs 补常量；cleanLogs 保留字面量——不在规格里、单消费者、保持直接注册），seedJobs 与 seed_test 从规格投影；装配处用常量为键的 bindings map 循环注册执行闭包（闭包体逐字保留，demoJob 闭包从 `NewJobScheduler` 移到装配处——构造函数只管调度机制），按规格的 System 标志分派 Register/RegisterSystem（逐条对应现状，租户可见性过滤与调度二次防线行为不变）。规格缺绑定 → `app.New` 返回错误拒绝启动（接线 bug 类别同正文撞序号 init panic 与 ADR 0019 `VerifyTenantTables` 拒启先例）；孤儿绑定（绑定无规格）不校验——cleanLogs 的「注册-不种子」（管理员手动建任务行）是合法状态。种子行 TenantID 1 硬编码与 gorm `default:1` 零值 Exec 补丁逐字保留，快照数据源换成规格派生。
+
+原因：候选报告原案「JobSpec{…, Run} 一处声明三路投影」被启动时序事实否决——`seed.Run` 在模块 service 装配之前执行，带执行闭包的规格在该时点不存在，报告未核时序。规格与闭包分离（metadata-only 规格 + 按名绑定闭包）是修正后的形状而非妥协：规格是种子策略（cron/状态/备注是「默认种子行长什么样」的决策），闭包是装配接线（需要已装配的 service），两者生命周期不同。推迟 job 种子到装配后、把 `seed.Run` 拆两段（省一个 map，代价是 seed 语义拆裂与第二个调用点）同样否决。System 标志是租户可见性安全边界（标错 false 会把跨租户动作暴露给普通租户管理员，调度二次防线读的是同一张注册表）——review 对该标志逐条质询。新模块加任务的触点从「三处手抄 + 一处常量」降为三处声明（模块常量 + Run 方法、规格一条、绑定一条），`docs/agents/new-module.md` 第 9 步同步改写。
+
+拒绝的替代：spec 带 Run 闭包（时序否决，见上）；job 种子推迟装配后、seed.Run 拆两段（见上）；只收名字的轻量路线（seed 字面量换常量引用——cron/备注漂移面保留，零值回归网仍手抄）；gorm 补丁改写为显式列 INSERT（重写 #63 战场验证过的机制，default 标签行为还有别的列要小心）；种子与注册的双向集合校验（cleanLogs 证明只有单向成立，双向会把合法的「注册-不种子」判成 bug）。
+
+相关：正文（Registrar/演示种子注册列表先例）、ADR 0019（fail-closed 拒启先例）、GLOSSARY「装配」节「任务规格（JobSpec）」、`docs/agents/new-module.md` 第 9 步（改写后）。
