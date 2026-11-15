@@ -16,7 +16,9 @@ import (
 	"regexp"
 	"sync"
 	"testing"
+	"time"
 
+	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
 	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
@@ -201,11 +203,15 @@ func TestIntegrationPayRefundCreateValidation(t *testing.T) {
 		t.Fatalf("待支付订单退款应 409 文案可区分，实际 HTTP %d msg %q", status, api.Msg)
 	}
 
-	// 已关闭订单 409（spec §8.2：已退款/已关闭订单再退 409；30 由 DB 造数据）。
+	// 已关闭订单 409（spec §8.2：已退款/已关闭订单再退 409）：30 由超时关单
+	// job 落库（唯一写点，ADR 0021 补遗）——拨时钟越过 expire（创建 +2h）→
+	// Execute 真 job → 复原时钟。
 	closedOrder := payCreateOrder(t, env, admin, appRow.AppKey, "MO-REF-CLOSED", "10.00")
-	if err := env.DB.Exec("UPDATE pay_order SET status = 30 WHERE id = ?", payOrderID(t, closedOrder)).Error; err != nil {
-		t.Fatalf("关闭订单: %v", err)
-	}
+	closeDial := time.Now().Add(3 * time.Hour)
+	closePrev := payservice.SetBusinessClock(func() time.Time { return closeDial })
+	env.App.Scheduler.Execute(inframodel.Job{TenantID: 1, HandlerName: payservice.OrderTimeoutCloseJobHandlerName})
+	payservice.SetBusinessClock(closePrev)
+	assertOrderStatus(t, env, payOrderID(t, closedOrder), 30, "超时关单 job 应关闭订单")
 	status, api = payRefund(t, env, admin, appRow.AppKey, "MO-REF-CLOSED", "RF-CLOSED", "1.00")
 	if status != http.StatusConflict || api.Msg != "订单已关闭，无法退款" {
 		t.Fatalf("已关闭订单退款应 409 文案可区分，实际 HTTP %d msg %q", status, api.Msg)

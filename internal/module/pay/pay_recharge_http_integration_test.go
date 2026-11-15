@@ -135,6 +135,10 @@ func rechargeSeedApp(t *testing.T, env *testutil.IntegrationEnv, token string) p
 
 // rechargeInsertPendingRefund 直造「已发起待回调」的退款单（mid-flight 场景：
 // 模拟异步渠道 create 后回调前，余额被并发消费），返回退款单 ID。
+//
+// 生产不可达的确定性构造：Pending=0 是异步渠道预留的真实休眠生产态，现注册表
+// 无渠道可达、退款回调处理入口生产无接线；真实渠道工单实现退款回调接线时，
+// 本测试应重构走「可配置返回 Pending 的 SPI 测试渠道」。
 func rechargeInsertPendingRefund(t *testing.T, env *testutil.IntegrationEnv, appID, orderID int64, orderNo, merchantOrderID string) int64 {
 	t.Helper()
 	res := env.DB.Exec(
@@ -423,6 +427,8 @@ func TestIntegrationPayRechargeWalletChannelGuard(t *testing.T) {
 
 	// 防绕过对照：直接构造 pay_order（POST /pay/order/create，不经充值创建）
 	// + 直插充值关联行 → wallet submit 仍 409（校验走反查，不看订单来源）。
+	// 生产不可达的确定性构造——绕过者视角即测试目的：守卫来源无关性对照
+	// （正常路径不会出现不经充值创建、直挂充值关联的 pay_order）。
 	bypass := payCreateOrder(t, env, admin, "demo", "MO-BYPASS-1", "30.00")
 	bypassOrderID := payOrderID(t, bypass)
 	if err := env.DB.Exec(
