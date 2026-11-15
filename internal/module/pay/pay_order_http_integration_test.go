@@ -13,7 +13,9 @@ import (
 	"regexp"
 	"sync"
 	"testing"
+	"time"
 
+	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	"github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
 	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/money"
@@ -86,25 +88,10 @@ func paySubmit(t *testing.T, env *testutil.IntegrationEnv, token string, orderID
 	})
 }
 
-// payBackdateExpire 把订单过期时间改到过去（过期 submit 用例；服务端设定
-// expire_time，请求不收，测试经 DB 造数据）。
-func payBackdateExpire(t *testing.T, env *testutil.IntegrationEnv, orderID int64) {
-	t.Helper()
-	if err := env.DB.Exec("UPDATE pay_order SET expire_time = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE id = ?", orderID).Error; err != nil {
-		t.Fatalf("回拨过期时间: %v", err)
-	}
-}
-
-// payCloseOrder 把订单置 30 已关闭（关闭后 submit 用例）。
-func payCloseOrder(t *testing.T, env *testutil.IntegrationEnv, orderID int64) {
-	t.Helper()
-	if err := env.DB.Exec("UPDATE pay_order SET status = 30 WHERE id = ?", orderID).Error; err != nil {
-		t.Fatalf("关闭订单: %v", err)
-	}
-}
-
 // payBindRawChannel 绕过绑定校验直接落绑定行（submit 侧「已实现」校验的
 // 独立触发：绑定层已拒绝未实现渠道，只能 DB 造数据验证 submit 兜底）。
+// 生产不可达的确定性构造——submit 兜底校验是绑定层 409 之后的 fail-closed
+// 安全网。
 func payBindRawChannel(t *testing.T, env *testutil.IntegrationEnv, tenantID, appID int64, code string) {
 	t.Helper()
 	if err := env.DB.Exec(
@@ -273,6 +260,8 @@ func TestIntegrationPayOrderCreateIdempotent(t *testing.T) {
 // 可区分）+ 重复 submit 新 extension + 金额服务端定（submit 不收金额）。
 func TestIntegrationPayCashierAndSubmitMatrix(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry / 每 5 分钟 payOrderTimeoutClose tick 会与本测试拨钟窗抢任务（各 env 调度器独立，测试显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	appRow := payCreateApp(t, env, admin, "cashier-app")
 	payBindChannels(t, env, admin, appRow.ID, []string{"mock", "wallet"})
@@ -300,14 +289,28 @@ func TestIntegrationPayCashierAndSubmitMatrix(t *testing.T) {
 		t.Fatalf("可用渠道应含 mock 与 wallet，实际 %v", channelNames)
 	}
 
-	// 过期 409：expire_time 服务端设定，DB 回拨后 submit 拒绝。
-	payBackdateExpire(t, env, orderID)
+	// 过期 409：expire_time 服务端设定（创建时刻 +2h）。拨应用时钟越过 expire
+	// 后 submit 拒绝——status 仍待支付（关单 job 未跑），先撞「已过期」谓词
+	// （submit 先查状态后查过期，文案可区分）。
+	expireDial := time.Now().Add(3 * time.Hour)
+	expirePrev := payservice.SetBusinessClock(func() time.Time { return expireDial })
+	t.Cleanup(func() { payservice.SetBusinessClock(expirePrev) })
 	status, api = paySubmit(t, env, admin, orderID, "mock")
 	if status != http.StatusConflict {
 		t.Fatalf("过期订单 submit 应 409，实际 HTTP %d code %d msg %q", status, api.Code, api.Msg)
 	}
 	if msg := api.Msg; msg != "订单已过期，请重新下单" {
 		t.Fatalf("过期文案应可区分，实际 %q", msg)
+	}
+	// 拨钟态下执行超时关单 job（status=30 唯一写点，ADR 0021 补遗）：真 job
+	// 条件 UPDATE 落 30（含审计列），复原时钟后矩阵其余用例回到真实时间。
+	env.App.Scheduler.Execute(inframodel.Job{TenantID: 1, HandlerName: payservice.OrderTimeoutCloseJobHandlerName})
+	payservice.SetBusinessClock(expirePrev)
+	assertOrderStatus(t, env, orderID, 30, "超时关单 job 应关闭过期订单")
+	// 关闭后 submit：状态谓词先于过期谓词，撞「已关闭」文案。
+	status, api = paySubmit(t, env, admin, orderID, "mock")
+	if status != http.StatusConflict || api.Msg != "订单已关闭，无法发起支付" {
+		t.Fatalf("关闭后订单 submit 应 409 已关闭文案，实际 HTTP %d msg %q", status, api.Msg)
 	}
 
 	// 未绑定 409：wallet 已启用已实现但应用未绑定。
@@ -351,9 +354,17 @@ func TestIntegrationPayCashierAndSubmitMatrix(t *testing.T) {
 		t.Fatalf("未实现渠道 submit 应 409，实际 HTTP %d msg %q", status, api.Msg)
 	}
 
-	// 已关闭 409：status=30（超时关单 job 是 #134，测试 DB 造数据）。
+	// 已关闭 409：status=30 唯一写点是超时关单 job（job-only，ADR 0021 补遗）
+	// ——拨时钟越过 expire（创建 +2h）→ Execute 真 job → 复原时钟。注意 Execute
+	// 是租户级全局：会顺带关闭本矩阵此前的待支付过期单（order2），已核实后续
+	// 断言不依赖其状态。
 	order3 := payCreateOrder(t, env, admin, appRow.AppKey, "MO-CLOSED", "30.00")
-	payCloseOrder(t, env, payOrderID(t, order3))
+	closeDial := time.Now().Add(3 * time.Hour)
+	closePrev := payservice.SetBusinessClock(func() time.Time { return closeDial })
+	t.Cleanup(func() { payservice.SetBusinessClock(closePrev) })
+	env.App.Scheduler.Execute(inframodel.Job{TenantID: 1, HandlerName: payservice.OrderTimeoutCloseJobHandlerName})
+	payservice.SetBusinessClock(closePrev)
+	assertOrderStatus(t, env, payOrderID(t, order3), 30, "超时关单 job 应关闭订单")
 	status, api = paySubmit(t, env, admin, payOrderID(t, order3), "mock")
 	if status != http.StatusConflict || api.Msg != "订单已关闭，无法发起支付" {
 		t.Fatalf("已关闭订单 submit 应 409 文案可区分，实际 HTTP %d msg %q", status, api.Msg)

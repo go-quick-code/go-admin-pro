@@ -153,14 +153,6 @@ func inframodelJob(handler string) inframodel.Job {
 	return inframodel.Job{TenantID: 1, HandlerName: handler}
 }
 
-// payBackdateTask 把任务 next_notify_time 拨到过去（重试逐跳断言，不睡时钟）。
-func payBackdateTask(t *testing.T, env *testutil.IntegrationEnv, taskID int64) {
-	t.Helper()
-	if err := env.DB.Exec("UPDATE pay_notify_task SET next_notify_time = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id = ?", taskID).Error; err != nil {
-		t.Fatalf("回拨任务 next_notify_time: %v", err)
-	}
-}
-
 // payNotifyLogs 查任务执行日志（append-only 断言用）。
 func payNotifyLogs(t *testing.T, env *testutil.IntegrationEnv, taskID int64) []map[string]any {
 	t.Helper()
@@ -250,6 +242,8 @@ func TestIntegrationPayNotifyRetrySuccess(t *testing.T) {
 //   - 每次执行追加日志（append-only，notify_times 递增）。
 func TestIntegrationPayNotifyRetrySemantics(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200, 500, 200}, []string{
 		`{"code":1001,"msg":"订单不存在"}`,
@@ -257,33 +251,41 @@ func TestIntegrationPayNotifyRetrySemantics(t *testing.T) {
 		`{"code":0,"msg":"success"}`,
 	})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-sem-app", merchant.srv.URL+"/pay/notify")
+
+	// 重试整条时间轴绑应用时钟：拨定 T0 再建单/建任务（任务创建与
+	// next_notify_time 预推进均来自传入 now），逐轮拨到下一重试点再 Execute
+	// ——不回拨 DB 行、不睡真实时钟。
+	T0 := time.Now().Truncate(time.Second)
+	prev := payservice.SetBusinessClock(func() time.Time { return T0 })
+	t.Cleanup(func() { payservice.SetBusinessClock(prev) })
+	dial := func(at time.Time) { payservice.SetBusinessClock(func() time.Time { return at }) }
 	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-SEM", "5.00")
 
-	// 第 1 轮：2xx 业务码非 0 → 21，next_notify_time = +15s（第 1 次失败的间隔）。
+	// 第 1 轮：2xx 业务码非 0 → 21，next_notify_time = T0+15s（第 1 次失败的间隔）。
 	payRunNotifyJob(t, env)
 	task := payTaskRow(t, env, taskID)
 	if payNum(task["status"]) != 21 {
 		t.Fatalf("2xx 业务码非 0 应转 21，实际 %v", task["status"])
 	}
-	assertRetryIn(t, env, taskID, 15*time.Second, "第 1 次失败后")
+	assertRetryIn(t, env, T0, taskID, 15*time.Second, "第 1 次失败后")
 	if logs := payNotifyLogs(t, env, taskID); len(logs) != 1 || payNum(logs[0]["status"]) != 21 {
 		t.Fatalf("第 1 轮应有 1 条 status=21 日志：%v", logs)
 	}
 
-	// 第 2 轮（回拨后重试）：非 2xx → 22，间隔仍 15s。
-	payBackdateTask(t, env, taskID)
+	// 第 2 轮（拨到 T0+15s 重试点）：非 2xx → 22，间隔仍 15s。
+	dial(T0.Add(15 * time.Second))
 	payRunNotifyJob(t, env)
 	task = payTaskRow(t, env, taskID)
 	if payNum(task["status"]) != 22 {
 		t.Fatalf("非 2xx 应转 22，实际 %v", task["status"])
 	}
-	assertRetryIn(t, env, taskID, 15*time.Second, "第 2 次失败后")
+	assertRetryIn(t, env, T0.Add(15*time.Second), taskID, 15*time.Second, "第 2 次失败后")
 	if payNum(task["notifyTimes"]) != 2 {
 		t.Fatalf("两次执行后 notify_times 应为 2，实际 %v", task["notifyTimes"])
 	}
 
-	// 第 3 轮：code=0 → 10 成功（21/22 语义确认后重试可恢复成功）。
-	payBackdateTask(t, env, taskID)
+	// 第 3 轮（拨到 T0+30s 重试点）：code=0 → 10 成功（21/22 语义确认后重试可恢复成功）。
+	dial(T0.Add(30 * time.Second))
 	payRunNotifyJob(t, env)
 	task = payTaskRow(t, env, taskID)
 	if payNum(task["status"]) != 10 {
@@ -304,20 +306,21 @@ func TestIntegrationPayNotifyRetrySemantics(t *testing.T) {
 	}
 }
 
-// assertRetryIn 断言任务 next_notify_time 落在 [now+delta-2s, now+delta+2s]
-// （间隔逐跳断言；±2s 容忍执行耗时）。
-func assertRetryIn(t *testing.T, env *testutil.IntegrationEnv, taskID int64, delta time.Duration, phase string) {
+// assertRetryIn 断言任务 next_notify_time 落在 [dialed+delta-2s, dialed+delta+2s]
+// （重试时间轴绑应用时钟：dialed 是本轮执行时的拨钟值；±2s 容忍 DB 秒级截断
+// 与执行耗时）。
+func assertRetryIn(t *testing.T, env *testutil.IntegrationEnv, dialed time.Time, taskID int64, delta time.Duration, phase string) {
 	t.Helper()
 	task := payTaskRow(t, env, taskID)
 	raw, ok := task["nextNotifyTime"].(time.Time)
 	if !ok {
 		t.Fatalf("%s：next_notify_time 应存在，实际 %v", phase, task["nextNotifyTime"])
 	}
-	diff := time.Until(raw)
+	diff := raw.Sub(dialed)
 	lower := delta - 2*time.Second
 	upper := delta + 2*time.Second
 	if diff < lower || diff > upper {
-		t.Fatalf("%s：next_notify_time 应约在 %s 后，实际 %s（%v）", phase, delta, raw.Format(time.RFC3339), diff)
+		t.Fatalf("%s：next_notify_time 应约在拨钟值 %s 后 %s，实际 %s（%v）", phase, dialed.Format(time.RFC3339), delta, raw.Format(time.RFC3339), diff)
 	}
 }
 
@@ -325,13 +328,25 @@ func assertRetryIn(t *testing.T, env *testutil.IntegrationEnv, taskID int64, del
 // 之后不再发送（扫描守卫 + 状态不在 (0,21,22)）；日志 9 行。
 func TestIntegrationPayNotifyRetryNineFailures(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":500,"msg":"商户处理失败"}`})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-nine-app", merchant.srv.URL+"/pay/notify")
+
+	// 重试整条时间轴绑应用时钟：拨定 T0 建任务，第 i 轮拨到前 i-1 次失败间隔
+	// 之和再 Execute（15s/15s/30s/180s/1800s/1800s/1800s/3600s，与 service
+	// notifyRetryIntervals 逐跳对齐）——不回拨 DB 行、不睡真实时钟。
+	T0 := time.Now().Truncate(time.Second)
+	prev := payservice.SetBusinessClock(func() time.Time { return T0 })
+	t.Cleanup(func() { payservice.SetBusinessClock(prev) })
 	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-NINE", "3.00")
+	hops := []time.Duration{0, 15 * time.Second, 30 * time.Second, 60 * time.Second,
+		240 * time.Second, 2040 * time.Second, 3840 * time.Second, 5640 * time.Second, 9240 * time.Second}
 
 	for i := 1; i <= 9; i++ {
-		payBackdateTask(t, env, taskID)
+		at := T0.Add(hops[i-1])
+		payservice.SetBusinessClock(func() time.Time { return at })
 		payRunNotifyJob(t, env)
 		task := payTaskRow(t, env, taskID)
 		if payNum(task["notifyTimes"]) != int64(i) {
@@ -349,8 +364,9 @@ func TestIntegrationPayNotifyRetryNineFailures(t *testing.T) {
 		}
 	}
 
-	// 第 10 轮：状态 20 不再扫描、不再发送、不再追加日志。
-	payBackdateTask(t, env, taskID)
+	// 第 10 轮：状态 20 不再扫描、不再发送、不再追加日志（拨到第 9 次失败后
+	// 的重试点 T0+12840s 执行，守卫仍不触发）。
+	payservice.SetBusinessClock(func() time.Time { return T0.Add(12840 * time.Second) })
 	payRunNotifyJob(t, env)
 	if got := merchant.count(); got != 9 {
 		t.Fatalf("彻底失败后不应再发送，实际 %d 次", got)
@@ -399,9 +415,16 @@ func TestIntegrationPayNotifyRetryConcurrentClaim(t *testing.T) {
 // 不发送、不消耗重试次数、任务保持待重试、next_notify_time 推进、记日志。
 func TestIntegrationPayNotifyFailClosed(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":0,"msg":"success"}`})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-fc-app", merchant.srv.URL+"/pay/notify")
+	// 重试时间轴绑应用时钟：拨定 T0 再建任务，fail-closed 的 next_notify_time
+	// 推进（T0 + 一个间隔）与恢复轮的拨钟点随之确定。
+	T0 := time.Now().Truncate(time.Second)
+	prev := payservice.SetBusinessClock(func() time.Time { return T0 })
+	t.Cleanup(func() { payservice.SetBusinessClock(prev) })
 	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-FC", "1.00")
 
 	// 独立 Service 实例：不注入密钥（空 = 未配置），租户清单用测试桩。
@@ -430,8 +453,8 @@ func TestIntegrationPayNotifyFailClosed(t *testing.T) {
 	if task["nextNotifyTime"] == nil {
 		t.Fatal("fail-closed 应推进 next_notify_time（防热循环）")
 	}
-	if raw, ok := task["nextNotifyTime"].(time.Time); !ok || time.Until(raw) <= 0 {
-		t.Fatalf("next_notify_time 应被推到未来，实际 %v", task["nextNotifyTime"])
+	if raw, ok := task["nextNotifyTime"].(time.Time); !ok || raw.Sub(T0) <= 0 {
+		t.Fatalf("next_notify_time 应被推过拨钟时刻（防热循环），实际 %v", task["nextNotifyTime"])
 	}
 	// 记日志（status 22 请求失败语义 + 摘要说明拒发原因）。
 	logs := payNotifyLogs(t, env, taskID)
@@ -443,11 +466,12 @@ func TestIntegrationPayNotifyFailClosed(t *testing.T) {
 	}
 
 	// 注入密钥后同一任务自动恢复投递（无需人工干预；fail-closed 只把
-	// next_notify_time 推进一个间隔，回拨后下一轮即恢复）。放行清单同生产
-	// 装配口径注入（htptest 商户是环回地址，PR #140 安全审查 P2 守卫需要）。
+	// next_notify_time 推进一个间隔，拨到重试点 T0+15s 后下一轮即恢复）。
+	// 放行清单同生产装配口径注入（htptest 商户是环回地址，PR #140 安全审查
+	// P2 守卫需要）。
 	svc.SetNotifyHMACKey(env.Config.Pay.NotifyHMACKey)
 	svc.SetNotifySSRFPrivateAllow(env.Config.Pay.NotifySSRFPrivateAllow)
-	payBackdateTask(t, env, taskID)
+	payservice.SetBusinessClock(func() time.Time { return T0.Add(15 * time.Second) })
 	if _, err := svc.RunNotifyRetry(context.Background()); err != nil {
 		t.Fatalf("补配密钥后执行失败: %v", err)
 	}
@@ -515,9 +539,16 @@ func TestIntegrationPayNotifySSRFRefusal(t *testing.T) {
 // 后同一任务自动恢复（fail-closed 只推进一个间隔，回拨后下一轮即投递）。
 func TestIntegrationPayNotifySSRFAllowanceRestores(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200}, []string{`{"code":0,"msg":"success"}`})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-ssrf-allow-app", merchant.srv.URL+"/pay/notify")
+	// 重试时间轴绑应用时钟：拨定 T0 再建任务，fail-closed 推进（T0+一个间隔）
+	// 与恢复轮的拨钟点随之确定。
+	T0 := time.Now().Truncate(time.Second)
+	prev := payservice.SetBusinessClock(func() time.Time { return T0 })
+	t.Cleanup(func() { payservice.SetBusinessClock(prev) })
 	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-SSRF-ALLOW", "1.00")
 
 	svc := payservice.New(payrepo.New(env.App.DB))
@@ -532,7 +563,7 @@ func TestIntegrationPayNotifySSRFAllowanceRestores(t *testing.T) {
 	}
 
 	svc.SetNotifySSRFPrivateAllow([]string{"127.0.0.1"})
-	payBackdateTask(t, env, taskID)
+	payservice.SetBusinessClock(func() time.Time { return T0.Add(15 * time.Second) })
 	if _, err := svc.RunNotifyRetry(context.Background()); err != nil {
 		t.Fatalf("补配放行清单后执行失败: %v", err)
 	}
@@ -739,14 +770,21 @@ func TestIntegrationPayNotifyDemoE2E(t *testing.T) {
 // 跨租户 404。
 func TestIntegrationPayNotifyTaskAdmin(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry tick 会与本测试拨钟窗抢任务/错位商户脚本响应（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	merchant := newNotifyMerchant(t, []int{200, 200}, []string{
 		`{"code":1001,"msg":"失败"}`, `{"code":0,"msg":"success"}`,
 	})
 	appRow := payCreateAppWithNotifyURL(t, env, admin, "notify-admin-app", merchant.srv.URL+"/pay/notify")
+	// 重试时间轴绑应用时钟：拨定 T0 再建任务，第 1 轮 T0 执行 → 21，拨到
+	// T0+15s 重试点第 2 轮执行 → 成功。
+	T0 := time.Now().Truncate(time.Second)
+	prev := payservice.SetBusinessClock(func() time.Time { return T0 })
+	t.Cleanup(func() { payservice.SetBusinessClock(prev) })
 	_, taskID := payMockPaySuccess(t, env, admin, appRow.AppKey, "MO-NOTIFY-ADMIN", "9.99")
 	payRunNotifyJob(t, env)
-	payBackdateTask(t, env, taskID)
+	payservice.SetBusinessClock(func() time.Time { return T0.Add(15 * time.Second) })
 	payRunNotifyJob(t, env)
 
 	// 分页：type/status 过滤。
@@ -821,6 +859,8 @@ func TestIntegrationPayNotifyTaskAdmin(t *testing.T) {
 // → 30 已关闭；已支付/已关闭不受影响；未到期不动。
 func TestIntegrationPayOrderTimeoutClose(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
+	// 停活调度器：每分钟 payNotifyRetry / 每 5 分钟 payOrderTimeoutClose tick 会与本测试拨钟窗抢任务（各 env 调度器独立，显式 Scheduler.Execute 直调不受影响）。
+	env.App.Scheduler.Stop()
 	admin := env.Login(t, "admin", "123456")
 	appRow := payCreateApp(t, env, admin, "timeout-app")
 	payBindChannels(t, env, admin, appRow.ID, []string{"mock", "wallet"})
@@ -832,17 +872,22 @@ func TestIntegrationPayOrderTimeoutClose(t *testing.T) {
 		t.Fatalf("充值准备: %v", err)
 	}
 
+	// 时间轴绑应用时钟：拨定 T0 建单（expire = T0+2h 服务端设定）。
+	T0 := time.Now().Truncate(time.Second)
+	prev := payservice.SetBusinessClock(func() time.Time { return T0 })
+	t.Cleanup(func() { payservice.SetBusinessClock(prev) })
+
 	expiredID := payOrderID(t, payCreateOrder(t, env, admin, appRow.AppKey, "MO-TIMEOUT-EXP", "1.00"))
 	paidID := payOrderID(t, payCreateOrder(t, env, admin, appRow.AppKey, "MO-TIMEOUT-PAID", "2.00"))
-	futureID := payOrderID(t, payCreateOrder(t, env, admin, appRow.AppKey, "MO-TIMEOUT-FUTURE", "3.00"))
 
-	// paid：wallet 支付成功（对照组）。
+	// paid：wallet 支付成功（对照组，须在拨过 expire 前支付）。
 	status, api := paySubmit(t, env, admin, paidID, "wallet")
 	mustOK(t, "wallet submit", status, api)
 
-	// expired/paid 回拨过期时间；future 保持未到期。
-	payBackdateExpire(t, env, expiredID)
-	payBackdateExpire(t, env, paidID)
+	// 拨到 T0+3h：expired/paid 的 expire（T0+2h）已越过；future 在拨后创建，
+	// expire = T0+5h 保持未到期。
+	payservice.SetBusinessClock(func() time.Time { return T0.Add(3 * time.Hour) })
+	futureID := payOrderID(t, payCreateOrder(t, env, admin, appRow.AppKey, "MO-TIMEOUT-FUTURE", "3.00"))
 
 	// 直调超时关单任务（job seam）。
 	if !env.App.Scheduler.IsSystemHandler(payservice.OrderTimeoutCloseJobHandlerName) {
@@ -854,8 +899,9 @@ func TestIntegrationPayOrderTimeoutClose(t *testing.T) {
 	assertOrderStatus(t, env, paidID, 10, "已支付订单不受影响")
 	assertOrderStatus(t, env, futureID, 0, "未到期订单不受影响")
 
-	// 幂等：再跑一轮，已关闭订单不变（无二次更新副作用可观察的是状态稳定）。
-	payBackdateExpire(t, env, futureID)
+	// 幂等：拨到 T0+6h 再跑一轮，新到期订单（future）被关闭，已支付订单
+	// 仍不受影响（无二次更新副作用可观察的是状态稳定）。
+	payservice.SetBusinessClock(func() time.Time { return T0.Add(6 * time.Hour) })
 	env.App.Scheduler.Execute(inframodel.Job{TenantID: 1, HandlerName: payservice.OrderTimeoutCloseJobHandlerName})
 	assertOrderStatus(t, env, futureID, 30, "第二轮应关闭新到期订单")
 	assertOrderStatus(t, env, paidID, 10, "已支付订单仍不受影响")
