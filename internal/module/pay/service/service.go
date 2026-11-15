@@ -146,10 +146,23 @@ func (s *Service) businessLocation() *time.Location {
 	return time.Local
 }
 
+// businessClock 是 pay 业务时间（单号日期键/订单过期/超时关单/回调重试判定
+// 等）的来源。用 var 而非直接 time.Now()：仅集成测试注入固定时钟验证超时
+// 关单与回调重试时间轴（用例内复原），生产代码不写此变量。
+var businessClock = time.Now
+
+// SetBusinessClock 是业务时钟的写缝：注入固定时钟并返回原值，供集成测试
+// 在用例内替换与复原（同 message SetQuotaClock 的定位），生产代码不应调用。
+func SetBusinessClock(f func() time.Time) func() time.Time {
+	prev := businessClock
+	businessClock = f
+	return prev
+}
+
 // businessNow 返回业务时区下的「现在」：单号日期键一律走这里，不直接用
 // time.Now()（其 Location 是服务器本地时区，跨时区部署会算错日期键）。
 func (s *Service) businessNow() time.Time {
-	return time.Now().In(s.businessLocation())
+	return businessClock().In(s.businessLocation())
 }
 
 // requirePlatform 校验当前租户是平台租户（ID=1）。渠道是平台级资源，
