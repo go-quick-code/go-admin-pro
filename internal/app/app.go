@@ -513,16 +513,14 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	}
 
 	// 按规格注册执行闭包（ADR 0024 补遗）：规格与绑定以同一常量为键——
-	// 先 fail-closed 校验绑定齐全（缺绑定即拒启，纯函数检查由 app 包单测
-	// 覆盖），再按规格 System 标志分派普通/系统级注册。System 标志逐条对应
-	// 重构前现状（demoJob=false、其余 6 条=true）：租户可见性过滤与调度二次
-	// 防线读同一张系统级注册表，行为不变。孤儿绑定（如 cleanLogs）不校验——
-	// 「注册-不种子」是合法状态（管理员按需建任务行）。
-	bound := make(map[string]struct{}, len(jobBindings))
-	for name := range jobBindings {
-		bound[name] = struct{}{}
-	}
-	if missing := missingJobBindings(seed.JobSpecs, bound); len(missing) > 0 {
+	// 先 fail-closed 校验绑定齐全（键缺失或值为 nil 都算缺失：nil 执行体
+	// 会在 cron 首触发时 panic，须在装配期拦截；缺绑定即拒启，纯函数检查
+	// 由 app 包单测覆盖），再按规格 System 标志分派普通/系统级注册。
+	// System 标志逐条对应重构前现状（demoJob=false、其余 6 条=true）：租户
+	// 可见性过滤与调度二次防线读同一张系统级注册表，行为不变。孤儿绑定
+	//（绑定无规格）与规格外直注（如 cleanLogs 的「注册-不种子」）都不校验——
+	// 后者是合法状态（管理员按需建任务行）。
+	if missing := missingJobBindings(seed.JobSpecs, jobBindings); len(missing) > 0 {
 		return nil, fmt.Errorf("定时任务规格缺少执行绑定：%s（装配处 jobBindings 补齐，ADR 0024 补遗）",
 			strings.Join(missing, ", "))
 	}
@@ -580,15 +578,16 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 }
 
 // missingJobBindings 返回规格清单中没有装配绑定的处理器名名单（按规格次序，
-// 便于与 JobSpecs 对照）：任一条缺失都意味着对应任务行启用后 cron 触发会报
-// 「未注册的任务处理器」，属接线 bug——app.New 据此拒绝启动（fail-closed，
-// ADR 0024 补遗；先例：演示种子撞序号 init panic、ADR 0019 VerifyTenantTables
-// 拒启）。孤儿绑定（绑定无规格，如 cleanLogs 的「注册-不种子」）是合法状态，
-// 不在检查范围。
-func missingJobBindings(specs []seed.JobSpec, bound map[string]struct{}) []string {
+// 便于与 JobSpecs 对照）：绑定表键缺失或值为 nil 都算缺失——键存在校验拦不住
+// 手写 X: nil 的 map 字面量，nil 执行体要到 cron 首触发才 panic。任一条缺失都
+// 意味着对应任务行启用后 cron 触发会报「未注册的任务处理器」，属接线 bug——
+// app.New 据此拒绝启动（fail-closed，ADR 0024 补遗；先例：演示种子撞序号
+// init panic、ADR 0019 VerifyTenantTables 拒启）。孤儿绑定（绑定无规格）与
+// 规格外直注（如 cleanLogs 的「注册-不种子」）是合法状态，不在检查范围。
+func missingJobBindings(specs []seed.JobSpec, bindings map[string]infraservice.HandlerFunc) []string {
 	var missing []string
 	for _, spec := range specs {
-		if _, ok := bound[spec.HandlerName]; !ok {
+		if bindings[spec.HandlerName] == nil {
 			missing = append(missing, spec.HandlerName)
 		}
 	}
