@@ -57,23 +57,19 @@ type JobScheduler struct {
 // NewJobScheduler 创建调度器；loc 是应用业务时区（spec §4.10：每日任务按
 // 应用时区 01:00 执行，而不是服务器 TZ）。robfig/cron 的 WithLocation 让
 // 无 TZ= 前缀的表达式按该时区解释；loc 为空时退回 time.Local。
+// 处理器不在此自注册：执行闭包需要已装配的业务服务，由装配处（internal/app）
+// 按 seed.JobSpecs 规格绑定（ADR 0024 补遗）——构造函数只管调度机制。
 func NewJobScheduler(repo *repository.Repository, loc *time.Location) *JobScheduler {
 	if loc == nil {
 		loc = time.Local
 	}
-	s := &JobScheduler{
+	return &JobScheduler{
 		repo:           repo,
 		cron:           cron.New(cron.WithSeconds(), cron.WithLocation(loc)),
 		entries:        make(map[int64]cron.EntryID),
 		handlers:       make(map[string]HandlerFunc),
 		systemHandlers: make(map[string]struct{}),
 	}
-	// 内置演示任务，便于验证定时任务链路。
-	s.Register(DemoJobHandlerName, func(ctx context.Context, param string) error {
-		slog.Info("demo job executed", "tenant", tenant.ID(ctx), "param", param)
-		return nil
-	})
-	return s
 }
 
 // Register 注册普通任务处理器（任何租户可用）。
