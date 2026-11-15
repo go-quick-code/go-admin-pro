@@ -618,7 +618,8 @@ func (h *Handler) Register[[ .ClassName ]]Routes(rg *gin.RouterGroup) {
 	[[ .VarName ]].DELETE("/:id", h.requirePermission("[[ .PermPrefix ]]:delete"), h.Delete[[ .ClassName ]])
 [[if .ImportExport]]
 	// 导入导出接线位（生成器只留位，不产出实现）：接线参考 internal/module/crm 的
-	// 手写实现与 internal/pkg/excel，并补上对应的 Import/Export handler。
+	// 手写实现——导出侧调单点 helper internal/pkg/response.SendXLSX（spec #144），
+	// 导入侧用 internal/pkg/excel，并补上对应的 Import/Export handler。
 	//	[[ .VarName ]].POST("/import", h.requirePermission("[[ .PermPrefix ]]:import"), h.Import[[ .ClassName ]])
 	//	[[ .VarName ]].GET("/export", h.requirePermission("[[ .PermPrefix ]]:export"), h.Export[[ .ClassName ]])
 	//	[[ .VarName ]].GET("/import-template", h.requirePermission("[[ .PermPrefix ]]:import"), h.Import[[ .ClassName ]]Template)
