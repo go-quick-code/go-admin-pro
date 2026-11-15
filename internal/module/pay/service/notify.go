@@ -26,11 +26,11 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/xerr"
 )
 
-// notify.go 是商户回调任务与超时关单的执行层（issue #134，
+// notify.go 是商户回调任务的执行层（issue #134，
 // docs/pay-mvp-spec.md §4.5/§4.6 demo 回调/§7 job 种子）。
 //
 // 结构（照公海回收 pool_recycle.go 模式）：
-//   - infra_job handler 入口（payNotifyRetry / payOrderTimeoutClose）→
+//   - infra_job handler 入口（payNotifyRetry）→
 //     系统级遍历启用租户 → 逐租户处理（单租户失败不阻塞其他租户）；
 //   - 任务并发认领：条件 UPDATE（status IN (0,21,22) 且 next_notify_time
 //     到期，认领即推进 next_notify_time）——0 行 = 已被并发方认领，跳过不重发；
@@ -45,9 +45,6 @@ import (
 // NotifyRetryJobHandlerName 是商户回调重试任务的处理器名
 // （infra_job.handler_name，种子行与 internal/app 注册处共用）。
 const NotifyRetryJobHandlerName = "payNotifyRetry"
-
-// OrderTimeoutCloseJobHandlerName 是订单超时关闭任务的处理器名。
-const OrderTimeoutCloseJobHandlerName = "payOrderTimeoutClose"
 
 // notifyRetryIntervals 是重试间隔序列（秒，spec §4.5 照芋道 NOTIFY_FREQUENCY）：
 // 第 N 次失败后取第 N 个间隔；首次 + 8 重试共 9 次，第 9 次仍失败置 20 彻底失败。
@@ -589,38 +586,6 @@ func (s *Service) enrichPaymentPayload(ctx context.Context, task *paymodel.Notif
 func slogSkipTask(task *paymodel.NotifyTask, err error) {
 	// 与 infra job 日志同风格：slog 结构化，带任务定位字段。
 	slog.Warn("pay notify task skipped", "taskId", task.ID, "type", task.Type, "err", err)
-}
-
-// ---------- payOrderTimeoutClose（订单超时关闭 job） ----------
-
-// OrderTimeoutCloseResult 汇总一轮超时关单的执行结果。
-type OrderTimeoutCloseResult struct {
-	Tenants int   // 扫过的租户数
-	Closed  int64 // 关闭的过期待支付订单数
-}
-
-// RunOrderTimeoutClose 是订单超时关闭任务入口（系统级动作，逐租户执行）：
-// 扫 status=0 且 expire_time < now → 条件 UPDATE 置 30 已关闭（已支付/已退款/
-// 已关闭不受影响，spec §7）。
-func (s *Service) RunOrderTimeoutClose(ctx context.Context) (OrderTimeoutCloseResult, error) {
-	tenantIDs, err := s.listEnabledTenants(ctx)
-	if err != nil {
-		return OrderTimeoutCloseResult{}, err
-	}
-	result := OrderTimeoutCloseResult{Tenants: len(tenantIDs)}
-	var errs []error
-	for _, id := range tenantIDs {
-		closed, err := s.repo.CloseExpiredOrders(tenant.WithTenantID(ctx, id), id, s.businessNow())
-		if err != nil {
-			errs = append(errs, fmt.Errorf("租户 %d 超时关单失败: %w", id, err))
-			continue
-		}
-		result.Closed += closed
-	}
-	if len(errs) > 0 {
-		return result, errs[0]
-	}
-	return result, nil
 }
 
 // ---------- demo 商户回调端点（公开路由的公共链路） ----------

@@ -686,6 +686,41 @@ func (s *Service) GetOrder(ctx context.Context, id int64) (*dto.OrderDetail, err
 	return &dto.OrderDetail{Order: order, Extension: ext}, nil
 }
 
+// ---------- 订单超时关闭 job（spec §7） ----------
+
+// OrderTimeoutCloseJobHandlerName 是订单超时关闭任务的处理器名。
+const OrderTimeoutCloseJobHandlerName = "payOrderTimeoutClose"
+
+// OrderTimeoutCloseResult 汇总一轮超时关单的执行结果。
+type OrderTimeoutCloseResult struct {
+	Tenants int   // 扫过的租户数
+	Closed  int64 // 关闭的过期待支付订单数
+}
+
+// RunOrderTimeoutClose 是订单超时关闭任务入口（系统级动作，逐租户执行）：
+// 扫 status=0 且 expire_time < now → 条件 UPDATE 置 30 已关闭（已支付/已退款/
+// 已关闭不受影响，spec §7）。
+func (s *Service) RunOrderTimeoutClose(ctx context.Context) (OrderTimeoutCloseResult, error) {
+	tenantIDs, err := s.listEnabledTenants(ctx)
+	if err != nil {
+		return OrderTimeoutCloseResult{}, err
+	}
+	result := OrderTimeoutCloseResult{Tenants: len(tenantIDs)}
+	var errs []error
+	for _, id := range tenantIDs {
+		closed, err := s.repo.CloseExpiredOrders(tenant.WithTenantID(ctx, id), id, s.businessNow())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("租户 %d 超时关单失败: %w", id, err))
+			continue
+		}
+		result.Closed += closed
+	}
+	if len(errs) > 0 {
+		return result, errs[0]
+	}
+	return result, nil
+}
+
 // ---------- 纯函数与助手 ----------
 
 // orderStatusMessage 订单非待支付状态的 409 文案（submit 校验矩阵，文案可区分）。
