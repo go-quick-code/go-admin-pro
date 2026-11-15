@@ -28,6 +28,11 @@ type HandlerFunc func(ctx context.Context, param string) error
 // 不是缺省租户回退值（PR #39 审查 P0）。
 const PlatformTenantID int64 = 1
 
+// DemoJobHandlerName 是内置演示任务处理器名：常量是处理器名的单一出处
+// （ADR 0024 补遗），seed 规格与装配绑定引用同一常量。演示任务非系统级
+// （任何租户可建任务行）；执行闭包在装配处绑定（internal/app）。
+const DemoJobHandlerName = "demoJob"
+
 // errSystemJobForbidden 是系统级任务越权操作的统一文案（HTTP 403）。
 func errSystemJobForbidden() error {
 	return xerr.Forbidden("系统级任务仅平台管理员可操作")
@@ -64,7 +69,7 @@ func NewJobScheduler(repo *repository.Repository, loc *time.Location) *JobSchedu
 		systemHandlers: make(map[string]struct{}),
 	}
 	// 内置演示任务，便于验证定时任务链路。
-	s.Register("demoJob", func(ctx context.Context, param string) error {
+	s.Register(DemoJobHandlerName, func(ctx context.Context, param string) error {
 		slog.Info("demo job executed", "tenant", tenant.ID(ctx), "param", param)
 		return nil
 	})

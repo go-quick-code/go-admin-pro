@@ -105,8 +105,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
 	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）+ 商户回调重试/
-	// 订单超时关闭（issue #134，spec §7 job 种子两行）。
-	assertCount(t, db, &inframodel.Job{}, 7, "定时任务")
+	// 订单超时关闭（issue #134，spec §7 job 种子两行）。计数跟随规格清单
+	//（ADR 0024 补遗）：规格与种子行同源，新增规格漏投影即在此暴露。
+	assertCount(t, db, &inframodel.Job{}, int64(len(seed.JobSpecs)), "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
 	// 消息默认数据（issue #72）：log provider 的短信/邮件渠道 + 两条欢迎模板。
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道")
@@ -121,15 +122,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
 	// 定时任务状态（issue #63 收口 GORM 零值 + default:1 导致「默认启用」被写成暂停）：
-	// 演示任务与公海回收默认暂停，考勤日结果与会议提醒默认启用；
-	// 商户回调重试与订单超时关闭默认启用（issue #134，spec §7）。
-	assertJobStatus(t, db, "demoJob", inframodel.JobStatusPaused)
-	assertJobStatus(t, db, "recyclePoolCustomers", inframodel.JobStatusPaused)
-	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
-	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
-	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
-	assertJobStatus(t, db, "payNotifyRetry", inframodel.JobStatusRunning)
-	assertJobStatus(t, db, "payOrderTimeoutClose", inframodel.JobStatusRunning)
+	// 从规格投影逐条断言落库终态——演示任务与公海回收默认暂停，其余默认启用。
+	assertSeededJobStatuses(t, db)
 	// 考勤默认配置（issue #60，spec §7.3）：默认班次 09:00–18:00 宽限 5 分钟 +
 	// 默认考勤组（绑定默认班次）。
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次")
@@ -165,9 +159,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐（幂等）")
 	assertDefaultLeaveDefinition(t, db)
 	assertDefaultExpenseDefinition(t, db)
-	assertJobStatus(t, db, "oaAttendanceDailyResult", inframodel.JobStatusRunning)
-	assertJobStatus(t, db, "oaRoomBookingReminder", inframodel.JobStatusRunning)
-	assertJobStatus(t, db, "cleanAccessLogs", inframodel.JobStatusRunning)
+	assertSeededJobStatuses(t, db)
 	assertCount(t, db, &oamodel.AttendanceShift{}, 1, "默认班次（幂等）")
 	assertCount(t, db, &oamodel.AttendanceGroup{}, 1, "默认考勤组（幂等）")
 	assertCount(t, db, &msgmodel.Channel{}, 2, "消息渠道（幂等）")
@@ -202,6 +194,16 @@ func assertDefaultLeaveDefinition(t *testing.T, db *gorm.DB) {
 	}
 	if def.Nodes[1].AssigneeType != bpmmodel.AssigneePermission || def.Nodes[1].AssigneeValue != "oa:leave:manage" {
 		t.Fatalf("节点 2 应为 oa:leave:manage 权限码：%+v", def.Nodes[1])
+	}
+}
+
+// assertSeededJobStatuses 从规格投影逐条断言种子任务的落库状态（ADR 0024
+// 补遗）：断言对象是 Exec 补丁后的 DB 终态而非规格自身——种子投影漏条目或
+// 零值补丁失效都会在此失败，issue #63 回归网语义原样。
+func assertSeededJobStatuses(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, spec := range seed.JobSpecs {
+		assertJobStatus(t, db, spec.HandlerName, spec.Status)
 	}
 }
 
