@@ -103,8 +103,11 @@ func payDemoNotifyURL(kind string) string {
 	return base + "/pay/demo/notify/" + kind
 }
 
-// init 把 pay 演示数据入口注册给 seed.Run（同 seedCRMDemoFunc 的函数变量模式）。
-func init() { seedPayDemoFunc = seedPayDemo }
+// init 把 pay 演示数据入口自注册进 seed.Run 的有序演示列表（ADR 0024）：
+// order 取 DemoOrderPay。只依赖基础种子（admin 账号 + 14 行渠道种子），
+// 不依赖 CRM/OA/ERP 演示数据，顺序无关；业务行全部经 pay service 真实
+// 入口落库（含钱包唯一入账入口）。
+func init() { RegisterDemo(DemoOrderPay, seedPayDemo) }
 
 // PayDemo 写入 pay 演示数据（应用/套餐/交易链路/钱包流水），幂等可重复执行。
 // seed.Run 在 GAP_SEED_DEMO=true 时经 withDemo 分支调用；只想补写 pay 演示

@@ -33,7 +33,7 @@ import (
 
 // platformDemoTenantID 是平台演示数据的归属租户（默认租户 1）。不复用
 // crm_demo.go 的 demoTenantID：代码生成器的编译校验副本会剥离 crm_demo.go，
-// 平台演示文件必须自含其依赖（见 seed.go 的 seedCRMDemoFunc 注释）。
+// 平台演示文件必须自含其依赖（见 seed.go 的 demoSeeds 注释）。
 const platformDemoTenantID int64 = 1
 
 // 演示行固定 ID 段：11 起（基础种子的渠道/模板占 1–2，与 crm_demo 的 1001 段
@@ -45,8 +45,10 @@ const (
 	demoMailTemplateID  int64 = 12
 )
 
-// init 把平台演示数据入口注册给 seed.Run（见 seed.go 的 seedCRMDemoFunc 注释）。
-func init() { seedPlatformDemoFunc = seedPlatformDemo }
+// init 把平台演示数据入口自注册进 seed.Run 的有序演示列表（ADR 0024）：
+// order 取 DemoOrderPlatform。本文件自含依赖（不 import crm_demo.go 的
+// demoTenantID），不依赖 CRM/OA 演示数据，顺序无关。
+func init() { RegisterDemo(DemoOrderPlatform, seedPlatformDemo) }
 
 // PlatformDemo 写入平台能力演示数据（渠道/模板/套餐/敏感词/社交客户端/消息
 // 日志），幂等可重复执行。seed.Run 在 GAP_SEED_DEMO=true 时经 withDemo 分支

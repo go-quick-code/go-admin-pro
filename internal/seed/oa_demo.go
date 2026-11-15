@@ -70,8 +70,10 @@ type oaDemoOrg struct {
 	manager oaDemoUser
 }
 
-// init 把演示数据入口注册给 seed.Run（见 seed.go 的 seedOADemoFunc 注释）。
-func init() { seedOADemoFunc = seedOADemo }
+// init 把演示数据入口自注册进 seed.Run 的有序演示列表（ADR 0024）：order
+// 取 DemoOrderOA。本文件依赖 CRM 演示组织（sales1/sales2/manager）——
+// DemoOrderOA 必须大于 DemoOrderCRM，是唯一的顺序契约（见 seed.go）。
+func init() { RegisterDemo(DemoOrderOA, seedOADemo) }
 
 // seedOADemo 写入 OA 演示数据：每个域先按表判空，再在同一事务里落库。
 func seedOADemo(db *gorm.DB) error {
