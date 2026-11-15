@@ -505,7 +505,44 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil
 	})
 
-	engine := router.New(cfg, sysAPI, infraAPI, codegenAPI, crmAPI, oaAPI, bpmAPI, notifyAPI, messageAPI, erpAPI, payAPI)
+	// 模块注册（ADR 0024）：Backbone 三个受保护组中间件由装配处填充——Auth 与
+	// OperateLog 归 system、AccessLog 归 infra；次序（Auth → AccessLog →
+	// OperateLog）在 router.New 内固定，这里只提供函数。
+	backbone := router.Backbone{
+		Auth:       sysAPI.Auth(),
+		AccessLog:  infraAPI.AccessLog(),
+		OperateLog: sysAPI.OperateLog(),
+	}
+	// 注册器列表：次序即受保护组的模块注册次序（零漂移约束）；公开组与换票流组
+	// 由 router 对可选能力（RegisterPublic/RegisterStream）按同一列表过滤得出，
+	// 相对次序一致（公开 = system, notify, pay；换票流 = notify）。接新模块 =
+	// 这里 append 一行（清单见 docs/agents/new-module.md）。
+	registrars := []router.Registrar{
+		sysAPI,
+		infraAPI,
+		codegenAPI,
+		crmAPI,
+		oaAPI,
+		// bpm（issue #44）：流程定义管理（实例/任务接口由 #46 追加注册）。
+		bpmAPI,
+		// notify：公开组挂凭票据的推送流（issue #78，spec §4.5.3/§5.4——票据即
+		// 凭证，浏览器 EventSource 不能带请求头，公开路由是设计使然，ADR 0013；
+		// 推送关闭时注册为 no-op）；换票流组挂 POST /notify/push/ticket。
+		notifyAPI,
+		// message（issue #72）：渠道/模板（仅平台租户，service 层收口）、
+		// 短信/邮件发送与租户级发送日志。
+		messageAPI,
+		// erp（issue #88）：统一前缀 /erp，主数据（分类/单位/产品）起步；
+		// 单据/库存/财务路由由后续票追加注册。
+		erpAPI,
+		// pay（issue #131）：统一前缀 /pay，应用与渠道域起步（渠道的平台级约束
+		// 在 service 层 requirePlatform 收口）；交易/回调/钱包路由由后续票追加，
+		// 公开端点（demo 回调，issue #134，PR #140 补渠道回调）挂公开组——
+		// 无登录、挂 IP 限速、不记访问日志（公开组在 protected 组外，结构使然）。
+		payAPI,
+	}
+
+	engine := router.New(cfg, backbone, registrars...)
 
 	scheduler.Start(context.Background())
 

@@ -59,7 +59,8 @@ func TestGeneratedProductCompiles(t *testing.T) {
 // CategoryId/Code/Description，都会与「重新生成覆盖同名产物」的样板冲突。
 // 清理后样板骨架在「生成物 + 模块底座」的干净组合上做编译验证——即
 // INTEGRATION.md「重新生成会覆盖同名产物、手工修改需自行合并」语义在测试层的
-// 等价物（seed 包通过 seedCRMDemoFunc 变量在缺失 crm_demo.go 时可正常编译）。
+// 等价物（seed 包的演示种子在各 demo 文件 init 里自注册，ADR 0024：缺失
+// crm_demo.go 时只是少一条注册，seed 包照常编译）。
 func pruneOverlaidEntityFiles(t *testing.T, tmp string) {
 	t.Helper()
 	for _, rel := range []string{
@@ -140,8 +141,8 @@ func TestGeneratedFreshModuleCompiles(t *testing.T) {
 // 这些装配行，保持「全新模块自洽可编译」的检查语义。
 //
 // issue #97：ERP 演示种子（internal/seed/erp_demo.go）import 真实 erp
-// model/service，必须随模块一并剪除（seed.Run 通过函数变量调用，缺失时
-// 自动跳过 ERP 演示数据）。
+// model/service，必须随模块一并剪除（演示种子在 init 里自注册，ADR 0024：
+// 剪除即少一条注册，seed 包照常编译、自动跳过 ERP 演示数据）。
 //
 // issue #125：internal/module/erp/doctype（单据类型注册表，ADR 0020）是
 // 只依赖标准库的纯元数据包，internal/seed 的单据菜单投影 import 它——

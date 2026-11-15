@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
+	"runtime"
+	"strings"
 	"time"
 
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
@@ -17,8 +20,9 @@ import (
 )
 
 // Run 写入初始化数据。表结构由 goose 迁移预先建好，这里只负责数据。
-// withDemo 为 true 时在基础种子之后写入 CRM 演示数据（crm_demo.go）；
-// 集成测试基座传 false，保证用例数据只来自用例自身。
+// withDemo 为 true 时在基础种子之后按 DemoOrder 次序遍历演示种子注册列表
+// （各 demo 文件 init 自注册，ADR 0024）；集成测试基座传 false，保证用例
+// 数据只来自用例自身。
 //
 // seed 是系统级写入路径：不携带租户上下文，所有语句显式 tenant.Skip
 // （租户插件 fail-closed 后，无上下文访问租户表会被直接拦截）；
@@ -83,38 +87,8 @@ func Run(db *gorm.DB, withDemo bool) error {
 		return err
 	}
 	if withDemo {
-		if seedCRMDemoFunc != nil {
-			if err := seedCRMDemoFunc(db); err != nil {
-				return err
-			}
-		}
-		if seedOADemoFunc != nil {
-			if err := seedOADemoFunc(db); err != nil {
-				return err
-			}
-		}
-		// ERP 演示数据（issue #97，docs/erp-mvp-spec.md §7/§9）：主数据 →
-		// 采购订单/入库 → 盘点 → 销售订单/出库 → 收付款 → 首页统计可见。
-		// 独立于 CRM/OA 演示数据（只依赖基础种子的 admin 账号），放在最后。
-		if seedERPDemoFunc != nil {
-			if err := seedERPDemoFunc(db); err != nil {
-				return err
-			}
-		}
-		// 平台能力演示数据（issue #85，spec §7.3/§9）：渠道/模板/套餐/敏感词/
-		// 社交客户端（停用）/演示消息日志，配置与密钥全部占位符。不依赖 CRM/OA
-		// 演示组织，顺序无关，放最后。
-		if seedPlatformDemoFunc != nil {
-			if err := seedPlatformDemoFunc(db); err != nil {
-				return err
-			}
-		}
-		// pay 演示数据（issue #139，docs/pay-mvp-spec.md §7 演示数据/§9 验收 3）：
-		// 演示应用/套餐/充值与退款/示例订单与提现/演示钱包流水——业务行全部经
-		// pay service 真实入口落库。只依赖基础种子（admin 账号 + 14 行渠道种子），
-		// 顺序无关，放最后。
-		if seedPayDemoFunc != nil {
-			if err := seedPayDemoFunc(db); err != nil {
+		for _, demo := range demoSeeds {
+			if err := demo.fn(db); err != nil {
 				return err
 			}
 		}
@@ -122,30 +96,66 @@ func Run(db *gorm.DB, withDemo bool) error {
 	return nil
 }
 
-// seedCRMDemoFunc 是 CRM 演示数据的写入入口，由 crm_demo.go 的 init 注册。
-// 用函数变量而不是直接调用，是为了让代码生成器的编译校验（会剔换真实
-// 产品实体及其消费者）可以在不携带 crm_demo.go 的副本上继续编译 seed 包；
-// 正常构建里 crm_demo.go 始终存在，行为等价于直接调用。
-var seedCRMDemoFunc func(*gorm.DB) error
+// DemoOrder 常量集中声明演示种子的执行次序（ADR 0024）：步进 10 留插入位，
+// 新增模块在最大值之后顺延取号，插入新演示种子不用重排编号。
+//
+// 唯一的顺序契约：OA 必须在 CRM 之后——OA 演示数据依赖 CRM 演示组织
+// （sales1/sales2/manager，见 oa_demo.go）；其余演示种子只依赖基础种子
+// （admin 账号 + 各自自含的兜底），顺序无关（ERP/Platform/Pay 的取值位置
+// 只是历史落点）。契约的结构化断言见 TestDemoOrderOAAfterCRM。
+const (
+	DemoOrderCRM      = 10
+	DemoOrderOA       = 20
+	DemoOrderERP      = 30
+	DemoOrderPlatform = 40
+	DemoOrderPay      = 50
+)
 
-// seedOADemoFunc 是 OA 演示数据的写入入口，由 oa_demo.go 的 init 注册。
-// OA 演示数据依赖 CRM 演示组织（sales1/sales2/manager）与基础种子（默认
-// 班次/考勤组、默认审批流程、报销类别字典），因此固定排在 CRM 演示数据之后。
-var seedOADemoFunc func(*gorm.DB) error
+// demoSeed 是一条演示种子注册项：order 决定执行次序，fn 是写入入口。
+type demoSeed struct {
+	order int
+	fn    func(*gorm.DB) error
+}
 
-// seedERPDemoFunc 是 ERP 演示数据的写入入口，由 erp_demo.go 的 init 注册。
-// 不依赖 CRM/OA 演示数据（只依赖基础种子的 admin 账号），顺序无关；用函数
-// 变量是为了代码生成器的 fresh-module 编译校验能连同真实 erp 模块剪除本文件。
-var seedERPDemoFunc func(*gorm.DB) error
+// demoSeeds 是包级有序演示种子列表（ADR 0024）：各 demo 文件在 init 里
+// RegisterDemo 自注册，Run 按 order 升序遍历消费。demo 文件可能被代码生成器
+// 的 fresh-module 编译校验剪除（crm_demo.go/erp_demo.go，见
+// compile_check_test.go）——init 自注册下剪除 = 少一条注册，seed 包照常编译。
+var demoSeeds []demoSeed
 
-// seedPlatformDemoFunc 是平台能力演示数据的写入入口，由 platform_demo.go 的
-// init 注册。不依赖 CRM/OA 演示数据（自带渠道/模板/套餐兜底），顺序无关。
-var seedPlatformDemoFunc func(*gorm.DB) error
+// RegisterDemo 把演示种子写入入口注册进包级有序列表：demo 文件在 init 里
+// 自注册，order 取集中声明的 DemoOrder 常量；插入到升序位置，保证 Run 的
+// 遍历次序确定（Go 的同包多文件 init 按文件名序执行，与 order 无关）。
+// 撞序号是复制粘贴接线 bug 不是可替换 seam——立即 panic（init 不能返回
+// error，且装配 bug 应在每个 import seed 的构建里立即触发，含 seed 关闭的
+// prod 构建），消息点名两个撞号方并含 order 值，不让任何一方被静默吞掉。
+func RegisterDemo(order int, fn func(*gorm.DB) error) {
+	for i, existing := range demoSeeds {
+		if existing.order == order {
+			panic(fmt.Sprintf("seed: 演示种子 order %d 冲突：%s 与 %s（DemoOrder 常量步进 10 取号，撞号即接线 bug）",
+				order, demoFuncName(existing.fn), demoFuncName(fn)))
+		}
+		if existing.order > order {
+			demoSeeds = append(demoSeeds, demoSeed{})
+			copy(demoSeeds[i+1:], demoSeeds[i:])
+			demoSeeds[i] = demoSeed{order: order, fn: fn}
+			return
+		}
+	}
+	demoSeeds = append(demoSeeds, demoSeed{order: order, fn: fn})
+}
 
-// seedPayDemoFunc 是 pay 演示数据的写入入口，由 pay_demo.go 的 init 注册。
-// 不依赖 CRM/OA/ERP 演示数据（只依赖基础种子的 admin 账号与 14 行渠道种子），
-// 顺序无关；业务行全部经 pay service 真实入口落库（含钱包唯一入账入口）。
-var seedPayDemoFunc func(*gorm.DB) error
+// demoFuncName 返回 fn 的短名（最后一个点之后的部分），用于撞序号 panic
+// 点名撞号双方——全名形如 go-admin-pro/internal/seed.seedCRMDemo。
+// 只在撞序号 panic 分支调用（走 reflect + FuncForPC），常规注册路径不付
+// 反射开销。
+func demoFuncName(fn func(*gorm.DB) error) string {
+	full := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+	if i := strings.LastIndexByte(full, '.'); i >= 0 {
+		return full[i+1:]
+	}
+	return full
+}
 
 func seedTenant(db *gorm.DB) error {
 	var count int64

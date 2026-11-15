@@ -84,8 +84,11 @@ const (
 	erpDemoPaymentID       int64 = 4007
 )
 
-// init 把 ERP 演示数据入口注册给 seed.Run（见 seed.go 的 seedERPDemoFunc 注释）。
-func init() { seedERPDemoFunc = seedERPDemo }
+// init 把 ERP 演示数据入口自注册进 seed.Run 的有序演示列表（ADR 0024）：
+// order 取 DemoOrderERP。本文件依赖真实 erp model/service，代码生成器的
+// fresh-module 编译校验会剪除本文件——init 自注册下剪除即少一条注册，
+// seed 包照常编译（不依赖 CRM/OA 演示数据，顺序无关）。
+func init() { RegisterDemo(DemoOrderERP, seedERPDemo) }
 
 // erpDemoUser 是演示数据 owner（ERP 无公海，owner = 创建人，spec §4.10）。
 type erpDemoUser struct {

@@ -56,8 +56,10 @@ func (u demoOrgUser) creator() string {
 	return strconv.FormatInt(u.ID, 10)
 }
 
-// init 把演示数据入口注册给 seed.Run（见 seed.go 的 seedCRMDemoFunc 注释）。
-func init() { seedCRMDemoFunc = seedCRMDemo }
+// init 把演示数据入口自注册进 seed.Run 的有序演示列表（ADR 0024）：order
+// 取 DemoOrderCRM。OA 演示数据依赖本文件建出的演示组织，顺序契约见
+// seed.go 的 DemoOrder 常量注释。
+func init() { RegisterDemo(DemoOrderCRM, seedCRMDemo) }
 
 // seedCRMDemo 写入 CRM 演示数据。只有 crm_customer 为空时才执行。
 func seedCRMDemo(db *gorm.DB) error {
