@@ -17,7 +17,7 @@
 6. **定制装配**：service 的 Set* 接缝在 app.go 逐个接线（每模块 bespoke，无统一形状——统一化等于 DI 框架，已否决）。集成测试需要触达 service 时在 `App` 结构体加字段，注释写明哪个票、经该字段做什么（参照 `Pay`/`BPM` 字段注释）。
 7. **配置**：`internal/config/config.go` 加模块配置段（按需）。注意 seed 包不读配置——时区/存储根/回调地址等由 app.New 显式注入（参照 `SetDemoLocation`/`SetDemoPayNotifyBase`）。
 8. **基础种子**：`internal/seed/seed.go` 的 `Run` callsheet 按依赖顺序插一行——显式有序清单是有意保留的手工接线，不是遗漏（ADR 0024）。
-9. **定时任务**：三处声明——模块 service 定义 `XxxJobHandlerName` 常量与 `RunXxx(ctx, param)` 方法；seed 包 `JobSpecs` 追加一条规格（处理器名引模块常量，写明 cron/默认状态/备注/是否系统级）；装配处 bindings map 追加一条绑定（闭包调 `RunXxx`）。兜底：规格缺绑定启动即拒（ADR 0024 补遗）；种子行与测试断言由规格投影，handler 名与 cron 不再手抄。
+9. **定时任务**：三处声明——模块 service 定义 `XxxJobHandlerName` 常量与 `RunXxx(ctx, param)` 方法；seed 包 `JobSpecs` 追加一条规格（处理器名引模块常量，写明 cron/默认状态/备注/是否系统级，任务有默认参数时写明 handler_param）；装配处 bindings map 追加一条绑定（闭包调 `RunXxx`）。兜底：规格缺绑定启动即拒（ADR 0024 补遗）；种子行与测试断言由规格投影，handler 名与 cron 不再手抄。
 10. **菜单与权限**：seed 菜单/按钮 + 前端路由。兜底：权限码收敛测试（ADR 0023）——routeOnly 缺口（路由挂码、seed 无授予路径）一律修复不豁免。
 
 ## 验证
