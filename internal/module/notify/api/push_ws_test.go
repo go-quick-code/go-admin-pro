@@ -88,6 +88,22 @@ func dialWS(tb testing.TB, env *wsEnv, ticket string, opts *websocket.DialOption
 	return conn, resp
 }
 
+// waitSubscribers 等待 hub 的 (tenant, user) 订阅数达到 want，2s 内未落定即
+// Fatal。订阅注册由请求 handler goroutine 在握手响应写出后异步完成（WS
+// handler 在 websocket.Accept 写出 101 之后才执行 hub.Subscribe）：握手成功
+// 不代表簿记完成（#128：CI 慢机偶发 Subscribers=0）——拨号后的发布事件与
+// 计数断言一律先经这里等注册落定，轮询等状态变化，不做固定 sleep。
+func waitSubscribers(tb testing.TB, hub *push.Hub, tenantID, userID int64, want int, what string) {
+	tb.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.Subscribers(tenantID, userID) != want {
+		if time.Now().After(deadline) {
+			tb.Fatalf("%s：订阅数 = %d, want %d（2s 内未落定）", what, hub.Subscribers(tenantID, userID), want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // TestWSHandshakeDeliversEvent 覆盖验收第 1 条：握手成功并收到通知事件，
 // 且与 SSE 共用同一 hub（在线订阅数 1，事件结构与 spec §4.5.4 一致）。
 func TestWSHandshakeDeliversEvent(t *testing.T) {
@@ -98,15 +114,7 @@ func TestWSHandshakeDeliversEvent(t *testing.T) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("握手状态码 = %d, want 101", resp.StatusCode)
 	}
-	// 服务端读循环完成订阅注册是异步的：握手成功不代表簿记完成（CI 慢机偶发
-	// Subscribers=0），轮询等待成立后再发布事件。
-	deadline := time.Now().Add(2 * time.Second)
-	for env.hub.Subscribers(1, 1) != 1 {
-		if time.Now().After(deadline) {
-			t.Fatalf("握手后在线订阅数 = %d, want 1", env.hub.Subscribers(1, 1))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitSubscribers(t, env.hub, 1, 1, 1, "握手后在线订阅数")
 
 	env.hub.Publish(1, 1, push.NewNotification(push.EventData{
 		Title: "WS 实时推送", Type: "bpm_todo", BizType: "bpm_task", BizID: 42,
@@ -138,6 +146,10 @@ func TestWSClientMessageDiscarded(t *testing.T) {
 	ticket, _ := env.tickets.Issue(1, 1)
 	conn, _ := dialWS(t, env, ticket, nil)
 	defer conn.CloseNow()
+	// 发布事件前等订阅注册落定：Publish 与请求 handler goroutine 的注册并发
+	//（#128——未注册时发布的事件无处投递，客户端 2s 读超时「failed to get
+	// reader」）。
+	waitSubscribers(t, env.hub, 1, 1, 1, "发消息前订阅注册")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -185,13 +197,7 @@ func TestWSOversizedMessageClosed(t *testing.T) {
 	}
 	// 服务端读循环的断连与 hub 注销是异步的：客户端观测到关闭不代表服务端
 	// 已完成簿记（基线偶发失败），与 TestWSDisconnectCleansUp 同款轮询等待归零。
-	deadline := time.Now().Add(2 * time.Second)
-	for env.hub.Subscribers(1, 1) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("超限断开后订阅数 = %d, want 0", env.hub.Subscribers(1, 1))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitSubscribers(t, env.hub, 1, 1, 0, "超限断开后订阅清理")
 	// 服务端无恙：新票据仍可正常握手。
 	ticket2, _ := env.tickets.Issue(1, 1)
 	conn2, _ := dialWS(t, env, ticket2, nil)
@@ -204,23 +210,9 @@ func TestWSDisconnectCleansUp(t *testing.T) {
 	env := newWSEnv(t, time.Second)
 	ticket, _ := env.tickets.Issue(1, 1)
 	conn, _ := dialWS(t, env, ticket, nil)
-	// 服务端读循环完成订阅注册是异步的：握手成功不代表簿记完成（CI 慢机偶发
-	// Subscribers=0），与下方归零断言同口径轮询等待成立。
-	deadline := time.Now().Add(2 * time.Second)
-	for env.hub.Subscribers(1, 1) != 1 {
-		if time.Now().After(deadline) {
-			t.Fatalf("在线订阅数 = %d, want 1", env.hub.Subscribers(1, 1))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitSubscribers(t, env.hub, 1, 1, 1, "在线订阅数")
 	conn.CloseNow()
-	deadline = time.Now().Add(2 * time.Second)
-	for env.hub.Subscribers(1, 1) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.hub.Subscribers(1, 1))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitSubscribers(t, env.hub, 1, 1, 0, "断开后订阅清理")
 }
 
 // TestWSHeartbeat 覆盖心跳（spec §4.5.3，issue #79 验收第 2 条）：heartbeat
