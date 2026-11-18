@@ -32,6 +32,11 @@ import (
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
+	// mall（issue #174）：会员域管理端。依赖指向平台层与 pay service（mall 是
+	// pay 的业务消费方，T4 支付联动接线；docs/mall-mvp-spec.md §2）。
+	mallapi "github.com/go-quick-code/go-admin-pro/internal/module/mall/api"
+	mallrepo "github.com/go-quick-code/go-admin-pro/internal/module/mall/repository"
+	mallservice "github.com/go-quick-code/go-admin-pro/internal/module/mall/service"
 	payapi "github.com/go-quick-code/go-admin-pro/internal/module/pay/api"
 	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
 	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
@@ -417,6 +422,13 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	paySvc.SetDemoNotifyHandler(paySvc.HandleDemoNotify)
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission, cfg.Location())
 
+	// mall 装配（issue #174）：repo → service → api.New，形状对照 pay/crm
+	//（svc + requirePermission + location）。T1 会员域管理端；积分入账与
+	// pay 联动（SetOrderSuccessHandler 第二消费方）随 T2/T4 经 Set* 接线。
+	mallRepo := mallrepo.New(db)
+	mallSvc := mallservice.New(mallRepo)
+	mallAPI := mallapi.New(mallSvc, sysAPI.RequirePermission, cfg.Location())
+
 	// 定时任务绑定表（ADR 0024 补遗）：键 = 处理器名常量（与 seed.JobSpecs
 	// 引用同一常量，处理器名没有第二处字面量），值 = 执行闭包——业务服务在
 	// 装配期已就绪，闭包体自原装配点逐字迁移；demoJob 闭包自 JobScheduler
@@ -568,6 +580,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		// 公开端点（demo 回调，issue #134，PR #140 补渠道回调）挂公开组——
 		// 无登录、挂 IP 限速、不记访问日志（公开组在 protected 组外，结构使然）。
 		payAPI,
+		// mall（issue #174）：统一前缀 /mall，会员域管理端起步（商品/交易路由
+		// 随 T2/T3 追加注册，C 端公开组 /mall/app/* 随 T5）。列表序在 pay 之后
+		//（spec §2：mall 是 pay 的业务消费方，注册器相对次序一致）。
+		mallAPI,
 	}
 
 	engine := router.New(cfg, backbone, registrars...)

@@ -229,6 +229,19 @@ var TenantTables = []string{
 	// SQL（回调端点是公开路由，租户经关联单据派生后显式传入）。
 	"pay_demo_order",
 	"pay_demo_withdraw",
+
+	// mall 会员域（issue #174，迁移 00040–00044，docs/mall-mvp-spec.md §3.1）：
+	// 会员/等级/地址/积分配置/积分流水五表全量租户隔离（跨租户业务 ID 一律
+	// 404）。member_user.mobile 与 member_level 的 name/level 入租户唯一键；
+	// point_config 是租户级单行（UNIQUE(tenant_id)）；point_record 是
+	// append-only 流水（余额只经唯一入账入口变动，余额列不得直改）。
+	// member_user/member_level/member_address 的管理端读写随本票；积分
+	// 配置/流水的业务逻辑随 T2（表先建，避免迁移翻工）。
+	"member_user",
+	"member_level",
+	"member_address",
+	"member_point_config",
+	"member_point_record",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

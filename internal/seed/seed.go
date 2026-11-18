@@ -76,6 +76,11 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedPayChannels(db); err != nil {
 		return err
 	}
+	// mall 会员等级种子（issue #174，spec §3.1）：默认租户一行「普通会员
+	// level=1 experience=0」，表为空时幂等写入。
+	if err := seedMemberLevel(db); err != nil {
+		return err
+	}
 	if err := seedPoolConfigs(db); err != nil {
 		return err
 	}
@@ -599,6 +604,10 @@ func seedMenus(db *gorm.DB) error {
 	// 820 渠道配置。资金敏感：内置普通角色（role id=2）默认不授予任何
 	// pay 菜单（见 seedRoles 的 roleMenus——刻意无 800 段条目）。
 	menus = append(menus, payMenus()...)
+	// 会员中心 900 段（issue #174，spec §5）：dir 900 + 901 会员管理 +
+	// 902 会员等级。管理面属租户管理员职责：内置普通角色默认不授予
+	// mall 菜单（照 erp 700 段「普通角色零默认授权」口径）。
+	menus = append(menus, mallMenus()...)
 	// 菜单补齐（issue #69）：按 ID 只插入缺失项，不更新、不复活已软删菜单。
 	// 旧实现「有菜单就整体跳过」会让存量库永远看不到新版本追加的菜单；
 	// Unscoped 把软删 ID 也视为已存在，避免重新插入撞主键或复活管理员删除的菜单。

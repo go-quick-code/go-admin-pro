@@ -6,6 +6,7 @@ import (
 	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	mallmodel "github.com/go-quick-code/go-admin-pro/internal/module/mall/model"
 	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
@@ -42,6 +43,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&inframodel.Config{}, &inframodel.Job{},
 		&msgmodel.Channel{}, &msgmodel.Template{}, &sysmodel.Area{},
 		&paymodel.Channel{},
+		&mallmodel.MemberLevel{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -116,6 +118,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// mock/wallet 启用、其余停用。
 	assertCount(t, db, &paymodel.Channel{}, 14, "支付渠道")
 	assertPayChannelSeed(t, db)
+	// mall 会员等级种子（issue #174，spec §3.1）：默认租户一行「普通会员」。
+	assertCount(t, db, &mallmodel.MemberLevel{}, 1, "会员等级")
+	assertMemberLevelSeed(t, db)
 	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
 	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
@@ -293,6 +298,22 @@ func assertPayChannelSeed(t *testing.T, db *gorm.DB) {
 		if row.Config != "{}" {
 			t.Fatalf("支付渠道 %s 种子 config 应为 {}，实际 %s", code, row.Config)
 		}
+	}
+}
+
+// assertMemberLevelSeed 断言「普通会员」等级种子行（issue #174，spec §3.1）：
+// level=1 experience=0 启用态，默认租户（ID=1）。
+func assertMemberLevelSeed(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var row mallmodel.MemberLevel
+	if err := tenant.Skip(db).Order("id ASC").First(&row).Error; err != nil {
+		t.Fatalf("读取会员等级种子: %v", err)
+	}
+	if row.Name != "普通会员" || row.Level != 1 || row.Experience != 0 {
+		t.Fatalf("会员等级种子不符：name=%s level=%d experience=%d，期望 普通会员/1/0", row.Name, row.Level, row.Experience)
+	}
+	if row.TenantID != 1 || row.Status != mallmodel.StatusEnable {
+		t.Fatalf("会员等级种子归属/状态不符：tenant=%d status=%d，期望 1/0", row.TenantID, row.Status)
 	}
 }
 
