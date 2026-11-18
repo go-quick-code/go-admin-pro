@@ -161,6 +161,7 @@ var permConvergenceSpecs = []permConvergenceSpec{
 	{prefix: "erp", seedMenus: func() []sysmodel.Menu { return append(erpCoreMenus(), erpDocMenus()...) }, derive: deriveErpDocCodes},
 	{prefix: "oa", seedMenus: baseMenus},
 	{prefix: "pay", seedMenus: payMenus},
+	{prefix: "mall", seedMenus: mallMenus},
 	{prefix: "infra", seedMenus: baseMenus},
 	{prefix: "message", seedMenus: baseMenus},
 	{prefix: "bpm", seedMenus: baseMenus},
