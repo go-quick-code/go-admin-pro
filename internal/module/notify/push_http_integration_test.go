@@ -231,6 +231,22 @@ func readWSEvent(tb testing.TB, conn *websocket.Conn, within time.Duration) stri
 	return string(data)
 }
 
+// waitForSubscribers 等待 hub 的 (tenant, user) 订阅数达到 want，2s 内未落定
+// 即 Fatal。WS 的订阅注册在服务端读循环里异步完成——握手成功不代表簿记完成
+// （#128：CI 慢机偶发 Subscribers=0），拨号后的发布事件与计数断言一律先经
+// 这里等注册落定，轮询等状态变化，不做固定 sleep。SSE 不需要它：handler 在
+// 写首条注释行之前已同步注册，收到注释行即注册成立（自同步）。
+func waitForSubscribers(tb testing.TB, hub *push.Hub, tenantID, userID int64, want int, what string) {
+	tb.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.Subscribers(tenantID, userID) != want {
+		if time.Now().After(deadline) {
+			tb.Fatalf("%s：订阅数 = %d, want %d（2s 内未落定）", what, hub.Subscribers(tenantID, userID), want)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // wsReader 在后台持续读取 WS 消息（等价浏览器的事件循环）：消息经 channel
 // 交给测试做确定性等待，同时保证客户端库始终在处理控制帧（自动 pong）。
 // 注意不能用带短超时的 ctx 直接 conn.Read 做静默断言——库约定任何方法出错
@@ -603,21 +619,10 @@ func TestIntegrationPushDisconnectCleansUp_HTTP(t *testing.T) {
 	}
 	stream := streamSSE(t, resp)
 	stream.nextLine(t, "首条注释行", 2*time.Second)
-	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
-		t.Fatalf("在线订阅数 = %d, want 1", got)
-	}
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 1, "在线订阅数")
 
 	resp.Body.Close()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if env.App.PushHub.Subscribers(tenant.DefaultID, 1) == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.App.PushHub.Subscribers(tenant.DefaultID, 1))
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 0, "断开后订阅清理")
 }
 
 // TestIntegrationPushWS_DeliversWithinSecond_HTTP 覆盖 WS 主链路（issue #79
@@ -630,9 +635,7 @@ func TestIntegrationPushWS_DeliversWithinSecond_HTTP(t *testing.T) {
 
 	conn := dialWS(t, env, tk.Ticket, nil)
 	defer conn.CloseNow()
-	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
-		t.Fatalf("握手后在线订阅数 = %d, want 1", got)
-	}
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 1, "握手后在线订阅数")
 
 	// 在线用户 1 秒内收到：与生产装配同一 service 实例创建通知。
 	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
@@ -723,6 +726,10 @@ func TestIntegrationPushWSCrossTenantIsolation_HTTP(t *testing.T) {
 	if err := env.DB.Raw("SELECT id FROM system_user WHERE tenant_id = 2 AND username = 'admin'").Scan(&tenant2UserID).Error; err != nil || tenant2UserID == 0 {
 		t.Fatalf("查询租户 2 管理员: err=%v id=%d", err, tenant2UserID)
 	}
+	// 发布前等两条订阅都注册落定（#128：注册在读循环里异步完成，未注册时
+	// 发布的事件无处投递，下游 1s 读超时假红）。
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 1, "租户 1 在线订阅数")
+	waitForSubscribers(t, env.App.PushHub, 2, tenant2UserID, 1, "租户 2 在线订阅数")
 
 	// 只推租户 1 的 admin：租户 2 的 WS 必须静默。
 	ctx := tenant.WithTenantID(t.Context(), tenant.DefaultID)
@@ -792,20 +799,9 @@ func TestIntegrationPushWSDisconnectCleansUp_HTTP(t *testing.T) {
 	token := env.Login(t, "admin", "123456")
 
 	conn := dialWS(t, env, issuePushTicket(t, env, token).Ticket, nil)
-	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != 1 {
-		t.Fatalf("在线订阅数 = %d, want 1", got)
-	}
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 1, "在线订阅数")
 	conn.CloseNow()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if env.App.PushHub.Subscribers(tenant.DefaultID, 1) == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("断开后订阅未清理：Subscribers = %d", env.App.PushHub.Subscribers(tenant.DefaultID, 1))
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 0, "断开后订阅清理")
 }
 
 // TestIntegrationPushDisabled_HTTP 覆盖推送关闭：路由不注册（换票 404），
@@ -841,9 +837,9 @@ func TestIntegrationPushConnQuota_HTTP(t *testing.T) {
 		readWS(t, conn) // 后台读循环：自动 pong 保活
 		t.Cleanup(func() { _ = conn.CloseNow() })
 	}
-	if got := env.App.PushHub.Subscribers(tenant.DefaultID, 1); got != push.MaxConnsPerStream {
-		t.Fatalf("上限内连接数 = %d, want %d", got, push.MaxConnsPerStream)
-	}
+	// 8 条注册是异步的：等全部落定再发第 9 条——第 9 条被拒的前提是配额已满
+	//（#128：不等的话慢机上第 9 条会被接受为第 8 条，1008 断言假红）。
+	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, push.MaxConnsPerStream, "上限内连接注册")
 
 	// 第 9 条：握手完成（票据有效），随后被服务端以 1008 关闭。
 	tk := issuePushTicket(t, env, token)
