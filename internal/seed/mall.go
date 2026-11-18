@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// mall.go 是 mall 会员域与商品域种子（issue #174/#176，
+// mall.go 是 mall 会员域与商品域种子（issue #174/#175/#176，
 // docs/mall-mvp-spec.md §3.1/§3.2/§5/§7）：
 // 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单。
 //
@@ -20,10 +20,13 @@ import (
 // 913 商品属性（property 页）；
 // 按钮按 菜单ID×10+n：9011/9012 会员新增/修改（member 无删除端点——业务
 // 身份禁删，生命周期由停启用覆盖，路由侧无 mall:member:delete 码）、
-// 9021–9023 等级增/改/删、9111–9114/9121–9124/9131–9134 分类/品牌/属性
-// 四码（开工前 grep seed 去重确认 900–913 与 901x/902x/911x/912x/913x 未被
-// 占用）。地址随 T1 无独立页面（在会员详情抽屉按会员查看），菜单随 T2 C 端
-// 自助落地面时再补；积分配置/流水页面随 T2；SPU 页随 T4。
+// 9013/9014 积分配置查询/修改（issue #175：积分是会员域功能，按钮挂 901
+// 会员管理下——910 段随 T3 商品域占用；调整接口复用 mall:member:update、
+// 流水查询复用 mall:member:query，不设独立按钮）、
+// 9021–9023 等级增/改/删、9111–9113/9121–9123/9131–9133 分类/品牌/属性
+// 三码（query 挂页面行；开工前 grep seed 去重确认 900–913 与 901x/902x/
+// 911x/912x/913x 未被占用）。地址随 T1 无独立页面（在会员详情抽屉按会员
+// 查看），菜单随 T5 C 端自助落地面时再补；SPU 页随 T4。
 //
 // 商品域 910 段 URL 挂 /mall 伞下（spec §2「前端路由 /mall：member/product/
 // trade 三页组」）：dir 910 用绝对路径 /mall/product，与 900 的 /mall/member、
@@ -41,6 +44,8 @@ func mallMenus() []sysmodel.Menu {
 		menuRow(901, 900, "会员管理", "member", "mall/member/index", "mall:member:query", "User", 1),
 		btnRow(9011, 901, "会员新增", "mall:member:create", 1),
 		btnRow(9012, 901, "会员修改", "mall:member:update", 2),
+		btnRow(9013, 901, "积分配置查询", "mall:point:query", 3),
+		btnRow(9014, 901, "积分配置修改", "mall:point:update", 4),
 		menuRow(902, 900, "会员等级", "level", "mall/level/index", "mall:level:query", "Medal", 2),
 		btnRow(9021, 902, "等级新增", "mall:level:create", 1),
 		btnRow(9022, 902, "等级修改", "mall:level:update", 2),
