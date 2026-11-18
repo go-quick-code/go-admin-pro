@@ -1,9 +1,9 @@
 import request from '@/utils/request'
 
-// mall 会员域 API（issue #174，docs/mall-mvp-spec.md §4/§5）：管理端会员/等级/
-// 地址。商品/交易域与 C 端端点随 T2/T3/T5 追加。
-// 积分无管理端入口（余额只经后端唯一入账入口变动，T2）——本文件刻意无
-// 积分写接口。
+// mall 会员域 API（issue #174/#175，docs/mall-mvp-spec.md §4/§5）：管理端
+// 会员/等级/地址/积分。商品/交易域与 C 端端点随 T3/T5 追加。
+// 积分余额只经后端唯一入账入口变动（ApplyPointChange）：前端只有「调整」
+// 触发端（adjustMemberPoint），不存在任何直改余额的接口。
 
 // ---------- 会员（mall:member:*） ----------
 // mobile 租户内唯一（后端撞键 409）；password 选填（空 = 不设/不改密码，
@@ -40,6 +40,29 @@ export function updateMember(data: {
 // 停启用（PUT /mall/member/:id/status）：status 0 启用 / 1 停用。
 export function updateMemberStatus(id: number, status: number) {
   return request.put(`/mall/member/${id}/status`, { status }) as Promise<any>
+}
+
+// ---------- 积分（issue #175） ----------
+// 调整（POST /mall/member/adjust-point，挂 mall:member:update）：point 可正
+// 可负，0 拒绝（400）；余额扣成负数 409；返回流水（含 balanceAfter 快照）。
+export function adjustMemberPoint(data: { userId: number; point: number; remark?: string }) {
+  return request.post('/mall/member/adjust-point', data) as Promise<any>
+}
+// 按会员流水（GET /mall/member/:id/point-records，挂 mall:member:query）：
+// 分页，bizType 过滤选填（order_pay/order_cancel/admin_adjust）；id 正序
+// （重放序：逐笔 point 累计恒等于 point_balance）。
+export function pagePointRecords(userId: number, params: any) {
+  return request.get(`/mall/member/${userId}/point-records`, { params }) as Promise<any>
+}
+// 积分配置（GET /mall/point-config，挂 mall:point:query）：租户级单行，
+// 行缺失后端按默认 pointPerYuan=1 惰性建行。
+export function getPointConfig() {
+  return request.get('/mall/point-config') as Promise<any>
+}
+// 更新积分配置（PUT /mall/point-config，挂 mall:point:update）：
+// pointPerYuan ≥ 0（0 = 支付不入账）。
+export function updatePointConfig(data: { pointPerYuan: number; remark?: string }) {
+  return request.put('/mall/point-config', data) as Promise<any>
 }
 
 // ---------- 会员等级（mall:level:*） ----------
