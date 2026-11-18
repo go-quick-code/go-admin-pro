@@ -242,6 +242,18 @@ var TenantTables = []string{
 	"member_address",
 	"member_point_config",
 	"member_point_record",
+
+	// mall 商品域基础四表（issue #176，迁移 00045–00048，docs/mall-mvp-spec.md
+	// §3.2）：分类/品牌/属性名/属性值全量租户隔离（跨租户业务 ID 一律 404）。
+	// product_category 同级 name、product_brand/property 租户内 name、
+	// product_property_value 的 (property_id, name) 全部入租户唯一键（插件
+	// 隔离）。两级树父级合法性与分类删除守卫（有子级禁删；SPU 引用计数随
+	// T4 SPU 表落地接线）在 service 层收口。SPU/SKU 两表随 T4 迁移建表时
+	// 追加登记。
+	"product_category",
+	"product_brand",
+	"product_property",
+	"product_property_value",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

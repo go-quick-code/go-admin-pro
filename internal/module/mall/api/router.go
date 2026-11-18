@@ -6,7 +6,9 @@ import "github.com/gin-gonic/gin"
 // 权限码见 docs/mall-mvp-spec.md §4/§7：会员 mall:member:*（query/create/
 // update——无 delete：会员是业务身份，生命周期由停启用覆盖，issue #174）；
 // 等级 mall:level:*（query/create/update/delete）；地址随会员查询码
-// mall:member:query（地址是会员详情数据，spec §7 无独立码）。
+// mall:member:query（地址是会员详情数据，spec §7 无独立码）；商品
+// mall:category:* / mall:brand:* / mall:property:*（各四码，属性值是属性名
+// 子资源随 mall:property:* 同码，issue #176）。
 // C 端 /mall/app/* 公开组与会员令牌自校验随 T2/T5，由后续票追加注册。
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 会员（租户级）：分页/详情/创建/更新/停启用。停启用挂 mall:member:update
@@ -35,4 +37,36 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	address := rg.Group("/mall/address")
 	address.GET("/page", h.perm("mall:member:query"), h.PageAddresses)
 	address.GET("/member/:id", h.perm("mall:member:query"), h.ListMemberAddresses)
+
+	// 商品（租户级，issue #176，spec §4）：分类树+CRUD / 品牌 CRUD /
+	// 属性名+属性值 CRUD。权限码 mall:category:* / mall:brand:* /
+	// mall:property:*（query/create/update/delete 四码，与菜单种子一致）。
+	// 删除守卫（分类有子级/被 SPU 引用禁删 409）在 service 层；SPU 引用
+	// 计数随 T4 SPU 表接线。
+	product := rg.Group("/mall/product")
+	// 分类（两级树）：树查询 + CRUD（同级 name 唯一 409）。
+	product.GET("/category/tree", h.perm("mall:category:query"), h.TreeProductCategories)
+	product.GET("/category/:id", h.perm("mall:category:query"), h.GetProductCategory)
+	product.POST("/category", h.perm("mall:category:create"), h.CreateProductCategory)
+	product.PUT("/category", h.perm("mall:category:update"), h.UpdateProductCategory)
+	product.DELETE("/category/:id", h.perm("mall:category:delete"), h.DeleteProductCategory)
+	// 品牌：分页/详情/创建/更新/删除（name 租户内唯一 409）。
+	product.GET("/brand/page", h.perm("mall:brand:query"), h.PageBrands)
+	product.GET("/brand/:id", h.perm("mall:brand:query"), h.GetBrand)
+	product.POST("/brand", h.perm("mall:brand:create"), h.CreateBrand)
+	product.PUT("/brand", h.perm("mall:brand:update"), h.UpdateBrand)
+	product.DELETE("/brand/:id", h.perm("mall:brand:delete"), h.DeleteBrand)
+	// 属性名：分页/详情/创建/更新/删除（name 租户内唯一 409；删除级联值）。
+	product.GET("/property/page", h.perm("mall:property:query"), h.PageProperties)
+	product.GET("/property/:id", h.perm("mall:property:query"), h.GetProductProperty)
+	product.POST("/property", h.perm("mall:property:create"), h.CreateProperty)
+	product.PUT("/property", h.perm("mall:property:update"), h.UpdateProperty)
+	product.DELETE("/property/:id", h.perm("mall:property:delete"), h.DeleteProperty)
+	// 属性值（属性名子资源，随 mall:property:* 同码）：属性内清单 + CRUD
+	//（(property_id, name) 唯一 409）。gin 同层静态段 value 与参数段 :id
+	// 共存（照 /mall/level/{list,:id} 先例）。
+	product.GET("/property/:id/value", h.perm("mall:property:query"), h.ListPropertyValues)
+	product.POST("/property/value", h.perm("mall:property:create"), h.CreatePropertyValue)
+	product.PUT("/property/value", h.perm("mall:property:update"), h.UpdatePropertyValue)
+	product.DELETE("/property/value/:id", h.perm("mall:property:delete"), h.DeletePropertyValue)
 }

@@ -74,3 +74,72 @@ export function pageAddresses(params: any) {
 export function listMemberAddresses(userId: number) {
   return request.get(`/mall/address/member/${userId}`) as Promise<any>
 }
+
+// ---------- 商品分类（mall:category:*，issue #176） ----------
+// 两级树：parentId 0=根，父必须是根级（后端 400）；同级 name 唯一（后端
+// 409）；有子级或被 SPU 引用禁删（后端 409——SPU 引用计数随 T4 接线）。
+export function treeProductCategories() {
+  return request.get('/mall/product/category/tree') as Promise<any>
+}
+export function getProductCategory(id: number) {
+  return request.get(`/mall/product/category/${id}`) as Promise<any>
+}
+export function createProductCategory(data: { parentId?: number; name: string; sort?: number; status?: number }) {
+  return request.post('/mall/product/category', data) as Promise<any>
+}
+export function updateProductCategory(data: { id: number; parentId?: number; name: string; sort?: number; status?: number }) {
+  return request.put('/mall/product/category', data) as Promise<any>
+}
+export function deleteProductCategory(id: number) {
+  return request.delete(`/mall/product/category/${id}`) as Promise<any>
+}
+
+// ---------- 商品品牌（mall:brand:*，issue #176） ----------
+// name 租户内唯一（后端 409）。
+export function pageBrands(params: any) {
+  return request.get('/mall/product/brand/page', { params }) as Promise<any>
+}
+export function getBrand(id: number) {
+  return request.get(`/mall/product/brand/${id}`) as Promise<any>
+}
+export function createBrand(data: { name: string; picUrl?: string; status?: number; remark?: string }) {
+  return request.post('/mall/product/brand', data) as Promise<any>
+}
+export function updateBrand(data: { id: number; name: string; picUrl?: string; status?: number; remark?: string }) {
+  return request.put('/mall/product/brand', data) as Promise<any>
+}
+export function deleteBrand(id: number) {
+  return request.delete(`/mall/product/brand/${id}`) as Promise<any>
+}
+
+// ---------- 商品属性（mall:property:*，issue #176） ----------
+// 属性名 name 租户内唯一（后端 409）；属性值 (propertyId, name) 唯一（后端
+// 409）；删除属性名后端级联删其属性值。
+export function pageProperties(params: any) {
+  return request.get('/mall/product/property/page', { params }) as Promise<any>
+}
+export function getProperty(id: number) {
+  return request.get(`/mall/product/property/${id}`) as Promise<any>
+}
+export function createProperty(data: { name: string }) {
+  return request.post('/mall/product/property', data) as Promise<any>
+}
+export function updateProperty(data: { id: number; name: string }) {
+  return request.put('/mall/product/property', data) as Promise<any>
+}
+export function deleteProperty(id: number) {
+  return request.delete(`/mall/product/property/${id}`) as Promise<any>
+}
+// 属性值：propertyId 归属属性名（body）；修改只可改名（归属不可改）。
+export function listPropertyValues(propertyId: number) {
+  return request.get(`/mall/product/property/${propertyId}/value`) as Promise<any>
+}
+export function createPropertyValue(data: { propertyId: number; name: string }) {
+  return request.post('/mall/product/property/value', data) as Promise<any>
+}
+export function updatePropertyValue(data: { id: number; name: string }) {
+  return request.put('/mall/product/property/value', data) as Promise<any>
+}
+export function deletePropertyValue(id: number) {
+  return request.delete(`/mall/product/property/value/${id}`) as Promise<any>
+}
