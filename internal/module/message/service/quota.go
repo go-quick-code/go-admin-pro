@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-quick-code/go-admin-pro/internal/module/message/model"
@@ -45,13 +46,19 @@ func (s *Service) businessLocation() *time.Location {
 
 // quotaClock 是月度配额统计「现在」的来源。用 var 而非直接 time.Now()：
 // 仅集成测试注入固定时钟验证月边界（用例内复原），生产代码不写此变量。
-var quotaClock = time.Now
+// atomic.Value 存 func() time.Time（同 pay businessClock 的形态，PR #158
+// 安全审查先例）：拨钟 swap 与任何并发读方消除 data race——当前无异步读方
+// （休眠态，未构成实际 race），本改造是形态对齐的 hardening，防未来新增
+// 异步读方（如发送超时扫描走 businessNow 同款路径）时成同款 race（#159）。
+var quotaClock atomic.Value
+
+func init() { quotaClock.Store(time.Now) }
 
 // SetQuotaClock 是配额统计时钟的写缝：注入固定时钟并返回原值，供集成测试
 // 在用例内替换与复原（同 SetSendTimeout 的定位），生产代码不应调用。
 func SetQuotaClock(f func() time.Time) func() time.Time {
-	prev := quotaClock
-	quotaClock = f
+	prev := quotaClock.Load().(func() time.Time)
+	quotaClock.Store(f)
 	return prev
 }
 
@@ -59,7 +66,7 @@ func SetQuotaClock(f func() time.Time) func() time.Time {
 // 不直接用 time.Now()（其 Location 是服务器本地时区，与 app.timezone
 // 可能不同，跨月零点会划错月份——ADR 0006）。
 func (s *Service) businessNow() time.Time {
-	return quotaClock().In(s.businessLocation())
+	return quotaClock.Load().(func() time.Time)().In(s.businessLocation())
 }
 
 // MonthlyUsage 返回租户当月指定渠道的发送次数（spec §4.2.4 口径）：统计
