@@ -46,7 +46,7 @@ func mallMenus() []sysmodel.Menu {
 		btnRow(9012, 901, "会员修改", "mall:member:update", 2),
 		btnRow(9013, 901, "积分配置查询", "mall:point:query", 3),
 		btnRow(9014, 901, "积分配置修改", "mall:point:update", 4),
-		menuRow(902, 900, "会员等级", "level", "mall/level/index", "mall:level:query", "Medal", 2),
+		menuRow(902, 900, "会员等级", "level", "mall/level", "mall:level:query", "Medal", 2),
 		btnRow(9021, 902, "等级新增", "mall:level:create", 1),
 		btnRow(9022, 902, "等级修改", "mall:level:update", 2),
 		btnRow(9023, 902, "等级删除", "mall:level:delete", 3),
