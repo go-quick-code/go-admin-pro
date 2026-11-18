@@ -50,8 +50,8 @@
    ```
 
    （ModuleScaffold 产物已含这行，无需再改。）
-5. **app.go**：crm 模块已在 app.go 装配过（repo → service → api.New → router.New），
-   per-entity 文件不引入新组件，**无需改动 app.go**。
+5. **app.go**：crm 模块已在 app.go 装配过（repo → service → api.New，handler
+   已 append 进 router.New 的注册器列表），per-entity 文件不引入新组件，**无需改动 app.go**。
 6. **菜单/权限码种子**：把 seed/menus.append.go 中的 menu/btn 行追加进
    internal/seed/seed.go 的 seedMenus（父目录 400 须已存在）；
    权限码：crm:product:query / :create / :update / :delete。

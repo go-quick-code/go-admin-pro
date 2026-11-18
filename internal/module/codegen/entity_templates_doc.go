@@ -57,8 +57,8 @@ const tmplEntityIntegration = `# [[ .Comment ]]（[[ .ClassName ]]）脚手架�
    ~~~
 
    （ModuleScaffold 产物已含这行，无需再改。）[[ if not .ModuleScaffold ]]
-5. **app.go**：[[ .Module ]] 模块已在 app.go 装配过（repo → service → api.New → router.New），
-   per-entity 文件不引入新组件，**无需改动 app.go**。[[ else ]]
+5. **app.go**：[[ .Module ]] 模块已在 app.go 装配过（repo → service → api.New，handler
+   已 append 进 router.New 的注册器列表），per-entity 文件不引入新组件，**无需改动 app.go**。[[ else ]]
 5. **app.go（新模块装配）**：在 internal/app/app.go 中按 crm 同款方式装配：
 
    ~~~go
@@ -67,7 +67,13 @@ const tmplEntityIntegration = `# [[ .Comment ]]（[[ .ClassName ]]）脚手架�
    [[ .Module ]]API := [[ .Module ]]api.New([[ .Module ]]Svc, sysAPI.RequirePermission, cfg.Location())
    ~~~
 
-   并把 [[ .Module ]]API 传入 router.New、在 router.New 中注册 RegisterProtected。[[end]][[ if .Menu ]]
+   注册按 ADR 0024：模块 api 已实现 RegisterProtected，结构化满足 router.Registrar
+   （可选公开/换票流端点另实现 RegisterPublic/RegisterStream，router 按接口探测）——
+   把 [[ .Module ]]API **append 进 internal/app/app.go 的 registrars 列表**（传入
+   router.New，列表顺序即受保护组注册次序；router 包不 import 模块包，勿改回
+   router 直接 import 模块 api 包、在 router.New 内逐家注册的旧形状），并把新
+   模块前缀 append 进 internal/testutil/routes_test.go 的 prefixes 列表（前缀
+   在场测试防漏接）。完整清单见 docs/agents/new-module.md。[[end]][[ if .Menu ]]
 6. **菜单/权限码种子**：把 seed/menus.append.go 中的 menu/btn 行追加进
    internal/seed/seed.go 的 seedMenus（父目录 [[ .Menu.ParentID ]] 须已存在）；
    权限码：[[ .PermPrefix ]]:query / :create / :update / :delete。[[ else ]]
