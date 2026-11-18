@@ -232,10 +232,12 @@ func readWSEvent(tb testing.TB, conn *websocket.Conn, within time.Duration) stri
 }
 
 // waitForSubscribers 等待 hub 的 (tenant, user) 订阅数达到 want，2s 内未落定
-// 即 Fatal。WS 的订阅注册在服务端读循环里异步完成——握手成功不代表簿记完成
-// （#128：CI 慢机偶发 Subscribers=0），拨号后的发布事件与计数断言一律先经
-// 这里等注册落定，轮询等状态变化，不做固定 sleep。SSE 不需要它：handler 在
-// 写首条注释行之前已同步注册，收到注释行即注册成立（自同步）。
+// 即 Fatal。WS 的订阅注册由请求 handler goroutine 在握手响应写出后异步完成
+// （WS handler 在 websocket.Accept 写出 101 之后才执行 hub.Subscribe）——握手
+// 成功不代表簿记完成（#128：CI 慢机偶发 Subscribers=0），拨号后的发布事件
+// 与计数断言一律先经这里等注册落定，轮询等状态变化，不做固定 sleep。SSE
+// 不需要它：handler 在写首条注释行之前已同步注册，收到注释行即注册成立
+// （自同步）。
 func waitForSubscribers(tb testing.TB, hub *push.Hub, tenantID, userID int64, want int, what string) {
 	tb.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -726,8 +728,8 @@ func TestIntegrationPushWSCrossTenantIsolation_HTTP(t *testing.T) {
 	if err := env.DB.Raw("SELECT id FROM system_user WHERE tenant_id = 2 AND username = 'admin'").Scan(&tenant2UserID).Error; err != nil || tenant2UserID == 0 {
 		t.Fatalf("查询租户 2 管理员: err=%v id=%d", err, tenant2UserID)
 	}
-	// 发布前等两条订阅都注册落定（#128：注册在读循环里异步完成，未注册时
-	// 发布的事件无处投递，下游 1s 读超时假红）。
+	// 发布前等两条订阅都注册落定（#128：注册在请求 handler goroutine 上异步
+	// 完成，未注册时发布的事件无处投递，下游 1s 读超时假红）。
 	waitForSubscribers(t, env.App.PushHub, tenant.DefaultID, 1, 1, "租户 1 在线订阅数")
 	waitForSubscribers(t, env.App.PushHub, 2, tenant2UserID, 1, "租户 2 在线订阅数")
 

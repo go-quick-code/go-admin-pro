@@ -89,9 +89,10 @@ func dialWS(tb testing.TB, env *wsEnv, ticket string, opts *websocket.DialOption
 }
 
 // waitSubscribers 等待 hub 的 (tenant, user) 订阅数达到 want，2s 内未落定即
-// Fatal。服务端读循环完成订阅注册是异步的：握手成功不代表簿记完成（#128：
-// CI 慢机偶发 Subscribers=0）——拨号后的发布事件与计数断言一律先经这里等
-// 注册落定，轮询等状态变化，不做固定 sleep。
+// Fatal。订阅注册由请求 handler goroutine 在握手响应写出后异步完成（WS
+// handler 在 websocket.Accept 写出 101 之后才执行 hub.Subscribe）：握手成功
+// 不代表簿记完成（#128：CI 慢机偶发 Subscribers=0）——拨号后的发布事件与
+// 计数断言一律先经这里等注册落定，轮询等状态变化，不做固定 sleep。
 func waitSubscribers(tb testing.TB, hub *push.Hub, tenantID, userID int64, want int, what string) {
 	tb.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -145,8 +146,9 @@ func TestWSClientMessageDiscarded(t *testing.T) {
 	ticket, _ := env.tickets.Issue(1, 1)
 	conn, _ := dialWS(t, env, ticket, nil)
 	defer conn.CloseNow()
-	// 发布事件前等订阅注册落定：Publish 与服务端读循环的注册并发（#128——
-	// 未注册时发布的事件无处投递，客户端 2s 读超时「failed to get reader」）。
+	// 发布事件前等订阅注册落定：Publish 与请求 handler goroutine 的注册并发
+	//（#128——未注册时发布的事件无处投递，客户端 2s 读超时「failed to get
+	// reader」）。
 	waitSubscribers(t, env.hub, 1, 1, 1, "发消息前订阅注册")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
