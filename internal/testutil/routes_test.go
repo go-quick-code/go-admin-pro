@@ -14,9 +14,10 @@ import (
 // 10 个模块的路由命名空间逐一断言引擎路由表 ≥1 条，漏接在 CI Integration job
 // 红掉而不是静默 serving 零路由。口径只到前缀在场：端点在受保护/公开组之间
 // 迁移（路由仍在表中）与模块相对次序重排都不会让本测试红——组结构由
-// per-module 集成测试与 ERP 路由树 golden 兜底，组归属 401 探测网另立
-// follow-up #163。作为 C7 重构（router 注册器化）的零漂移网，它兜的也只是
-// 「模块从路由表整体消失」这一类漂移，不兜组结构漂移。
+// per-module 集成测试与 ERP 路由树 golden 兜底，代表端点的组归属由
+// protected_probe_test.go 的 401 探测网兜底（#163）。作为 C7 重构（router
+// 注册器化）的零漂移网，它兜的也只是「模块从路由表整体消失」这一类漂移，
+// 不兜组结构漂移。
 func TestIntegrationModulePrefixPresent(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 
