@@ -208,28 +208,42 @@ func payDemoChannelRegistry(ctx context.Context, repo *payrepo.Repository, svc *
 // 业务/交易表已有行（含软删）即视为库里已有 pay 数据，整段跳过：避免固定 ID
 // 段与人工数据相撞、演示链路与已有租户数据混写。pay_channel（平台级 14 行
 // 基础种子常驻）刻意不在哨兵内。
+//
+// mall 支付应用（issue #181，T8 基础种子 seedMallPayApp，固定 ID 5011 +
+// 绑定 5012/5013）与 pay_channel 同理是常驻配置行、非演示数据信号：
+// pay_app/pay_app_channel 两行哨兵对 mall 固定 ID 显式排除——否则基础种子
+// 先落 mall 应用行会让演示哨兵在全新库上永真、pay 演示数据在
+// GAP_SEED_DEMO=true 时整段跳过（回归）。
 func payDemoSkipReason(db *gorm.DB) (string, error) {
 	checks := []struct {
 		label string
 		model any
+		// excludeMallSeed 为 true 时排除 mall 基础种子固定 ID 行（仅
+		// pay_app/pay_app_channel 两表需要——mall 种子只落这两表）。
+		excludeMallSeed bool
 	}{
-		{"pay_app", &paymodel.App{}},
-		{"pay_app_channel", &paymodel.AppChannel{}},
-		{"pay_wallet_recharge_package", &paymodel.WalletRechargePackage{}},
-		{"pay_wallet_recharge", &paymodel.WalletRecharge{}},
-		{"pay_wallet", &paymodel.Wallet{}},
-		{"pay_wallet_transaction", &paymodel.WalletTransaction{}},
-		{"pay_order", &paymodel.Order{}},
-		{"pay_order_extension", &paymodel.OrderExtension{}},
-		{"pay_refund", &paymodel.Refund{}},
-		{"pay_transfer", &paymodel.Transfer{}},
-		{"pay_notify_task", &paymodel.NotifyTask{}},
-		{"pay_demo_order", &paymodel.DemoOrder{}},
-		{"pay_demo_withdraw", &paymodel.DemoWithdraw{}},
+		{"pay_app", &paymodel.App{}, true},
+		{"pay_app_channel", &paymodel.AppChannel{}, true},
+		{"pay_wallet_recharge_package", &paymodel.WalletRechargePackage{}, false},
+		{"pay_wallet_recharge", &paymodel.WalletRecharge{}, false},
+		{"pay_wallet", &paymodel.Wallet{}, false},
+		{"pay_wallet_transaction", &paymodel.WalletTransaction{}, false},
+		{"pay_order", &paymodel.Order{}, false},
+		{"pay_order_extension", &paymodel.OrderExtension{}, false},
+		{"pay_refund", &paymodel.Refund{}, false},
+		{"pay_transfer", &paymodel.Transfer{}, false},
+		{"pay_notify_task", &paymodel.NotifyTask{}, false},
+		{"pay_demo_order", &paymodel.DemoOrder{}, false},
+		{"pay_demo_withdraw", &paymodel.DemoWithdraw{}, false},
 	}
 	for _, check := range checks {
 		var count int64
-		if err := tenant.Skip(db).Unscoped().Model(check.model).Count(&count).Error; err != nil {
+		q := tenant.Skip(db).Unscoped().Model(check.model)
+		if check.excludeMallSeed {
+			// 排除 mall 基础种子固定 ID 行（5011 应用 + 5012/5013 绑定）。
+			q = q.Where("id NOT IN ?", []int64{mallPayAppID, mallPayAppChannelMockID, mallPayAppChannelWalletID})
+		}
+		if err := q.Count(&count).Error; err != nil {
 			return "", fmt.Errorf("统计 %s: %w", check.label, err)
 		}
 		if count > 0 {

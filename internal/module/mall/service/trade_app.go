@@ -110,8 +110,14 @@ func appAddressFrom(row *model.MemberAddress) *dto.AppAddress {
 //     金额三列服务端定；收货快照取自地址）；
 //  6. 清掉已结算的购物车选中项。
 //
+// 事务提交后「下单即建支付单」（issue #181，T8，主会话裁决为不同事务）：
+// paySvc.CreateOrder 独立事务挂单（merchant_order_id = SO 号幂等）并把
+// payOrderId 记回（UpdateOrderPayOrder 首绑补写）。建单失败不回滚 mall
+// 订单——订单留待支付、payOrderId 保持 0，C 端重试发起支付时补建
+// （AppPayOrder 同号幂等建单）；详见 linkPayOrderAfterCreate。
+//
 // 幂等口径（spec §3.4）：重复提交同购物车结算产生新订单（不做幂等键）。
-func (s *Service) AppCreateOrder(ctx context.Context, userID int64, req *dto.AppCreateOrderReq) (*dto.AppCreateOrderResp, error) {
+func (s *Service) AppCreateOrder(ctx context.Context, userID int64, req *dto.AppCreateOrderReq, userIP string) (*dto.AppCreateOrderResp, error) {
 	tenantID := mallTenantID(ctx)
 	if tenantID == 0 {
 		// 库存扣减/序列发放走显式租户参数：缺租户上下文宁可拒绝。
@@ -126,6 +132,9 @@ func (s *Service) AppCreateOrder(ctx context.Context, userID int64, req *dto.App
 	if err != nil {
 		return nil, err
 	}
+	// 下单即建支付单（不同事务）：mall 订单已提交，pay 挂单是独立事务的
+	// 后置步骤（失败仅告警不回滚，口径见函数头与 linkPayOrderAfterCreate）。
+	s.linkPayOrderAfterCreate(ctx, tenantID, userID, out, userIP)
 	return out, nil
 }
 

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	mallrepo "github.com/go-quick-code/go-admin-pro/internal/module/mall/repository"
+	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 )
 
@@ -38,6 +39,13 @@ type Service struct {
 	// 签发/校验侧再防御（见 member_token.go memberTokenReady）。
 	memberTokenSecret []byte
 	memberTokenTTL    time.Duration
+	// paySvc 是 pay Service（issue #181，T8 支付联动）：mall 是 pay 的业务
+	// 消费方（mall→pay 单向，spec §2），app 装配期经 SetPaySvc 注入——
+	// C 端发起支付的建单/转发起（trade_pay.go AppPayOrder）；支付成功联动
+	// 由 app 装配期 paySvc.SetOrderSuccessHandler(mallSvc.HandlePaySuccess)
+	// 反向注册（pay 对 mall 零依赖，只持函数值）。未注入时支付端点 500
+	//（paySvcReady 防御，fail-closed）。
+	paySvc *payservice.Service
 }
 
 // New 创建 mall Service。

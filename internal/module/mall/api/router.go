@@ -158,13 +158,15 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	cart.PUT("/:id/selected", h.AppSelectCart)
 
 	// 交易（issue #179，spec §4）：结算试算/创建订单/我的订单分页/详情/取消/
-	// 我的积分流水。发起支付（内部转 pay）随 T7 接线。
+	// 我的积分流水。发起支付（内部转 pay，issue #181 T8）：pay 侧错误透传，
+	// mock 渠道返回待支付参数、wallet 渠道同步成功。
 	trade := tokenGroup.Group("/trade")
 	trade.GET("/settlement", h.AppSettlement)
 	trade.POST("/order", h.AppCreateOrder)
 	trade.GET("/order/page", h.AppPageOrders)
 	trade.GET("/order/:id", h.AppGetOrder)
 	trade.POST("/order/:id/cancel", h.AppCancelOrder)
+	trade.POST("/order/:id/pay", h.AppPayOrder)
 	trade.GET("/point-records", h.AppPageMyPointRecords)
 
 	// 收货地址（规格 §4 C 端地址维护；T6 收口补口——下单读地址，地址写入
