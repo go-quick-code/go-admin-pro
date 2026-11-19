@@ -166,3 +166,70 @@ export function updatePropertyValue(data: { id: number; name: string }) {
 export function deletePropertyValue(id: number) {
   return request.delete(`/mall/product/property/value/${id}`) as Promise<any>
 }
+
+// ---------- 商品 SPU/SKU（mall:spu:*，issue #177） ----------
+// name 租户内唯一（后端 409）；分类必须叶子（后端 400）；SKU 规格引用的
+// 属性值必须存在且归属对应属性（后端 400）；金额一律十进制字符串（Money
+// 口径，不经 float）；SKU 规格名称快照由后端按主数据反查写定（前端只传
+// propertyId/valueId）。删除约束：被订单引用禁删（后端 409，T6 生效）。
+export function pageProductSPUs(params: any) {
+  return request.get('/mall/product/spu/page', { params }) as Promise<any>
+}
+// 详情含 skus 数组（主 SKU 恒首位，properties 为规格快照 JSON）。
+export function getProductSPU(id: number) {
+  return request.get(`/mall/product/spu/${id}`) as Promise<any>
+}
+export function createProductSPU(data: {
+  categoryId: number
+  brandId?: number
+  name: string
+  picUrl?: string
+  sliderPicUrls?: string[]
+  detail?: string
+  specType: number
+  marketPrice?: string
+  status?: number
+  sort?: number
+  skus: {
+    properties?: { propertyId: number; valueId: number }[]
+    price: string
+    marketPrice?: string
+    picUrl?: string
+    stock: number
+    first?: boolean
+  }[]
+}) {
+  return request.post('/mall/product/spu', data) as Promise<any>
+}
+// 更新为字段全量覆盖 + SKU 集全量替换（旧 SKU 后端软删）。
+export function updateProductSPU(data: {
+  id: number
+  categoryId: number
+  brandId?: number
+  name: string
+  picUrl?: string
+  sliderPicUrls?: string[]
+  detail?: string
+  specType: number
+  marketPrice?: string
+  status?: number
+  sort?: number
+  skus: {
+    properties?: { propertyId: number; valueId: number }[]
+    price: string
+    marketPrice?: string
+    picUrl?: string
+    stock: number
+    first?: boolean
+  }[]
+}) {
+  return request.put('/mall/product/spu', data) as Promise<any>
+}
+// 上下架（PUT /mall/product/spu/:id/status）：status 0 下架 / 1 上架
+//（只有上架可被购买，T5 生效）。
+export function updateProductSPUStatus(id: number, status: number) {
+  return request.put(`/mall/product/spu/${id}/status`, { status }) as Promise<any>
+}
+export function deleteProductSPU(id: number) {
+  return request.delete(`/mall/product/spu/${id}`) as Promise<any>
+}

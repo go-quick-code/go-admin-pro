@@ -98,8 +98,9 @@ func (s *Service) UpdateProductCategory(ctx context.Context, req *dto.CategoryUp
 }
 
 // DeleteProductCategory 删除分类（软删）：删除守卫「有子级或被 SPU 引用
-// 禁删」（409，spec §4）——子级计数实时查库，SPU 引用计数走 countSPUsByCategory
-// （本票预留签名恒 0，T4 SPU 表落地后接线）。
+// 禁删」（409，spec §4）——子级计数与 SPU 引用计数（repo.CountSPUsByCategory，
+// T4 SPU 表落地接线：软删 SPU 不算——分类删除后软删商品不随之复活引用
+// 语义）实时查库。
 func (s *Service) DeleteProductCategory(ctx context.Context, id int64) error {
 	row, err := s.findCategory(ctx, id)
 	if err != nil {
@@ -109,7 +110,7 @@ func (s *Service) DeleteProductCategory(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	spuCount, err := s.countSPUsByCategory(ctx, row.ID)
+	spuCount, err := s.repo.CountSPUsByCategory(ctx, row.ID)
 	if err != nil {
 		return err
 	}
@@ -117,18 +118,6 @@ func (s *Service) DeleteProductCategory(ctx context.Context, id int64) error {
 		return err
 	}
 	return s.repo.DeleteCategory(ctx, row.ID)
-}
-
-// countSPUsByCategory 统计引用该分类的 SPU 数（删除守卫第二谓词的查询点）。
-// SPU 表（product_spu）随 T4 迁移建表，届时替换为
-// `s.repo.CountSPUsByCategory(ctx, categoryID)`（product_spu.category_id 引用
-// 计数，不带 deleted_at 过滤——SPU 删除不改写分类引用语义的口径与
-// member_level 的 CountMembersByLevel 一致，T4 落地时定稿）。本票恒返 0：
-// SPU 不存在即无引用，「有子级禁删」分支先行收口并由本票集成测试覆盖。
-func (s *Service) countSPUsByCategory(ctx context.Context, categoryID int64) (int64, error) {
-	_ = ctx
-	_ = categoryID
-	return 0, nil
 }
 
 // findCategory 取分类并做存在性校验（不存在/跨租户统一 404，不泄露存在性）。
@@ -239,11 +228,19 @@ func (s *Service) UpdateBrand(ctx context.Context, req *dto.BrandUpdateReq) erro
 	return nil
 }
 
-// DeleteBrand 删除品牌（软删）。SPU 引用守卫（product_spu.brand_id）随 T4
-// SPU 表落地接线——本票品牌删除无引用守卫（spec §3.2 未约束）。
+// DeleteBrand 删除品牌（软删）：SPU 引用守卫（product_spu.brand_id，T4 SPU
+// 表落地接线 T3 预留谓词）——被未删 SPU 引用禁删（409，纯函数见
+// ValidateBrandDelete）；软删 SPU 不算引用（同 CountSPUsByCategory 口径）。
 func (s *Service) DeleteBrand(ctx context.Context, id int64) error {
 	row, err := s.findBrand(ctx, id)
 	if err != nil {
+		return err
+	}
+	spuCount, err := s.repo.CountSPUsByBrand(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	if err := ValidateBrandDelete(BrandDeleteGuard{SPUCount: spuCount}); err != nil {
 		return err
 	}
 	return s.repo.DeleteBrand(ctx, row.ID)
