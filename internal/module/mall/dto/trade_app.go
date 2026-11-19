@@ -174,6 +174,27 @@ type AppCancelOrderReq struct {
 	Reason string `json:"reason" binding:"max=200"`
 }
 
+// AppOrderPayReq 发起支付（POST /mall/app/trade/order/:id/pay，需会员令牌，
+// issue #181 T8）：渠道码 ∈ pay 渠道码常量（mall 支付应用绑定 mock/wallet）。
+// 金额/单号不收——pay 单金额 = 订单 pay_money（服务端定，同 pay 收银台口径）。
+type AppOrderPayReq struct {
+	ChannelCode string `json:"channelCode" binding:"required,max=32"`
+}
+
+// AppOrderPayResp 发起支付响应（收银台参数形状照 pay OrderSubmitResp）：
+// wallet 渠道同步成功（status=10，订单联动已支付）；mock 渠道停在待支付
+// （status=0，displayMode=none，等渠道回调——MVP 由支付成功联动置单）。
+// payOrderId/payOrderNo 是挂单支付单（同 SO 幂等复用时即原单）。
+type AppOrderPayResp struct {
+	PayOrderID  int64  `json:"payOrderId"`
+	PayOrderNo  string `json:"payOrderNo"`
+	ExtensionID int64  `json:"extensionId"`
+	ExtensionNo string `json:"extensionNo"`
+	Status      int8   `json:"status"`
+	DisplayMode string `json:"displayMode"`
+	Content     string `json:"content"`
+}
+
 // AppPointRecordPageReq 我的积分流水分页（GET /mall/app/trade/point-records，
 // 需会员令牌）：user_id 恒取当前会员；biz_type 过滤选填（∈ 三类枚举，非法
 // 400，与管理端 PointRecordPageReq 同口径）。响应直接复用

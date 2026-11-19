@@ -49,6 +49,8 @@ func TestSeedPlatformDemoUnderFailClosedTenantPlugin(t *testing.T) {
 		&inframodel.Config{}, &inframodel.Job{},
 		&msgmodel.Channel{}, &msgmodel.Template{}, &msgmodel.Log{}, &sysmodel.Area{},
 		&paymodel.Channel{},
+		// mall 挂单支付应用（issue #181，seedMallPayApp 基础种子触达的两表）。
+		&paymodel.App{}, &paymodel.AppChannel{},
 		&mallmodel.MemberLevel{},
 		&sysmodel.SocialClient{}, &sysmodel.SensitiveWord{},
 		&crmmodel.PoolConfig{},

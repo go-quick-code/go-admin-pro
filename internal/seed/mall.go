@@ -4,6 +4,9 @@ import (
 	"fmt"
 
 	mallmodel "github.com/go-quick-code/go-admin-pro/internal/module/mall/model"
+	mallservice "github.com/go-quick-code/go-admin-pro/internal/module/mall/service"
+	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
+	paychannel "github.com/go-quick-code/go-admin-pro/internal/module/pay/service/channel"
 	sysmodel "github.com/go-quick-code/go-admin-pro/internal/module/system/model"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
 	"gorm.io/gorm"
@@ -11,7 +14,9 @@ import (
 
 // mall.go 是 mall 会员域与商品域种子（issue #174/#175/#176/#177，
 // docs/mall-mvp-spec.md §3.1/§3.2/§5/§7）：
-// 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单。
+// 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单；
+// 支付联动种子（issue #181，T8）：mall 挂单支付应用（app_key=mall，
+// 5011）+ mock/wallet 渠道绑定（5012/5013），基础种子常驻（文件尾）。
 //
 // 菜单（spec §5「9xx 段——900 会员中心（member/level/address 页）、910 商品
 //（category/brand/property/spu 页）、920 交易订单（order 页）」）：
@@ -96,6 +101,73 @@ func seedMemberLevel(db *gorm.DB) error {
 	}
 	if err := tenant.Skip(db).Create(row).Error; err != nil {
 		return fmt.Errorf("seed member level: %w", err)
+	}
+	return nil
+}
+
+// mall 支付联动种子固定 ID（issue #181，T8）：5011 段位模式照 pay_demo.go
+// 的 payDemoAppID 5001 段（应用 5001/绑定 5001–5002），mall 取相邻 5011 段
+// （应用 5011 + 绑定 5012/5013）——开工前已 grep seed 确认 501x 未被占用。
+// 与 CRM 1001/OA 2001/ERP 3001+4001/pay 5001 段错开。
+const (
+	// mallPayAppID 是 mall 挂单支付应用（app_key=mall，service.MallPayAppKey
+	// 的建单定位键）。
+	mallPayAppID int64 = 5011
+	// mallPayAppChannelMockID/mallPayAppChannelWalletID 是 mall 应用的
+	// mock/wallet 渠道绑定（C 端发起支付的渠道域）。
+	mallPayAppChannelMockID   int64 = 5012
+	mallPayAppChannelWalletID int64 = 5013
+)
+
+// seedMallPayApp 写入 mall 挂单支付应用与渠道绑定（issue #181，T8；默认
+// 租户 ID=1，mock/wallet 双绑定）：支付联动是 mall 的常驻能力（非演示数据），
+// 基础种子写入（seed.Run，GAP_SEED_DEMO 之外）。
+//
+// 幂等守卫是行级哨兵（pay_app 存在 app_key=mall 行即跳过），不是「表空才
+// 插」：pay_app 同时承载 pay 演示应用（pay_demo.go，5001），基础种子先行
+// 落行后「表空」永假，行级哨兵才能既保证 mall 应用常驻、又不动 pay 演示
+// 哨兵的判定域（pay_demo.go payDemoSkipReason 对 mall 固定 ID 行显式排除，
+// 两处配套）。回调地址留空（OrderNotifyURL=""）——mall 无外部回调端点，
+// 支付成功走进程内 OrderSuccessHandler 扩展点，商户回调任务投递无消费方
+// （照 demo 应用必填回调地址的差异：demo 联动依赖 HTTP 回调，mall 联动
+// 不依赖）。其余租户不预置：app_key=mall 是租户内唯一键，非默认租户的
+// 管理员经「支付应用」页自行创建（与会员等级种子「其余租户不预置」同口径）。
+func seedMallPayApp(db *gorm.DB) error {
+	var count int64
+	if err := tenant.Skip(db).Model(&paymodel.App{}).
+		Where("app_key = ?", mallservice.MallPayAppKey).Count(&count).Error; err != nil {
+		return fmt.Errorf("seed mall pay app: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+	app := paymodel.App{
+		BaseEntity: paymodel.BaseEntity{ID: mallPayAppID},
+		TenantID:   1,
+		AppKey:     mallservice.MallPayAppKey,
+		Name:       "商城应用",
+		Status:     paymodel.StatusEnable,
+		Remark:     "mall 交易订单挂单应用（issue #181 种子）：C 端发起支付的建单定位键，绑定 mock/wallet",
+	}
+	if err := tenant.Skip(db).Create(&app).Error; err != nil {
+		return fmt.Errorf("seed mall pay app: %w", err)
+	}
+	bindings := []paymodel.AppChannel{
+		{
+			BaseEntity:  paymodel.BaseEntity{ID: mallPayAppChannelMockID},
+			TenantID:    1,
+			AppID:       mallPayAppID,
+			ChannelCode: paychannel.CodeMock,
+		},
+		{
+			BaseEntity:  paymodel.BaseEntity{ID: mallPayAppChannelWalletID},
+			TenantID:    1,
+			AppID:       mallPayAppID,
+			ChannelCode: paychannel.CodeWallet,
+		},
+	}
+	if err := tenant.Skip(db).Create(&bindings).Error; err != nil {
+		return fmt.Errorf("seed mall pay app channels: %w", err)
 	}
 	return nil
 }

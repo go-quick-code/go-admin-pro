@@ -149,6 +149,7 @@ func (h *Handler) AppSettlement(c *gin.Context) {
 
 // AppCreateOrder 创建订单（POST /mall/app/trade/order）：收货地址 id + 备注，
 // 按选中购物车项结算；下单即扣库存（不足 409）；金额/单号服务端定。
+// 事务提交后挂 pay 支付单（issue #181，clientIP 供 pay 单记录发起来源）。
 func (h *Handler) AppCreateOrder(c *gin.Context) {
 	memberID, ok := h.appMemberID(c)
 	if !ok {
@@ -158,7 +159,7 @@ func (h *Handler) AppCreateOrder(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	resp, err := h.svc.AppCreateOrder(c.Request.Context(), memberID, &req)
+	resp, err := h.svc.AppCreateOrder(c.Request.Context(), memberID, &req, c.ClientIP())
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -228,6 +229,35 @@ func (h *Handler) AppCancelOrder(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+// ---------- 发起支付（内部转 pay，issue #181 T8） ----------
+
+// AppPayOrder 发起支付（POST /mall/app/trade/order/:id/pay）：channelCode
+// 选渠道，mall 端点内部委托转 paySvc（建单幂等复用 + SubmitOrder，见
+// service.AppPayOrder）。wallet 渠道同步成功返回 status=10（订单联动已
+// 支付）；mock 渠道返回 status=0/displayMode=none（等渠道回调）。pay 侧
+// 业务错误（余额不足 409 等）原样透传。
+func (h *Handler) AppPayOrder(c *gin.Context) {
+	memberID, ok := h.appMemberID(c)
+	if !ok {
+		return
+	}
+	id, ok := web.ParseID(c, "id")
+	if !ok {
+		response.BadRequest(c, "非法的 ID")
+		return
+	}
+	var req dto.AppOrderPayReq
+	if !bindJSON(c, &req) {
+		return
+	}
+	resp, err := h.svc.AppPayOrder(c.Request.Context(), memberID, id, &req, c.ClientIP())
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, resp)
 }
 
 // ---------- 我的积分流水 ----------

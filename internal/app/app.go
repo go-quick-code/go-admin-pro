@@ -432,16 +432,24 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission, cfg.Location())
 
 	// mall 装配（issue #174）：repo → service → api.New，形状对照 pay/crm
-	//（svc + requirePermission + location）。T1 会员域管理端；积分入账与
-	// pay 联动（SetOrderSuccessHandler 第二消费方）随 T2/T4 经 Set* 接线。
-	// 会员令牌签名材料（issue #178，T5）：密钥与有效期注入 service（登录
-	// 签发 + handler 自校验共用同一实现，Set* 形状照 paySvc.SetNotifyHMACKey）。
-	// 业务时区（issue #179，T6）：SetLocation 注入 service——SO 单号日期键
-	// 的唯一口径（照 paySvc.SetLocation 先例）。
+	//（svc + requirePermission + location）。T1 会员域管理端；积分入账随 T2
+	// 的唯一入账入口接线。会员令牌签名材料（issue #178，T5）：密钥与有效期
+	// 注入 service（登录签发 + handler 自校验共用同一实现，Set* 形状照
+	// paySvc.SetNotifyHMACKey）。业务时区（issue #179，T6）：SetLocation
+	// 注入 service——SO 单号日期键的唯一口径（照 paySvc.SetLocation 先例）。
 	mallRepo := mallrepo.New(db)
 	mallSvc := mallservice.New(mallRepo)
 	mallSvc.SetLocation(cfg.Location())
 	mallSvc.SetMemberTokenAuth(cfg.Mall.JWTSecret, cfg.Mall.TokenTTL)
+	// 支付联动（issue #181，T8；spec §2 mall→pay 单向 + §7 裁决 4）：
+	//   - SetPaySvc 注入 pay Service——C 端发起支付的建单（merchant_order_id
+	//     = SO 号幂等）与 SubmitOrder 转发起（委托主体，见 service.AppPayOrder）；
+	//   - paySvc.SetOrderSuccessHandler 注册 mall 联动——pay OrderSuccessHandler
+	//     扩展点第二消费方（充值是第一，payservice.New 内置）：pay 订单认领后
+	//     同事务置 mall 订单已支付 + 积分按实付入账，任一失败整体回滚。
+	//     pay 侧零改动（既有扩展点），pay 对 mall 保持零依赖（只持函数值）。
+	mallSvc.SetPaySvc(paySvc)
+	paySvc.SetOrderSuccessHandler(mallSvc.HandlePaySuccess)
 	mallAPI := mallapi.New(mallSvc, sysAPI.RequirePermission, cfg.Location())
 
 	// 定时任务绑定表（ADR 0024 补遗）：键 = 处理器名常量（与 seed.JobSpecs
