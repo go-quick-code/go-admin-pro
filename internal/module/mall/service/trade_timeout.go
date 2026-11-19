@@ -88,8 +88,10 @@ func (s *Service) listEnabledTenants(ctx context.Context) ([]int64, error) {
 }
 
 // closeTimeoutOrders 对单租户执行一轮超时关单：列出候选（待支付且
-// created_at 早于阈值）→ 逐单事务认领关单 + 回补库存。单单失败中断本轮并
-// 上抛（聚合层记该租户失败，其余租户不受影响）。
+// created_at 早于阈值）→ 逐单事务认领关单 + 回补库存。单单失败聚合记入
+// errs 后 continue（照外层租户循环的 errs 形状）——单个毒订单（如历史
+// 脏数据）不得中断本轮同租户其余订单的关单，否则一个失败单会让同租户
+// id 更大的全部待支付订单永不关单、库存永久占用（PR #184 审查 P1）。
 func (s *Service) closeTimeoutOrders(ctx context.Context, tenantID int64) (int64, error) {
 	now := s.businessNow()
 	cutoff := now.Add(-orderTimeoutDuration)
@@ -98,12 +100,17 @@ func (s *Service) closeTimeoutOrders(ctx context.Context, tenantID int64) (int64
 		return 0, err
 	}
 	var closed int64
+	var errs []error
 	for i := range orders {
 		n, err := s.closeTimeoutOrder(ctx, tenantID, orders[i].ID, now)
 		if err != nil {
-			return closed, err
+			errs = append(errs, fmt.Errorf("订单 %d 超时关单失败: %w", orders[i].ID, err))
+			continue
 		}
 		closed += n
+	}
+	if len(errs) > 0 {
+		return closed, errs[0]
 	}
 	return closed, nil
 }

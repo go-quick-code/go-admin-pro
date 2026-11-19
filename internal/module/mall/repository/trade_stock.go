@@ -31,11 +31,18 @@ func (r *Repository) DeductSKUStock(ctx context.Context, tenantID, skuID int64, 
 
 // RestoreSKUStock 回补库存（取消/关单，spec §3.4「取消/关单回补」，同形状
 // stock + ?）：只按 ID 与租户定位，不做库存上限校验（回补方向不可能为负）。
-// 返回影响行数（0 = 行不可见，异常分支由 service 层报错回滚）。
+// 返回影响行数（0 = 行不存在/跨租户，异常分支由 service 层报错回滚）。
+//
+// 刻意不过滤软删（无 `deleted_at IS NULL`）——这是簿记动作而非售卖动作：
+// SPU 更新是「SKU 集全量替换」（UpdateProductSPU 每次保存都软删全部旧
+// SKU，无「被订单引用禁改」守卫），在途订单引用的旧 SKU 行在保存后只以
+// 软删形态存在；取消/超时关单的回补必须能命中软删行，否则在途订单永久
+// 卡死（取消 409、关单 job 中断——PR #184 审查 P1）。扣减（DeductSKUStock）
+// 仍过滤软删：已删 SKU 不可再售。
 func (r *Repository) RestoreSKUStock(ctx context.Context, tenantID, skuID int64, qty int) (int64, error) {
 	res := r.db.WithContext(ctx).Exec(
 		"UPDATE `product_sku` SET `stock` = `stock` + ?, `updated_at` = ?, `updater` = ? "+
-			"WHERE `id` = ? AND `tenant_id` = ? AND `deleted_at` IS NULL",
+			"WHERE `id` = ? AND `tenant_id` = ?",
 		qty, time.Now(), database.AuditUser(ctx), skuID, tenantID,
 	)
 	return res.RowsAffected, res.Error

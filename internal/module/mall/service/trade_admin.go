@@ -217,8 +217,9 @@ func (s *Service) AdminCancelOrder(ctx context.Context, orderID int64) error {
 }
 
 // restoreOrderStock 按订单项逐 SKU 回补库存（取消/关单共用：C 端取消与
-// T7 管理员取消同形状，stock + ?；0 行 = SKU 已不可见（软删/异常）→ 报错
-// 整体回滚）。必须在持有订单事务内调用。
+// T7 管理员取消同形状，stock + ?；0 行 = SKU 行不存在/跨租户 → 报错整体
+// 回滚。软删行可命中：SPU 全量替换会软删在途订单引用的旧 SKU，回补是
+// 簿记动作不过滤软删——见 RestoreSKUStock 注释）。必须在持有订单事务内调用。
 func restoreOrderStock(ctx context.Context, tx *mallrepo.Repository, tenantID, orderID int64) error {
 	items, err := tx.ListOrderItemsByOrder(ctx, orderID)
 	if err != nil {
