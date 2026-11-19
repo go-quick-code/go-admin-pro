@@ -49,3 +49,15 @@ type AppAuthResp struct {
 	ExpiresIn   int64            `json:"expiresIn"`
 	Member      AppMemberProfile `json:"member"`
 }
+
+// AppAddressSaveReq 是 C 端收货地址新增/更新请求（PUT /mall/app/address/:id
+// 与 POST /mall/app/address 共用；isDefault 仅新增与更新置 1 生效）。
+type AppAddressSaveReq struct {
+	ReceiverName   string `json:"receiverName" binding:"required"`
+	ReceiverMobile string `json:"receiverMobile" binding:"required"`
+	Province       string `json:"province" binding:"required"`
+	City           string `json:"city" binding:"required"`
+	District       string `json:"district" binding:"required"`
+	Detail         string `json:"detail" binding:"required"`
+	IsDefault      int8   `json:"isDefault"`
+}

@@ -151,4 +151,14 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	trade.GET("/order/:id", h.AppGetOrder)
 	trade.POST("/order/:id/cancel", h.AppCancelOrder)
 	trade.GET("/point-records", h.AppPageMyPointRecords)
+
+	// 收货地址（规格 §4 C 端地址维护；T6 收口补口——下单读地址，地址写入
+	// 唯一入口在 C 端）：列表（默认置顶）/新增（首地址自动默认）/更新/
+	// 设默认（互斥清旧）/删除。归属谓词全程携带，越权 404。
+	address := tokenGroup.Group("/address")
+	address.GET("", h.AppListAddresses)
+	address.POST("", h.AppCreateAddress)
+	address.PUT("/:id", h.AppUpdateAddress)
+	address.PUT("/:id/default", h.AppSetDefaultAddress)
+	address.DELETE("/:id", h.AppDeleteAddress)
 }
