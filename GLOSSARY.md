@@ -463,3 +463,17 @@ _Avoid_: 库存流水（ERP 的数量流水）、账变（口语）
 **收银台（Cashier）**:
 admin 内嵌的发起支付页：选渠道、发起支付、展示处理结果；不做独立 H5 站点。
 _Avoid_: 支付页（口语）、结账（口语）
+
+## mall
+
+**SPU（标准产品单元，Standard Product Unit）**:
+商城的商品主数据：分类（必须叶子）、品牌、规格类型（单/多规格）与图文；只有上架的 SPU 可被加购/购买。
+_Avoid_: 产品（CRM 商机/合同引用的销售标的）、ERP 产品（进销存货品主数据）、商品（口语泛称，落库实体指 SPU）
+
+**SKU（库存单位，Stock Keeping Unit）**:
+SPU 的可售规格行：价格与库存挂 SKU，多规格以规格 JSON 快照（[{propertyId,propertyName,valueId,valueName}]）描述；下单行锁扣减库存。
+_Avoid_: 规格（口语，指 properties JSON）、商品（泛称）
+
+**成交快照（Deal Snapshot）**:
+订单项随下单一次落库的成交时现值（SPU 名/SKU 图/规格 JSON/成交单价），主数据后续改名改价不影响已建订单项。
+_Avoid_: 商品详情（实时现值）、订单快照（口语，指主行金额三列）
