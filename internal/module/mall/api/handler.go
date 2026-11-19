@@ -2,9 +2,10 @@
 // docs/mall-mvp-spec.md §2/§4）。
 //
 // 管理端全部挂受保护组（RegisterProtected，调用方需已挂载 Auth 中间件）；
-// C 端 /mall/app/* 公开组与会员令牌自校验随 T2/T5。权限码前缀
-// mall:member:* / mall:level:*（spec §7），requirePermission 注入先例对照
-// pay/crm（svc + requirePermission + location）。
+// C 端 /mall/app/* 挂公开组（RegisterPublic，无登录，handler 内会员令牌
+// 自校验 + IP 限速，issue #178 T5——spec §7 裁决 2：不动 router 三组结构）。
+// 权限码前缀 mall:member:* / mall:level:*（spec §7），requirePermission 注入
+// 先例对照 pay/crm（svc + requirePermission + location）。
 package api
 
 import (
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-quick-code/go-admin-pro/internal/module/mall/service"
+	"github.com/go-quick-code/go-admin-pro/internal/pkg/ratelimit"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/response"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/web"
 )
@@ -26,6 +28,13 @@ type Handler struct {
 	// location 是业务时区（ADR 0006）：T1 管理端无导出/单号日期键消费点，
 	// 预留注入先例（对照 pay/crm 的 New 签名，后续票的导出与编号直接可用）。
 	location *time.Location
+	// appAuthLimiter/appBrowseLimiter 是 C 端公开端点（/mall/app/*，issue
+	// #178）的 IP 限速器：注册/登录 10 次/分钟（弱凭证暴力尝试面），令牌
+	// 端点（我的信息/商品浏览）60 次/分钟（照 system publicIPLimit 先例）。
+	// 随 Handler 实例创建（集成测试每用例独立 env 即独立计数）；进程内单
+	// 实例语义，多实例部署由反代层另配（照 pay demoNotifyLimiter 同款定位）。
+	appAuthLimiter   *ratelimit.Limiter
+	appBrowseLimiter *ratelimit.Limiter
 }
 
 // New 创建 mall Handler。perm 复用 system 的 RequirePermission。
@@ -33,7 +42,13 @@ func New(svc *service.Service, perm PermissionMiddleware, location *time.Locatio
 	if location == nil {
 		location = time.Local
 	}
-	return &Handler{svc: svc, perm: perm, location: location}
+	return &Handler{
+		svc:              svc,
+		perm:             perm,
+		location:         location,
+		appAuthLimiter:   ratelimit.New(appAuthIPLimit, time.Minute),
+		appBrowseLimiter: ratelimit.New(appBrowseIPLimit, time.Minute),
+	}
 }
 
 func bindJSON(c *gin.Context, v interface{}) bool {

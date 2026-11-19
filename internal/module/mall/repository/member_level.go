@@ -34,6 +34,24 @@ func (r *Repository) FindLevelByID(ctx context.Context, id int64) (*model.Member
 	return &row, nil
 }
 
+// FindLevelByValue 按等级值查启用等级（租户内）：C 端注册默认等级的查询点
+// （level=1「普通会员」，spec §3.1 种子行；issue #178）。过滤 status 启用
+// ——停用等级不派发新注册会员；未找到返回 (nil, nil)（注册侧落 level_id=0
+// 未分配，不因等级主数据缺失阻断注册）。
+func (r *Repository) FindLevelByValue(ctx context.Context, level int) (*model.MemberLevel, error) {
+	var row model.MemberLevel
+	err := r.db.WithContext(ctx).
+		Where("level = ? AND status = ?", level, model.StatusEnable).
+		First(&row).Error
+	if err != nil {
+		if notFound(err) == nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &row, nil
+}
+
 // levelQuery 组装等级筛选查询。
 func (r *Repository) levelQuery(ctx context.Context, f LevelFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.MemberLevel{})

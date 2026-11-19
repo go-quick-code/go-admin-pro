@@ -83,6 +83,43 @@ func TestValidateMemberPassword(t *testing.T) {
 	}
 }
 
+// TestValidateMemberAppPassword C 端注册密码校验表（issue #178）：必填 +
+// 6–32 位（rune 口径）。与管理端 ValidateMemberPassword（6–64，选填）分立：
+// C 端自助注册是新入口按更紧界收敛，管理端建号语义不动。
+func TestValidateMemberAppPassword(t *testing.T) {
+	for _, password := range []string{"123456", "密码六位以上", strings.Repeat("p", 32)} {
+		if err := mallservice.ValidateMemberAppPassword(password); err != nil {
+			t.Fatalf("合法密码 %q 不应报错: %v", password, err)
+		}
+	}
+	cases := []struct {
+		name     string
+		password string
+		wantMsg  string
+	}{
+		{"空密码", "", "不能为空"},
+		{"纯空白", "   ", "不能为空"},
+		{"过短", "12345", "至少 6 位"},
+		{"超长", strings.Repeat("p", 33), "32 位"},
+		{"中文按 rune 计", strings.Repeat("密", 33), "32 位"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mallservice.ValidateMemberAppPassword(tc.password)
+			if err == nil {
+				t.Fatalf("期望报错含 %q，实际 nil", tc.wantMsg)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("报错 %q 应含 %q", err.Error(), tc.wantMsg)
+			}
+			e, ok := xerr.As(err)
+			if !ok || e.Status != 400 {
+				t.Fatalf("字段校验失败应为 400 业务错误，实际 %v", err)
+			}
+		})
+	}
+}
+
 // TestValidateMemberStatus 会员状态枚举：0 启用 / 1 停用。
 func TestValidateMemberStatus(t *testing.T) {
 	for _, status := range []int8{0, 1} {

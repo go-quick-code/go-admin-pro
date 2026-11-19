@@ -113,3 +113,17 @@ pay:
   # 链路与集成测试的 httptest 商户端点）；**生产必须留空**——内网地址不应
   # 出现在公开可配的回调地址白名单里。
   notify-ssrf-private-allow: ["127.0.0.1", "::1"]
+
+# mall 商城模块（issue #174/#178，docs/mall-mvp-spec.md §2/§7 裁决 2）：
+# C 端会员令牌（/mall/app/* 公开端点，HMAC-SHA256 自校验令牌）签名密钥。
+mall:
+  # 会员令牌签名密钥：base64url(payload{mid,tid,exp}) + "." + base64url(
+  # HMAC-SHA256(payload))。为空时 app.New 拒绝启动（fail-closed）；非 dev/test
+  # 环境使用下面这个 dev 默认值同样拒绝启动（validateMallJWTSecret）。
+  # **生产必须换成唯一强随机值**（如 openssl rand -base64 32 生成，
+  # GAP_MALL_JWT_SECRET 环境变量可覆盖），照抄等于对任何读过仓库的人开放
+  # 伪造会员身份。
+  jwt-secret: go-admin-pro-mall-jwt-dev-key
+  # 会员令牌有效期，默认 168h（7 天）；到期校验拒绝，停用会员令牌经 DB
+  # 状态查询失效（无撤销列表）。可选覆盖。
+  # token-ttl: 168h

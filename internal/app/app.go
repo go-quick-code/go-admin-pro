@@ -99,6 +99,15 @@ func (a *App) FlushAPILogs(ctx context.Context) error {
 
 // New 初始化数据库、模块与 HTTP 引擎。
 func New(cfg *config.Config, log *slog.Logger) (*App, error) {
+	// mall 会员令牌签名密钥 fail-closed（issue #178，spec §7 裁决 2）：密钥
+	// 缺失时拒绝启动——C 端 /mall/app/* 的注册/登录签发与令牌自校验全部
+	// 依赖该密钥，缺密钥等于 C 端身份体系不可用，静默降级只会把问题推迟到
+	// 首个会员请求。放在 database.Open 之前：零依赖配置事实，与「分类正确
+	// 性是 schema 事实」的 VerifyTenantTables 同一收口思路。错误信息指明
+	// mall.jwt_secret（配置键 mall.jwt-secret / 环境变量 GAP_MALL_JWT_SECRET）。
+	if strings.TrimSpace(cfg.Mall.JWTSecret) == "" {
+		return nil, fmt.Errorf("mall.jwt_secret 不能为空：C 端会员令牌签名密钥必须在配置文件（mall.jwt-secret）或环境变量 GAP_MALL_JWT_SECRET 中设置唯一强随机值")
+	}
 	db, err := database.Open(cfg.Database, log)
 	if err != nil {
 		return nil, err
@@ -425,8 +434,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// mall 装配（issue #174）：repo → service → api.New，形状对照 pay/crm
 	//（svc + requirePermission + location）。T1 会员域管理端；积分入账与
 	// pay 联动（SetOrderSuccessHandler 第二消费方）随 T2/T4 经 Set* 接线。
+	// 会员令牌签名材料（issue #178，T5）：密钥与有效期注入 service（登录
+	// 签发 + handler 自校验共用同一实现，Set* 形状照 paySvc.SetNotifyHMACKey）。
 	mallRepo := mallrepo.New(db)
 	mallSvc := mallservice.New(mallRepo)
+	mallSvc.SetMemberTokenAuth(cfg.Mall.JWTSecret, cfg.Mall.TokenTTL)
 	mallAPI := mallapi.New(mallSvc, sysAPI.RequirePermission, cfg.Location())
 
 	// 定时任务绑定表（ADR 0024 补遗）：键 = 处理器名常量（与 seed.JobSpecs
