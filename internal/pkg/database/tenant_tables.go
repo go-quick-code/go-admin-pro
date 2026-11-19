@@ -254,6 +254,16 @@ var TenantTables = []string{
 	"product_brand",
 	"product_property",
 	"product_property_value",
+
+	// mall 商品域 SPU/SKU（issue #177，迁移 00049–00050，docs/mall-mvp-spec.md
+	// §3.2）：SPU（name 租户内唯一）与 SKU（规格 JSON 快照 + 价格/库存）全量
+	// 租户隔离（跨租户业务 ID 一律 404）。SPU 的 category/brand 归属、SKU 的
+	// 属性值引用（properties JSON 内 valueId）都在 service 层经租户插件限定
+	// 后校验；上下架（0 下架 / 1 上架）是 T5 起的购买边界；SPU 删除守卫
+	//（订单引用计数 repo.CountOrdersBySPU，T6 前恒 0）与删除事务级联软删
+	// SKU 在 service 层收口。
+	"product_spu",
+	"product_sku",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

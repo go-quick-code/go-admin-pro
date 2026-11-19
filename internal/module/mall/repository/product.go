@@ -52,8 +52,8 @@ func (r *Repository) UpdateCategoryFields(ctx context.Context, id int64, fields 
 	return wrapDuplicateEntry(r.db.WithContext(ctx).Model(&model.ProductCategory{}).Where("id = ?", id).Updates(fields).Error)
 }
 
-// DeleteCategory 软删分类（删除守卫在 service 层：有子级禁删；SPU 引用
-// 守卫随 T4 接线）。
+// DeleteCategory 软删分类（删除守卫在 service 层：有子级禁删；被未删 SPU
+// 引用禁删——引用计数见 CountSPUsByCategory，T4 接线）。
 func (r *Repository) DeleteCategory(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.ProductCategory{}, "id = ?", id).Error
 }
@@ -137,7 +137,8 @@ func (r *Repository) UpdateBrandFields(ctx context.Context, id int64, fields map
 	return wrapDuplicateEntry(r.db.WithContext(ctx).Model(&model.ProductBrand{}).Where("id = ?", id).Updates(fields).Error)
 }
 
-// DeleteBrand 软删品牌（SPU 引用守卫随 T4 SPU 表落地接线）。
+// DeleteBrand 软删品牌（SPU 引用守卫在 service 层：被未删 SPU 引用禁删——
+// 引用计数见 CountSPUsByBrand，T4 接线）。
 func (r *Repository) DeleteBrand(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.ProductBrand{}, "id = ?", id).Error
 }
@@ -255,7 +256,9 @@ func (r *Repository) UpdatePropertyValueFields(ctx context.Context, id int64, fi
 	return wrapDuplicateEntry(r.db.WithContext(ctx).Model(&model.ProductPropertyValue{}).Where("id = ?", id).Updates(fields).Error)
 }
 
-// DeletePropertyValue 软删属性值（SKU 引用守卫随 T4 SPU/SKU 表落地接线）。
+// DeletePropertyValue 软删属性值（无 SKU 引用守卫——SKU properties 是落库
+// 时写定的名称快照，与属性主数据解耦，主数据软删不影响已建 SKU 的展示与
+// T6 订单成交快照；T4 定稿口径）。
 func (r *Repository) DeletePropertyValue(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.ProductPropertyValue{}, "id = ?", id).Error
 }

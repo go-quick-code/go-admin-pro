@@ -9,24 +9,26 @@ import (
 	"gorm.io/gorm"
 )
 
-// mall.go 是 mall 会员域与商品域种子（issue #174/#175/#176，
+// mall.go 是 mall 会员域与商品域种子（issue #174/#175/#176/#177，
 // docs/mall-mvp-spec.md §3.1/§3.2/§5/§7）：
 // 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单。
 //
 // 菜单（spec §5「9xx 段——900 会员中心（member/level/address 页）、910 商品
-//（category/brand/property 页）、920 交易订单（order 页）」）：
+//（category/brand/property/spu 页）、920 交易订单（order 页）」）：
 // dir 900 会员中心 + 901 会员管理（member 页）+ 902 会员等级（level 页）；
 // dir 910 商品 + 911 商品分类（category 页）+ 912 商品品牌（brand 页）+
-// 913 商品属性（property 页）；
+// 913 商品属性（property 页）+ 914 商品 SPU（spu 页，issue #177）；
 // 按钮按 菜单ID×10+n：9011/9012 会员新增/修改（member 无删除端点——业务
 // 身份禁删，生命周期由停启用覆盖，路由侧无 mall:member:delete 码）、
 // 9013/9014 积分配置查询/修改（issue #175：积分是会员域功能，按钮挂 901
 // 会员管理下——910 段随 T3 商品域占用；调整接口复用 mall:member:update、
 // 流水查询复用 mall:member:query，不设独立按钮）、
 // 9021–9023 等级增/改/删、9111–9113/9121–9123/9131–9133 分类/品牌/属性
-// 三码（query 挂页面行；开工前 grep seed 去重确认 900–913 与 901x/902x/
-// 911x/912x/913x 未被占用）。地址随 T1 无独立页面（在会员详情抽屉按会员
-// 查看），菜单随 T5 C 端自助落地面时再补；SPU 页随 T4。
+// 三码、9141–9144 SPU 新增/修改/删除/上下架（issue #177：query 挂页面行；
+// 上下架按钮 9144 挂 mall:spu:update——状态位更新随更新码，同会员停启用
+// 口径，按钮显式化便于授权审计；开工前 grep seed 去重确认 900–914 与
+// 901x/902x/911x/912x/913x/914x 未被占用）。地址随 T1 无独立页面（在会员
+// 详情抽屉按会员查看），菜单随 T5 C 端自助落地面时再补；920 交易订单页随 T6。
 //
 // 商品域 910 段 URL 挂 /mall 伞下（spec §2「前端路由 /mall：member/product/
 // trade 三页组」）：dir 910 用绝对路径 /mall/product，与 900 的 /mall/member、
@@ -63,6 +65,11 @@ func mallMenus() []sysmodel.Menu {
 		btnRow(9131, 913, "属性新增", "mall:property:create", 1),
 		btnRow(9132, 913, "属性修改", "mall:property:update", 2),
 		btnRow(9133, 913, "属性删除", "mall:property:delete", 3),
+		menuRow(914, 910, "商品 SPU", "spu", "mall/product/spu", "mall:spu:query", "ShoppingBag", 4),
+		btnRow(9141, 914, "SPU新增", "mall:spu:create", 1),
+		btnRow(9142, 914, "SPU修改", "mall:spu:update", 2),
+		btnRow(9143, 914, "SPU删除", "mall:spu:delete", 3),
+		btnRow(9144, 914, "SPU上下架", "mall:spu:update", 4),
 	}
 }
 

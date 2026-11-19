@@ -76,6 +76,19 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	product.POST("/property/value", h.perm("mall:property:create"), h.CreatePropertyValue)
 	product.PUT("/property/value", h.perm("mall:property:update"), h.UpdatePropertyValue)
 	product.DELETE("/property/value/:id", h.perm("mall:property:delete"), h.DeletePropertyValue)
+	// SPU/SKU（issue #177，spec §4）：分页/详情（含 SKU）/创建（SPU+SKU 同
+	// 事务）/更新（SKU 集全量替换）/上下架/删除（订单引用 409 + 级联软删
+	// SKU）。权限码 mall:spu:*（query/create/update/delete 四码，与菜单种子
+	// 914 段一致）；上下架挂 mall:spu:update（状态位更新随更新码，同会员
+	// 停启用口径）。删除守卫（订单引用计数 repo.CountOrdersBySPU，T6 前
+	// 恒 0）与分类/品牌删除守卫（被未删 SPU 引用禁删）在 service 层。
+	spu := product.Group("/spu")
+	spu.GET("/page", h.perm("mall:spu:query"), h.PageProductSPUs)
+	spu.GET("/:id", h.perm("mall:spu:query"), h.GetProductSPU)
+	spu.POST("", h.perm("mall:spu:create"), h.CreateProductSPU)
+	spu.PUT("", h.perm("mall:spu:update"), h.UpdateProductSPU)
+	spu.PUT("/:id/status", h.perm("mall:spu:update"), h.UpdateProductSPUStatus)
+	spu.DELETE("/:id", h.perm("mall:spu:delete"), h.DeleteProductSPU)
 
 	// 积分配置（租户级单行，issue #175）：GET 惰性建行默认 1 / PUT 校验 ≥0，
 	// 独立权限码 mall:point:query / mall:point:update（按钮落 901 会员管理下，
