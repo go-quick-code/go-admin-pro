@@ -264,6 +264,20 @@ var TenantTables = []string{
 	// SKU 在 service 层收口。
 	"product_spu",
 	"product_sku",
+
+	// mall 交易域（issue #179，迁移 00051–00054，docs/mall-mvp-spec.md §3.3）：
+	// 序列/购物车/订单/订单项四表全量租户隔离（跨租户业务 ID 一律 404）。
+	// mall_sequence 的 (tenant_id, biz_type, date_key) 入租户唯一键（SO 单号
+	// 按租户独立发放，照 pay_sequence/erp_sequence）；trade_cart 的
+	// UNIQUE(tenant_id, user_id, sku_id) 兜底加购合并并发；trade_order 的
+	// UNIQUE(tenant_id, no) 兜底 SO 单号租户内唯一。订单/订单项的越权谓词
+	// （user_id）与金额不变量（pay_money 服务端定）在 service 层收口
+	//（spec §3.4）；下单扣库存/取消回补走显式租户参数的裸 SQL（同积分
+	// 入账原语口径）。
+	"mall_sequence",
+	"trade_cart",
+	"trade_order",
+	"trade_order_item",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

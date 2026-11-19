@@ -112,14 +112,16 @@ func (r *Repository) CountSPUsByBrand(ctx context.Context, brandID int64) (int64
 	return count, err
 }
 
-// CountOrdersBySPU 统计引用该 SPU 的订单数（SPU 删除守卫的查询点）。
-// trade_order 随 T6 迁移建表，本票预留恒返 0（照 T3 countSPUsByCategory
-// 预留谓词模式）：SPU 删除守卫的谓词调用点已在 service 层落位，T6 只需
-// 把本方法换成真实计数（trade_order_item.spu_id 引用计数），无调用方改动。
+// CountOrdersBySPU 统计引用该 SPU 的订单项数（SPU 删除守卫的查询点）。
+// T6（issue #179）trade_order_item 落地后接线真实计数：订单项是成交快照
+// （随订单存续，不可删），引用永久——软删 SPU 不算引用（gorm 零值条件自动
+// 过滤）与分类/品牌守卫同口径；被引用 SPU 禁删 409 在 service 层翻译。
 func (r *Repository) CountOrdersBySPU(ctx context.Context, spuID int64) (int64, error) {
-	_ = ctx
-	_ = spuID
-	return 0, nil
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.TradeOrderItem{}).
+		Where("spu_id = ?", spuID).
+		Count(&count).Error
+	return count, err
 }
 
 // ---------- 商品 SKU ----------
@@ -146,4 +148,26 @@ func (r *Repository) CreateSKUs(ctx context.Context, rows []model.ProductSKU) er
 // SPU 删除级联，service 层事务内调用；gorm 软删自动补 deleted_at）。
 func (r *Repository) DeleteSKUsBySPU(ctx context.Context, spuID int64) error {
 	return r.db.WithContext(ctx).Delete(&model.ProductSKU{}, "spu_id = ?", spuID).Error
+}
+
+// ListSKUsByIDs 按 ID 批量查 SKU（下单/加购校验：成交快照取现值；租户插件
+// 隔离，缺失/跨租户 ID 由 service 层对账）。
+func (r *Repository) ListSKUsByIDs(ctx context.Context, ids []int64) ([]model.ProductSKU, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var list []model.ProductSKU
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&list).Error
+	return list, err
+}
+
+// ListSPUsByIDs 按 ID 批量查 SPU（下单校验全部上架 + 快照取名；租户插件
+// 隔离，缺失/跨租户 ID 由 service 层对账）。
+func (r *Repository) ListSPUsByIDs(ctx context.Context, ids []int64) ([]model.ProductSPU, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var list []model.ProductSPU
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&list).Error
+	return list, err
 }

@@ -26,9 +26,12 @@ import (
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
 )
 
-// Service 汇聚 mall 模块的会员域业务能力。
+// Service 汇聚 mall 模块的业务能力。
 type Service struct {
 	repo *mallrepo.Repository
+	// location 是业务时区（ADR 0006），由 app 装配时 SetLocation 注入：
+	// SO 单号日期键一律按它划分（trade.go businessNow）。nil 时退回 time.Local。
+	location *time.Location
 	// memberTokenSecret/memberTokenTTL 是 C 端会员令牌（issue #178，T5）的
 	// 签名材料：app 装配期经 SetMemberTokenAuth 注入（config mall.jwt-secret /
 	// mall.token-ttl）。密钥缺失在 app.New 装配首检 fail-closed 拒启；

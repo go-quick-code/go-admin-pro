@@ -1,10 +1,11 @@
-// Package model 是 mall 模块的实体定义（issue #174，docs/mall-mvp-spec.md §3.1）。
+// Package model 是 mall 模块的实体定义（issue #174 起步，docs/mall-mvp-spec.md
+// §3）。
 //
-// mall 五张 member_* 表全部是租户级数据（登记 TenantTables，ADR 0019）：
-// 查询/写入由租户插件自动追加 tenant_id 条件，跨租户业务 ID 一律不可见。
-// 本包 T1 只落会员域实体：member_user/member_level/member_address 的读写
-// 随 #174 管理端；member_point_config/member_point_record 表结构一次建全，
-// 业务逻辑（唯一入账入口）随 T2 填充——T1 无任何积分写入路径。
+// mall 全部业务表（member_/product_/trade_/mall_sequence）都是租户级数据
+// （登记 TenantTables，ADR 0019）：查询/写入由租户插件自动追加 tenant_id
+// 条件，跨租户业务 ID 一律不可见。本包按域落实体：会员域随 #174/#175，
+// 商品域随 #176/#177，交易域（trade_cart/trade_order/trade_order_item）
+// 随 #179（T6）。
 package model
 
 import (

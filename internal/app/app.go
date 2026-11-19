@@ -436,8 +436,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	// pay 联动（SetOrderSuccessHandler 第二消费方）随 T2/T4 经 Set* 接线。
 	// 会员令牌签名材料（issue #178，T5）：密钥与有效期注入 service（登录
 	// 签发 + handler 自校验共用同一实现，Set* 形状照 paySvc.SetNotifyHMACKey）。
+	// 业务时区（issue #179，T6）：SetLocation 注入 service——SO 单号日期键
+	// 的唯一口径（照 paySvc.SetLocation 先例）。
 	mallRepo := mallrepo.New(db)
 	mallSvc := mallservice.New(mallRepo)
+	mallSvc.SetLocation(cfg.Location())
 	mallSvc.SetMemberTokenAuth(cfg.Mall.JWTSecret, cfg.Mall.TokenTTL)
 	mallAPI := mallapi.New(mallSvc, sysAPI.RequirePermission, cfg.Location())
 

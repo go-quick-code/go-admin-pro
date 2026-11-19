@@ -85,6 +85,11 @@
 #                       00049 新增 product_spu（issue #177，mall 商品域
 #                       SPU/SKU；125→126），
 #                       00050 新增 product_sku（issue #177；126→127），
+#                       00051 新增 mall_sequence（issue #179，mall 交易域；
+#                       127→128），
+#                       00052 新增 trade_cart（issue #179；128→129），
+#                       00053 新增 trade_order（issue #179；129→130），
+#                       00054 新增 trade_order_item（issue #179；130→131），
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -92,7 +97,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-127}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-131}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
