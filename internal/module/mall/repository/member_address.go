@@ -46,3 +46,18 @@ func (r *Repository) ListAllAddressesByUser(ctx context.Context, userID int64) (
 		Order("is_default DESC, id ASC").Find(&list).Error
 	return list, err
 }
+
+// FindAddressByID 按 ID 查地址（租户插件隔离；user_id 归属校验在 service 层
+// ——地址行只对归属会员可见，跨会员 ID 一律 404）。未找到返回 (nil, nil)。
+// 下单收货快照（issue #179）与 C 端自助消费。
+func (r *Repository) FindAddressByID(ctx context.Context, id int64) (*model.MemberAddress, error) {
+	var row model.MemberAddress
+	err := r.db.WithContext(ctx).First(&row, "id = ?", id).Error
+	if err != nil {
+		if notFound(err) == nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &row, nil
+}

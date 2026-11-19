@@ -1,10 +1,11 @@
-// Package repository 是 mall 模块的 DAL 层（issue #174）。
+// Package repository 是 mall 模块的 DAL 层（issue #174 起步）。
 //
-// mall 五张 member_* 表全部是租户级数据（TenantTables，ADR 0019）：查询/
-// 写入都由租户插件自动追加 tenant_id 条件，跨租户业务 ID 一律不可见（404，
-// 不泄露存在性）。T1 只落会员域三表的读写原语与查询；积分两表（point_config/
-// point_record）无读写方——表结构随迁移一次建全，入账原语随 T2 落地
-// （唯一入账入口走显式租户参数的裸 SQL，照 pay wallet 口径）。
+// mall 全部业务表（member_/product_/trade_/mall_sequence）都是租户级数据
+// （TenantTables，ADR 0019）：查询/写入都由租户插件自动追加 tenant_id 条件，
+// 跨租户业务 ID 一律不可见（404，不泄露存在性）。跨行不变量的写路径（积分
+// 唯一入账入口、下单扣库存、取消回补、单号发放）走显式租户参数的裸 SQL，
+// 照 pay wallet / erp_stock 口径（不经租户插件，保证「锁行 → 读写」与租户
+// 条件在同一语句口径上，不被插件改写）。
 package repository
 
 import (

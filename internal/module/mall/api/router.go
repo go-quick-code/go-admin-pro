@@ -122,12 +122,33 @@ func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
 	authGroup.POST("/register", h.AppRegister)
 	authGroup.POST("/login", h.AppLogin)
 
-	// 需会员令牌端点：memberAuth handler 内自校验 + 浏览限速。auth/me 与
-	// 商品浏览同桶（同是已获令牌的读取面）。gin 同层静态段 /auth 与参数段
-	// /product/spu/:id 分属不同链，无路由冲突。
+	// 需会员令牌端点：memberAuth handler 内自校验 + 浏览限速。auth/me、
+	// 商品浏览与交易端点同桶（同是已获令牌的自助面）。gin 同层静态段 /auth、
+	// /product、/cart、/trade 与参数段分属不同链，无路由冲突。
 	tokenGroup := app.Group("")
 	tokenGroup.Use(h.limitAppIP(h.appBrowseLimiter), h.memberAuth())
 	tokenGroup.GET("/auth/me", h.AppMe)
 	tokenGroup.GET("/product/spu/page", h.AppPageProductSPUs)
 	tokenGroup.GET("/product/spu/:id", h.AppGetProductSPU)
+
+	// 购物车（issue #179，spec §4）：加购/改数量/选中切换/删除/我的购物车。
+	// 归属主体恒取 memberAuth 写入的 Principal.UserID（越权 404，不收客户端
+	// 传参）；gin 同层静态段 cart 与参数段 :id 分属不同链：cart/delete 是
+	// 独立静态段，/:id/count、/:id/selected 是参数段子路径。
+	cart := tokenGroup.Group("/cart")
+	cart.POST("", h.AppAddCart)
+	cart.GET("", h.AppListCart)
+	cart.POST("/delete", h.AppDeleteCart)
+	cart.PUT("/:id/count", h.AppUpdateCartCount)
+	cart.PUT("/:id/selected", h.AppSelectCart)
+
+	// 交易（issue #179，spec §4）：结算试算/创建订单/我的订单分页/详情/取消/
+	// 我的积分流水。发起支付（内部转 pay）随 T7 接线。
+	trade := tokenGroup.Group("/trade")
+	trade.GET("/settlement", h.AppSettlement)
+	trade.POST("/order", h.AppCreateOrder)
+	trade.GET("/order/page", h.AppPageOrders)
+	trade.GET("/order/:id", h.AppGetOrder)
+	trade.POST("/order/:id/cancel", h.AppCancelOrder)
+	trade.GET("/point-records", h.AppPageMyPointRecords)
 }
