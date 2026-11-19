@@ -95,6 +95,21 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	point := rg.Group("/mall/point-config")
 	point.GET("", h.perm("mall:point:query"), h.GetPointConfig)
 	point.PUT("", h.perm("mall:point:update"), h.UpdatePointConfig)
+
+	// 交易订单（租户级，issue #180，T7，spec §4）：分页（状态/编号/会员/
+	// 时间过滤）/详情（含 items 与 payOrderNo 等管理字段全量）/管理员备注/
+	// 取消（仅待支付，走 trade_rules 409）/完成（仅已支付 10→20，走状态机）。
+	// 权限码 mall:trade:{query,cancel,complete,update}——update 用于管理员
+	// 备注（字段更新语义，同会员停启用挂 update 口径）；取消/完成是业务状态
+	// 机动作，独立码（对齐 pay approve/close 先例）。菜单 920/921 + 按钮
+	// 9211–9213（seed mall.go）。gin 同层静态段 page 与参数段 :id 分属不同
+	// 链（照 /mall/app/trade/order/{page,:id} 先例）。
+	trade := rg.Group("/mall/trade")
+	trade.GET("/order/page", h.perm("mall:trade:query"), h.PageTradeOrders)
+	trade.GET("/order/:id", h.perm("mall:trade:query"), h.GetTradeOrder)
+	trade.PUT("/order/:id/remark", h.perm("mall:trade:update"), h.UpdateTradeOrderRemark)
+	trade.POST("/order/:id/cancel", h.perm("mall:trade:cancel"), h.CancelTradeOrder)
+	trade.POST("/order/:id/complete", h.perm("mall:trade:complete"), h.CompleteTradeOrder)
 }
 
 // RegisterPublic 注册 mall 模块 C 端公开接口（/mall/app/*，issue #178 T5，
