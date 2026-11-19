@@ -10,7 +10,6 @@ import "github.com/gin-gonic/gin"
 // 会员查询码 mall:member:query（地址是会员详情数据，spec §7 无独立码）；商品
 // mall:category:* / mall:brand:* / mall:property:*（各四码，属性值是属性名
 // 子资源随 mall:property:* 同码，issue #176）。
-// C 端 /mall/app/* 公开组与会员令牌自校验随 T5，由后续票追加注册。
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 会员（租户级）：分页/详情/创建/更新/停启用。停启用挂 mall:member:update
 	//（状态位更新随更新码，不设独立码——pay approve/close 的独立码先例针对
@@ -47,9 +46,9 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 
 	// 商品（租户级，issue #176，spec §4）：分类树+CRUD / 品牌 CRUD /
 	// 属性名+属性值 CRUD。权限码 mall:category:* / mall:brand:* /
-	// mall:property:*（query/create/update/delete 四码，与菜单种子一致）。
-	// 删除守卫（分类有子级/被 SPU 引用禁删 409）在 service 层；SPU 引用
-	// 计数随 T4 SPU 表接线。
+	// mall:property:*（各四码，属性值是属性名子资源随 mall:property:* 同码，
+	// issue #176）。删除守卫（分类有子级/被 SPU 引用禁删 409）在 service 层；
+	// SPU 引用计数随 T4 SPU 表接线。
 	product := rg.Group("/mall/product")
 	// 分类（两级树）：树查询 + CRUD（同级 name 唯一 409）。
 	product.GET("/category/tree", h.perm("mall:category:query"), h.TreeProductCategories)
@@ -96,4 +95,39 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	point := rg.Group("/mall/point-config")
 	point.GET("", h.perm("mall:point:query"), h.GetPointConfig)
 	point.PUT("", h.perm("mall:point:update"), h.UpdatePointConfig)
+}
+
+// RegisterPublic 注册 mall 模块 C 端公开接口（/mall/app/*，issue #178 T5，
+// spec §2「C 端 /mall/app/* 挂公开组（RegisterPublic，无登录、限速）」与
+// §7 裁决 2「C 端身份 = 模块内 HMAC 令牌自校验，公开组 + handler 内校验，
+// 不动 router 组结构」）。router.go 对 RegisterPublic 按 type assert 探测
+// 自动挂公开组（照 notify/pay 先例），公开组在 Auth 中间件之外——会员令牌
+// 由 memberAuth 在 handler 内自校验（service.VerifyMemberToken：签名/过期/
+// DB 查 member_user status），不经过 RequirePermission。
+//
+// 限速（照 pay demo 回调先例的 Limiter 用法，按直连对端 IP）：
+//   - 注册/登录 10 次/分钟（弱凭证暴力尝试面）；
+//   - 我的信息/商品浏览 60 次/分钟（浏览类放宽，照 system publicIPLimit）。
+//
+// 公开端点不记访问日志（公开组不在 router 的 protected 组内，结构使然）。
+// 本仓前端是 admin SPA（spec §7 裁决 6）：C 端端点无 admin 消费方，
+// web/src/api/mall.ts 不加这些函数。
+func (h *Handler) RegisterPublic(rg *gin.RouterGroup) {
+	app := rg.Group("/mall/app")
+
+	// 注册/登录（无令牌）：统一挂注册端限速（同桶——注册与登录是同一
+	// 凭证面的两条入口，10 次/分钟合并计数）。
+	authGroup := app.Group("/auth")
+	authGroup.Use(h.limitAppIP(h.appAuthLimiter))
+	authGroup.POST("/register", h.AppRegister)
+	authGroup.POST("/login", h.AppLogin)
+
+	// 需会员令牌端点：memberAuth handler 内自校验 + 浏览限速。auth/me 与
+	// 商品浏览同桶（同是已获令牌的读取面）。gin 同层静态段 /auth 与参数段
+	// /product/spu/:id 分属不同链，无路由冲突。
+	tokenGroup := app.Group("")
+	tokenGroup.Use(h.limitAppIP(h.appBrowseLimiter), h.memberAuth())
+	tokenGroup.GET("/auth/me", h.AppMe)
+	tokenGroup.GET("/product/spu/page", h.AppPageProductSPUs)
+	tokenGroup.GET("/product/spu/:id", h.AppGetProductSPU)
 }

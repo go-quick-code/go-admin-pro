@@ -22,6 +22,7 @@ type Config struct {
 	AccessLog  AccessLogConfig  `mapstructure:"access-log"`
 	IPLocation IPLocationConfig `mapstructure:"ip-location"`
 	Pay        PayConfig        `mapstructure:"pay"`
+	Mall       MallConfig       `mapstructure:"mall"`
 
 	// loc 缓存 App.Timezone 对应的 *time.Location，由 Load 校验后写入。
 	loc *time.Location
@@ -46,6 +47,22 @@ type PayConfig struct {
 	// 拓扑不应出现在公开可配的回调地址白名单）；dev 缺省放行本机环回
 	// （run-demo 链路与集成测试的 httptest 商户端点）。
 	NotifySSRFPrivateAllow []string `mapstructure:"notify-ssrf-private-allow"`
+}
+
+// MallConfig 是 mall 商城模块（issue #174/#178，docs/mall-mvp-spec.md §2/§7
+// 裁决 2）的配置。
+type MallConfig struct {
+	// JWTSecret 是 C 端会员令牌（HMAC-SHA256 自校验令牌，spec §7 裁决 2）的
+	// 签名密钥：令牌 = base64url(payload{mid,tid,exp}) + "." +
+	// base64url(HMAC-SHA256(payload))。为空时 app.New 拒绝启动（fail-closed，
+	// 见 internal/app.New 的装配首检）；app.env 非 dev/test 时使用已知 dev
+	// 默认值同样拒绝启动（validateMallJWTSecret，与 validatePayNotifyHMACKey
+	// 同型守卫）——生产必须换唯一强随机值（GAP_MALL_JWT_SECRET 可覆盖）。
+	JWTSecret string `mapstructure:"jwt-secret"`
+	// TokenTTL 是会员令牌有效期，默认 7 天（issue #178）：到期经校验拒绝
+	//（exp 过期 401），停用会员的令牌经 DB 查 member_user.status 失效——
+	// 无撤销列表。可选覆盖（≤0 取默认）。
+	TokenTTL time.Duration `mapstructure:"token-ttl"`
 }
 
 // PushConfig 是实时推送（issue #78，spec §4.5 / ADR 0013）的配置。
@@ -88,6 +105,13 @@ const DefaultDevJWTSecret = "go-admin-pro-dev-secret"
 // 仅为本地开发与集成测试提供便利。app.env 非 dev/test 时空值或该值会直接
 // 拒绝启动，见 validatePayNotifyHMACKey（与 validateJWTSecret 同型）。
 const DefaultDevPayNotifyHMACKey = "go-admin-pro-pay-notify-dev-key"
+
+// DefaultDevMallJWTSecret 是 dev/test 环境的 mall 会员令牌 HMAC 缺省密钥
+// （configs/config.yaml mall.jwt-secret 同值，issue #178）：仅为本地开发与
+// 集成测试提供便利。app.env 非 dev/test 时该值会直接拒绝启动
+// （validateMallJWTSecret，与 validatePayNotifyHMACKey 同型）；空值在任何
+// 环境都由 app.New 拒绝启动（fail-closed，会员令牌签发强依赖密钥）。
+const DefaultDevMallJWTSecret = "go-admin-pro-mall-jwt-dev-key"
 
 // insecureJWTSecrets 是已知可预测的 JWT 密钥：非 dev/test 环境一律拒绝，
 // 避免生产部署照抄示例配置后被伪造 token。
@@ -214,7 +238,10 @@ func (c *Config) validate() error {
 	if err := c.validateJWTSecret(); err != nil {
 		return err
 	}
-	return c.validatePayNotifyHMACKey()
+	if err := c.validatePayNotifyHMACKey(); err != nil {
+		return err
+	}
+	return c.validateMallJWTSecret()
 }
 
 // validateJWTSecret 拒绝非 dev/test 环境使用空密钥或已知默认密钥：
@@ -259,6 +286,23 @@ func isLocalEnv(env string) bool {
 		return true
 	}
 	return false
+}
+
+// validateMallJWTSecret 拒绝非 dev/test 环境使用已知默认的 mall 会员令牌
+// 密钥（issue #178，与 validatePayNotifyHMACKey 同型）：C 端会员令牌是
+// HMAC 对称签名——生产照抄示例配置等于对任何读过仓库的人开放伪造会员身份。
+// 空值不在本处拦：Load 对空值放行（dev 兜底见 normalize），统一由 app.New
+// 装配首检拒绝启动（fail-closed，internal/app.New——错误信息指明
+// mall.jwt_secret）。生产必须显式配置唯一强随机值（配置或 GAP_MALL_JWT_SECRET）。
+func (c *Config) validateMallJWTSecret() error {
+	if isLocalEnv(c.App.Env) {
+		return nil
+	}
+	secret := strings.TrimSpace(c.Mall.JWTSecret)
+	if secret == DefaultDevMallJWTSecret {
+		return fmt.Errorf("mall.jwt-secret 使用了已知默认值：app.env=%q 时必须在配置文件或 GAP_MALL_JWT_SECRET 中覆盖为唯一强密钥", c.App.Env)
+	}
+	return nil
 }
 
 func (c *Config) applyDefaults() {
@@ -323,6 +367,12 @@ func (c *Config) applyDefaults() {
 	if c.AccessLog.RetentionDays <= 0 {
 		c.AccessLog.RetentionDays = 30
 	}
+	// mall 会员令牌（issue #178）：有效期默认 7 天（spec §7 裁决 2 令牌
+	// 自校验体系的最小可用周期）；jwt-secret 无代码级回填——空值由 app.New
+	// fail-closed 拒启，dev 便利值见 normalize。
+	if c.Mall.TokenTTL <= 0 {
+		c.Mall.TokenTTL = 7 * 24 * time.Hour
+	}
 }
 
 func (c *Config) applyEnv() {
@@ -350,6 +400,12 @@ func (c *Config) applyEnv() {
 	// 支付回调密钥（issue #134）：允许部署侧环境变量覆盖，免改配置文件。
 	if v := os.Getenv("GAP_PAY_NOTIFY_HMAC_KEY"); v != "" {
 		c.Pay.NotifyHMACKey = v
+	}
+	// mall 会员令牌签名密钥（issue #178）：允许部署侧环境变量覆盖，免改
+	// 配置文件。与 GAP_JWT_SECRET/GAP_PAY_NOTIFY_HMAC_KEY 同款口径：仅显式
+	// 非空时覆盖。
+	if v := os.Getenv("GAP_MALL_JWT_SECRET"); v != "" {
+		c.Mall.JWTSecret = v
 	}
 	// 充值挂单应用（issue #136）：允许部署侧环境变量覆盖，免改配置文件。
 	if v := os.Getenv("GAP_PAY_RECHARGE_APP_KEY"); v != "" {
@@ -396,6 +452,12 @@ func (c *Config) normalize() {
 	c.App.APIPrefix = "/" + strings.Trim(c.App.APIPrefix, "/")
 	if c.JWT.Secret == "" {
 		c.JWT.Secret = DefaultDevJWTSecret
+	}
+	// mall 会员令牌密钥（issue #178）：仅 dev/test 兜底 dev 默认值（与
+	// jwt.secret 的 dev 便利同型；非 dev/test 保持空值——app.New 装配首检
+	// fail-closed 拒启，生产无静默兜底）。
+	if c.Mall.JWTSecret == "" && isLocalEnv(c.App.Env) {
+		c.Mall.JWTSecret = DefaultDevMallJWTSecret
 	}
 }
 

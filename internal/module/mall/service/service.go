@@ -20,6 +20,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	mallrepo "github.com/go-quick-code/go-admin-pro/internal/module/mall/repository"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/authn"
@@ -28,6 +29,12 @@ import (
 // Service 汇聚 mall 模块的会员域业务能力。
 type Service struct {
 	repo *mallrepo.Repository
+	// memberTokenSecret/memberTokenTTL 是 C 端会员令牌（issue #178，T5）的
+	// 签名材料：app 装配期经 SetMemberTokenAuth 注入（config mall.jwt-secret /
+	// mall.token-ttl）。密钥缺失在 app.New 装配首检 fail-closed 拒启；
+	// 签发/校验侧再防御（见 member_token.go memberTokenReady）。
+	memberTokenSecret []byte
+	memberTokenTTL    time.Duration
 }
 
 // New 创建 mall Service。
