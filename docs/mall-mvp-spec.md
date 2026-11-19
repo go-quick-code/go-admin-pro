@@ -40,7 +40,7 @@
 
 ## 3. 表结构
 
-通用：BaseEntity 等价字段 + `tenant_id`（全部租户级，mall 无平台级表）；`DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`；金额列 Money `decimal(12,2)`。共 **14 张新表**，`EXPECTED_TABLES` 116 → **130**。状态数值对齐芋道枚举。全部登记 `TenantTables`（ADR 0019）。
+通用：BaseEntity 等价字段 + `tenant_id`（全部租户级，mall 无平台级表）；`DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`；金额列 Money `decimal(12,2)`。共 **15 张新表**（T6 增补 `mall_sequence` 序列表：SO 单号发放照 ADR 0022 每域一张序列表先例），`EXPECTED_TABLES` 116 → **131**（本文原按预估写 14 张/130，T6 实建口径修正）。状态数值对齐芋道枚举。全部登记 `TenantTables`（ADR 0019）。
 
 ### 3.1 会员域（5）
 
@@ -113,5 +113,5 @@ C 端（公开组 `/mall/app/*`，Bearer 会员令牌，限速）：
 4. **支付联动 = pay `SetOrderSuccessHandler` 第二消费方**，同事务置已支付 + 积分入账；pay 侧零改动。
 5. **mall 依赖 payservice 单向**（平台能力域消费，非业务套件打通）。
 6. **积分 = 支付成功按实付入账**（point_per_yuan 配置），无过期/清零。
-7. **菜单 9xx 段**（900/910/920），迁移号 00040 起，EXPECTED_TABLES 116→130。
+7. **菜单 9xx 段**（900/910/920），迁移号 00040 起，EXPECTED_TABLES 116→131（T6 实建口径修正，补 mall_sequence）。
 8. **postage/discount 字段预留恒 0**；省市区存文本不联动 system_area。
