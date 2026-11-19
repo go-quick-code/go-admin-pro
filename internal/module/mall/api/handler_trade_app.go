@@ -33,6 +33,16 @@ func (h *Handler) appMemberID(c *gin.Context) (int64, bool) {
 	return principal.UserID, true
 }
 
+// appUserIP 取发起方 IP 审计列取值：恒用 c.RemoteIP()（直连对端），与
+// limitAppIP 限速同口径。刻意不用 c.ClientIP()：仓库未配置 SetTrustedProxies
+// 时 gin 默认信任任意来源，ClientIP() 会采信请求方可随意伪造的
+// X-Forwarded-For——审计列（pay_order 的发起来源记录）若取 XFF，伪造 IP
+// 即污染审计与风控数据（PR #184 审查 H3，理由全文见 handler_app.go
+// limitAppIP 注释；部署级代理信任拓扑不在 handler 层收敛）。
+func (h *Handler) appUserIP(c *gin.Context) string {
+	return c.RemoteIP()
+}
+
 // ---------- 购物车（加购/数量/选中/删除/我的购物车） ----------
 
 // AppAddCart 加购（POST /mall/app/cart）：skuId + count，同 SKU 合并数量；
@@ -159,7 +169,7 @@ func (h *Handler) AppCreateOrder(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	resp, err := h.svc.AppCreateOrder(c.Request.Context(), memberID, &req, c.ClientIP())
+	resp, err := h.svc.AppCreateOrder(c.Request.Context(), memberID, &req, h.appUserIP(c))
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -252,7 +262,7 @@ func (h *Handler) AppPayOrder(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	resp, err := h.svc.AppPayOrder(c.Request.Context(), memberID, id, &req, c.ClientIP())
+	resp, err := h.svc.AppPayOrder(c.Request.Context(), memberID, id, &req, h.appUserIP(c))
 	if err != nil {
 		response.Fail(c, err)
 		return
