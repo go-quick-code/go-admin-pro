@@ -315,26 +315,31 @@ func (s *Service) AppSetDefaultAddress(ctx context.Context, memberID, id int64) 
 
 // AppDeleteAddress 删除收货地址：归属 404 → 软删（0 行 = 并发删除同答）；
 // 删的是默认地址且仍有剩余时自动顶位最早一条（结算页「默认地址」语义需要
-// 非空集，同事务保证）。
+// 非空集）。删除与顶位包进同一事务（照 AppSetDefaultAddress 形状）——两步
+// 是「默认地址互斥不变量」的原子迁移：非事务下删除与顶位之间出错、或与
+// 并发 AppSetDefaultAddress 交错，可出现「会员无默认地址」或两个
+// is_default=1，结算页默认地址取值随之漂移（PR #184 审查 P2）。
 func (s *Service) AppDeleteAddress(ctx context.Context, memberID, id int64) error {
 	row, err := s.findAppAddress(ctx, memberID, id)
 	if err != nil {
 		return err
 	}
 	wasDefault := row.IsDefault == 1
-	rows, err := s.repo.DeleteAddressByID(ctx, memberID, id)
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return xerr.NotFound("收货地址不存在")
-	}
-	if wasDefault {
-		if _, err := s.repo.PromoteOldestAddress(ctx, memberID); err != nil {
+	return s.repo.Transaction(ctx, func(tx *mallrepo.Repository) error {
+		rows, err := tx.DeleteAddressByID(ctx, memberID, id)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		if rows == 0 {
+			return xerr.NotFound("收货地址不存在")
+		}
+		if wasDefault {
+			if _, err := tx.PromoteOldestAddress(ctx, memberID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // findAppAddress 归属校验：地址不存在/跨会员/跨租户统一 404（租户插件隔离
