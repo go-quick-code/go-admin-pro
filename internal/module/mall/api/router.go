@@ -13,9 +13,11 @@ import "github.com/gin-gonic/gin"
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 会员（租户级）：分页/详情/创建/更新/停启用。停启用挂 mall:member:update
 	//（状态位更新随更新码，不设独立码——pay approve/close 的独立码先例针对
-	// 业务状态机动作，会员启停是普通字段更新）。
+	// 业务状态机动作，会员启停是普通字段更新）。导出挂 mall:member:export
+	//（复用会员列表筛选，按钮 9015，spec §1 第 8 步 Excel 导出）。
 	member := rg.Group("/mall/member")
 	member.GET("/page", h.perm("mall:member:query"), h.PageMembers)
+	member.GET("/export-excel", h.perm("mall:member:export"), h.ExportMembers)
 	member.GET("/:id", h.perm("mall:member:query"), h.GetMember)
 	member.POST("", h.perm("mall:member:create"), h.CreateMember)
 	member.PUT("", h.perm("mall:member:update"), h.UpdateMember)
@@ -83,6 +85,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 恒 0）与分类/品牌删除守卫（被未删 SPU 引用禁删）在 service 层。
 	spu := product.Group("/spu")
 	spu.GET("/page", h.perm("mall:spu:query"), h.PageProductSPUs)
+	// 导出挂 mall:spu:export（复用 SPU 列表筛选，按钮 9145，spec §1 第 8 步）。
+	spu.GET("/export-excel", h.perm("mall:spu:export"), h.ExportSPUs)
 	spu.GET("/:id", h.perm("mall:spu:query"), h.GetProductSPU)
 	spu.POST("", h.perm("mall:spu:create"), h.CreateProductSPU)
 	spu.PUT("", h.perm("mall:spu:update"), h.UpdateProductSPU)
@@ -106,6 +110,8 @@ func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	// 链（照 /mall/app/trade/order/{page,:id} 先例）。
 	trade := rg.Group("/mall/trade")
 	trade.GET("/order/page", h.perm("mall:trade:query"), h.PageTradeOrders)
+	// 导出挂 mall:trade:export（复用管理端订单筛选，按钮 9214，spec §1 第 8 步）。
+	trade.GET("/order/export-excel", h.perm("mall:trade:export"), h.ExportTradeOrders)
 	trade.GET("/order/:id", h.perm("mall:trade:query"), h.GetTradeOrder)
 	trade.PUT("/order/:id/remark", h.perm("mall:trade:update"), h.UpdateTradeOrderRemark)
 	trade.POST("/order/:id/cancel", h.perm("mall:trade:cancel"), h.CancelTradeOrder)

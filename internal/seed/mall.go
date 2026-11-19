@@ -40,6 +40,10 @@ import (
 // 9211 订单取消 / 9212 订单完成（业务状态机动作，独立码——pay approve/close
 // 先例）/ 9213 订单备注（管理员备注挂 mall:trade:update——字段更新语义，
 // 同会员停启用口径，按钮显式化便于授权审计）；订单查询码挂 921 页面行。
+// 导出按钮（spec §1 第 8 步 Excel 导出，PR #184 审查补票，开工前 grep
+// seed 去重确认 9015/9145/9214 空闲）：9015 会员导出 / 9145 SPU 导出 /
+// 9214 订单导出，权限码 mall:<entity>:export 与路由守卫一一对应（路由侧
+// 双向收敛由 TestPermSetsConverge 自动覆盖）。
 //
 // 商品/交易域 910/920 段 URL 挂 /mall 伞下（spec §2「前端路由 /mall：
 // member/product/trade 三页组」）：dir 910 用绝对路径 /mall/product、
@@ -60,6 +64,7 @@ func mallMenus() []sysmodel.Menu {
 		btnRow(9012, 901, "会员修改", "mall:member:update", 2),
 		btnRow(9013, 901, "积分配置查询", "mall:point:query", 3),
 		btnRow(9014, 901, "积分配置修改", "mall:point:update", 4),
+		btnRow(9015, 901, "会员导出", "mall:member:export", 5),
 		menuRow(902, 900, "会员等级", "level", "mall/level", "mall:level:query", "Medal", 2),
 		btnRow(9021, 902, "等级新增", "mall:level:create", 1),
 		btnRow(9022, 902, "等级修改", "mall:level:update", 2),
@@ -82,11 +87,13 @@ func mallMenus() []sysmodel.Menu {
 		btnRow(9142, 914, "SPU修改", "mall:spu:update", 2),
 		btnRow(9143, 914, "SPU删除", "mall:spu:delete", 3),
 		btnRow(9144, 914, "SPU上下架", "mall:spu:update", 4),
+		btnRow(9145, 914, "SPU导出", "mall:spu:export", 5),
 		dirRow(920, 0, "交易订单", "/mall/trade", "List", 82),
 		menuRow(921, 920, "订单管理", "order", "mall/trade/order", "mall:trade:query", "Tickets", 1),
 		btnRow(9211, 921, "订单取消", "mall:trade:cancel", 1),
 		btnRow(9212, 921, "订单完成", "mall:trade:complete", 2),
 		btnRow(9213, 921, "订单备注", "mall:trade:update", 3),
+		btnRow(9214, 921, "订单导出", "mall:trade:export", 4),
 	}
 }
 
