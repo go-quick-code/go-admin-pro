@@ -12,9 +12,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// mall.go 是 mall 会员域与商品域种子（issue #174/#175/#176/#177，
-// docs/mall-mvp-spec.md §3.1/§3.2/§5/§7）：
-// 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单；
+// mall.go 是 mall 会员域与商品域、交易域种子（issue #174/#175/#176/#177/#180，
+// docs/mall-mvp-spec.md §3.1/§3.2/§3.3/§5/§7）：
+// 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单 +
+// 交易 920 段菜单（issue #180，T7）；
 // 支付联动种子（issue #181，T8）：mall 挂单支付应用（app_key=mall，
 // 5011）+ mock/wallet 渠道绑定（5012/5013），基础种子常驻（文件尾）。
 //
@@ -23,6 +24,7 @@ import (
 // dir 900 会员中心 + 901 会员管理（member 页）+ 902 会员等级（level 页）；
 // dir 910 商品 + 911 商品分类（category 页）+ 912 商品品牌（brand 页）+
 // 913 商品属性（property 页）+ 914 商品 SPU（spu 页，issue #177）；
+// dir 920 交易订单 + 921 订单管理（order 页，issue #180）；
 // 按钮按 菜单ID×10+n：9011/9012 会员新增/修改（member 无删除端点——业务
 // 身份禁删，生命周期由停启用覆盖，路由侧无 mall:member:delete 码）、
 // 9013/9014 积分配置查询/修改（issue #175：积分是会员域功能，按钮挂 901
@@ -33,18 +35,23 @@ import (
 // 上下架按钮 9144 挂 mall:spu:update——状态位更新随更新码，同会员停启用
 // 口径，按钮显式化便于授权审计；开工前 grep seed 去重确认 900–914 与
 // 901x/902x/911x/912x/913x/914x 未被占用）。地址随 T1 无独立页面（在会员
-// 详情抽屉按会员查看），菜单随 T5 C 端自助落地面时再补；920 交易订单页随 T6。
+// 详情抽屉按会员查看），菜单随 T5 C 端自助落地面时再补。
+// 交易订单按钮（issue #180，开工前 grep seed 去重确认 92xx 空闲）：
+// 9211 订单取消 / 9212 订单完成（业务状态机动作，独立码——pay approve/close
+// 先例）/ 9213 订单备注（管理员备注挂 mall:trade:update——字段更新语义，
+// 同会员停启用口径，按钮显式化便于授权审计）；订单查询码挂 921 页面行。
 //
-// 商品域 910 段 URL 挂 /mall 伞下（spec §2「前端路由 /mall：member/product/
-// trade 三页组」）：dir 910 用绝对路径 /mall/product，与 900 的 /mall/member、
-// /mall/level 共伞不同段，不构成路由冲突。
+// 商品/交易域 910/920 段 URL 挂 /mall 伞下（spec §2「前端路由 /mall：
+// member/product/trade 三页组」）：dir 910 用绝对路径 /mall/product、
+// dir 920 用绝对路径 /mall/trade，与 900 的 /mall/member、/mall/level 共伞
+// 不同段，不构成路由冲突。
 //
 // 会员/等级/商品是普通租户业务数据：内置普通角色（role id=2）默认不授予
 // mall 菜单（角色绑定清单见 seedRoles——mall 与 pay/erp 同款「资金/业务
 // 敏感，普通角色零默认授权」口径；本票菜单无资金属性，但会员/商品管理面
 // 属租户管理员职责，照 erp 700 段先例不给普通角色）。
 
-// mallMenus 构造会员中心 900 段与商品 910 段菜单。
+// mallMenus 构造会员中心 900 段、商品 910 段与交易 920 段菜单。
 func mallMenus() []sysmodel.Menu {
 	return []sysmodel.Menu{
 		dirRow(900, 0, "会员中心", "/mall", "ShoppingCartFull", 80),
@@ -75,6 +82,11 @@ func mallMenus() []sysmodel.Menu {
 		btnRow(9142, 914, "SPU修改", "mall:spu:update", 2),
 		btnRow(9143, 914, "SPU删除", "mall:spu:delete", 3),
 		btnRow(9144, 914, "SPU上下架", "mall:spu:update", 4),
+		dirRow(920, 0, "交易订单", "/mall/trade", "List", 82),
+		menuRow(921, 920, "订单管理", "order", "mall/trade/order", "mall:trade:query", "Tickets", 1),
+		btnRow(9211, 921, "订单取消", "mall:trade:cancel", 1),
+		btnRow(9212, 921, "订单完成", "mall:trade:complete", 2),
+		btnRow(9213, 921, "订单备注", "mall:trade:update", 3),
 	}
 }
 

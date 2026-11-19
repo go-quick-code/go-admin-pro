@@ -340,22 +340,10 @@ func (s *Service) AppCancelOrder(ctx context.Context, userID, orderID int64, req
 		if rows == 0 {
 			return xerr.Conflict("订单状态已变更，请刷新后重试")
 		}
-		// 库存回补（同形状 stock + ?，与状态迁移同事务）；0 行 = SKU 已不可见
-		//（软删/异常），报错整体回滚——不允许「状态已取消但库存未回补」。
-		items, err := tx.ListOrderItemsByOrder(ctx, order.ID)
-		if err != nil {
-			return err
-		}
-		for _, it := range items {
-			rows, err := tx.RestoreSKUStock(ctx, tenantID, it.SKUID, it.Count)
-			if err != nil {
-				return err
-			}
-			if rows == 0 {
-				return xerr.Conflict("商品库存回补失败，请稍后重试")
-			}
-		}
-		return nil
+		// 库存回补（同形状 stock + ?，与状态迁移同事务；T7 抽出与管理员取消
+		// 共用 restoreOrderStock）；0 行 = SKU 已不可见（软删/异常），报错整体
+		// 回滚——不允许「状态已取消但库存未回补」。
+		return restoreOrderStock(ctx, tx, tenantID, order.ID)
 	})
 }
 

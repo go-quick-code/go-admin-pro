@@ -233,3 +233,29 @@ export function updateProductSPUStatus(id: number, status: number) {
 export function deleteProductSPU(id: number) {
   return request.delete(`/mall/product/spu/${id}`) as Promise<any>
 }
+
+// ---------- 交易订单（mall:trade:*，issue #180） ----------
+// 管理端订单面：分页（状态/编号模糊/会员 ID/时间过滤）/详情（含订单项成交
+// 快照与 payOrderNo 等管理字段全量）/管理员备注（任意状态可补注）/取消
+//（仅待支付，后端其余状态 409，库存回补同事务）/完成（仅已支付 10→20，
+// 后端走状态机）。金额一律十进制字符串（Money 口径）。
+export function pageTradeOrders(params: any) {
+  return request.get('/mall/trade/order/page', { params }) as Promise<any>
+}
+export function getTradeOrder(id: number) {
+  return request.get(`/mall/trade/order/${id}`) as Promise<any>
+}
+// 管理员备注（PUT /mall/trade/order/:id/remark，挂 mall:trade:update）：
+// ≤500 字，终态也允许补注。
+export function updateTradeOrderRemark(id: number, remark: string) {
+  return request.put(`/mall/trade/order/${id}/remark`, { remark }) as Promise<any>
+}
+// 取消（POST /mall/trade/order/:id/cancel，挂 mall:trade:cancel）：仅待支付；
+// cancel_reason 由后端记「管理员取消」。
+export function cancelTradeOrder(id: number) {
+  return request.post(`/mall/trade/order/${id}/cancel`) as Promise<any>
+}
+// 完成（POST /mall/trade/order/:id/complete，挂 mall:trade:complete）：仅已支付。
+export function completeTradeOrder(id: number) {
+  return request.post(`/mall/trade/order/${id}/complete`) as Promise<any>
+}
