@@ -130,7 +130,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
 	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）+ 商户回调重试/
-	// 订单超时关闭（issue #134，spec §7 job 种子两行）。计数跟随规格清单
+	// 订单超时关闭（issue #134，spec §7 job 种子两行）+ 商城订单超时关闭
+	//（issue #182，mall spec §1 第 7 条）。计数跟随规格清单
 	//（ADR 0024 补遗）：规格与种子行同源，新增规格漏投影即在此暴露。
 	assertCount(t, db, &inframodel.Job{}, int64(len(seed.JobSpecs)), "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")

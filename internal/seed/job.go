@@ -6,6 +6,7 @@ import (
 	crmservice "github.com/go-quick-code/go-admin-pro/internal/module/crm/service"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
 	infraservice "github.com/go-quick-code/go-admin-pro/internal/module/infra/service"
+	mallservice "github.com/go-quick-code/go-admin-pro/internal/module/mall/service"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
 	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
 	"github.com/go-quick-code/go-admin-pro/internal/pkg/tenant"
@@ -122,6 +123,19 @@ var JobSpecs = []JobSpec{
 		CronExpression: "0 */5 * * * *",
 		Status:         inframodel.JobStatusRunning,
 		Remark:         "每 5 分钟扫描过期待支付订单（expire_time < now）并置为已关闭；已支付/已关闭订单不受影响",
+		System:         true,
+	},
+	// 商城订单超时关闭（issue #182，mall spec §1 第 7 条）：每 5 分钟扫描
+	// 待支付超 15 分钟的订单（status=0 且 created_at < now−15min，业务时钟
+	// businessNow 口径）置 40 已关闭（close_reason="超时未支付"）并同事务
+	// 回补库存。默认启用（幂等条件更新，已支付/已取消/已关闭不受影响——
+	// 终态无出边，非破坏性）。
+	{
+		HandlerName:    mallservice.OrderTimeoutCloseJobHandlerName,
+		Name:           "商城订单超时关闭",
+		CronExpression: "0 */5 * * * *",
+		Status:         inframodel.JobStatusRunning,
+		Remark:         "每 5 分钟扫描待支付超 15 分钟的商城订单并置为已关闭（同事务回补库存）；已支付/已取消/已关闭订单不受影响",
 		System:         true,
 	},
 }

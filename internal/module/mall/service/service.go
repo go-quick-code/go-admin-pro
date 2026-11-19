@@ -38,6 +38,10 @@ type Service struct {
 	// 签发/校验侧再防御（见 member_token.go memberTokenReady）。
 	memberTokenSecret []byte
 	memberTokenTTL    time.Duration
+	// tenants 是启用租户清单来源（issue #182，T9 超时关单 job 的跨租户迭代
+	// 数据源）：app 装配期经 SetTenantLister 注入（system Service 直接满足
+	// TenantLister 窄接口，照 pay 同型）。未注入时 job 报错拒跑（fail-closed）。
+	tenants TenantLister
 }
 
 // New 创建 mall Service。

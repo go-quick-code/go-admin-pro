@@ -127,3 +127,34 @@ func (r *Repository) UpdateOrderAdminRemark(ctx context.Context, orderID int64, 
 		Update("admin_remark", remark)
 	return res.RowsAffected, res.Error
 }
+
+// ListTimeoutOrders 列超时候选订单（超时关单 job 的扫描，issue #182，T9）：
+// status=0 且 created_at < cutoff（cutoff = businessNow − 15min 阈值，由
+// service 层定界；trade_order 无独立 expire_time 列，created_at 即业务时间
+// 基准）。gorm 模型查询走租户插件（ctx 携带目标租户），deleted_at 过滤由
+// 软删除机制自带。只读候选集：最终裁决是 ClaimOrderTimeout 条件 UPDATE
+// （列出与认领之间的并发改动由 0 影响行数吸收，不回补不计数）。
+func (r *Repository) ListTimeoutOrders(ctx context.Context, cutoff time.Time) ([]model.TradeOrder, error) {
+	var list []model.TradeOrder
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND created_at < ?", model.TradeOrderStatusPending, cutoff).
+		Order("id ASC").Find(&list).Error
+	return list, err
+}
+
+// ClaimOrderTimeout 超时关单认领（状态机 0→40 的条件 UPDATE，issue #182，
+// T9；形状同 ClaimOrderCancel/ClaimOrderCancelByAdmin）：仅当行仍处于待支付
+// （status=0）时置已关闭 + close_time/close_reason（"超时未支付"），返回影响
+// 行数（0 = 列出后已被并发改动——支付成功/用户取消先行认领 → 本轮跳过，
+// 不回补不计数；已取消(30)/已支付(10)等非待支付行天然不在 WHERE 内，终态
+// 无出边）。只能在事务内调用（与库存回补同事务）。
+func (r *Repository) ClaimOrderTimeout(ctx context.Context, orderID, tenantID int64, reason string, now time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).Exec(
+		"UPDATE `trade_order` SET `status` = ?, `close_time` = ?, `close_reason` = ?, "+
+			"`updated_at` = ?, `updater` = ? "+
+			"WHERE `id` = ? AND `tenant_id` = ? AND `status` = ? AND `deleted_at` IS NULL",
+		model.TradeOrderStatusClosed, now, reason, now, database.AuditUser(ctx),
+		orderID, tenantID, model.TradeOrderStatusPending,
+	)
+	return res.RowsAffected, res.Error
+}
