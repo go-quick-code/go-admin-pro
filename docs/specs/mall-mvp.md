@@ -37,13 +37,13 @@
 25. 作为开发者，我想要超时关单走 JobSpecs 三处声明（缺绑定拒启，ADR 0024 补遗），这样任务接线有编译/启动期防线。
 26. 作为开发者，我想要 C 端令牌 HMAC 自校验（公开组 + handler 内校验 + 限速，密钥缺失拒启动），这样不扩 router 组结构也有身份防线。
 27. 作为安全，我想要客户端金额全部不采纳（服务端定 pay_money）、越权矩阵 404/403、上下架购买边界，这样 C 端攻击面有明确防线。
-28. 作为运维，我想要 EXPECTED_TABLES=130 空库迁移往返 + 租户表登记强校验（14 表全租户级），这样升级可审计。
+28. 作为运维，我想要 EXPECTED_TABLES=131 空库迁移往返 + 租户表登记强校验（15 表全租户级，T6 补 mall_sequence），这样升级可审计。
 
 ## Implementation Decisions
 
 - 新模块 `internal/module/mall`（五层，service 按域拆文件 + `*_rules.go` 纯校验）；单模块四域对齐 erp/pay 先例，不拆 member/product/trade 三模块。
 - 依赖：平台层（system/money/sequence/ratelimit）+ **pay service 单向依赖**（mall→pay，pay 侧零改动；`OrderSuccessHandler` 是既有扩展点，充值是第一消费方）。
-- 表：member_user/level/address/point_config/point_record + product_category/brand/property/property_value/spu/sku + trade_cart/order/order_item，全租户级，全部登记 TenantTables；EXPECTED_TABLES 116→130；迁移 00040 起。
+- 表：member_user/level/address/point_config/point_record + product_category/brand/property/property_value/spu/sku + trade_cart/order/order_item + mall_sequence（T6 补），全租户级，全部登记 TenantTables；EXPECTED_TABLES 116→131（T6 实建口径修正，原按预估写 130）；迁移 00040 起。
 - 编号 `sequence.Next`（SO 前缀）；金额 Money；积分 int；订单状态机数值对齐芋道（0 待支付/10 已支付/20 已完成/30 已取消/40 已关闭）。
 - 下单即扣库存（行锁条件 UPDATE，不足 409），取消/关单回补；积分按支付实付入账（point_per_yuan）。
 - C 端 `/mall/app/*` 挂公开组 + 会员令牌 handler 自校验（HMAC，`config.mall.jwt_secret` 缺失拒启动）+ 限速；不动 router 三组结构与 Backbone。
@@ -65,5 +65,5 @@ promotion 营销域全量（优惠券/满减/秒杀/拼团/砍价/积分商城/�
 
 ## Further Notes
 
-- **AFK 默认裁决待复核**（docs/mall-mvp-spec.md §7）：三域裁剪、C 端令牌形状、下单扣库存、积分口径、9xx 菜单段、130 表——晨间复核如有推翻按新口径返工。
-- 芋道 mall 共 70+ 表，本 MVP 14 表是能力子集；对标缺口以「明确不做」清单显式化，后续票按需补。
+- **AFK 默认裁决待复核**（docs/mall-mvp-spec.md §7）：三域裁剪、C 端令牌形状、下单扣库存、积分口径、9xx 菜单段、131 表（T6 实建口径修正）——晨间复核如有推翻按新口径返工。
+- 芋道 mall 共 70+ 表，本 MVP 15 表（14 业务表 + mall_sequence）是能力子集；对标缺口以「明确不做」清单显式化，后续票按需补。

@@ -17,7 +17,7 @@ make verify-migration
 只验证迁移往返，可绕过启动冒烟：
 
 ```bash
-go run ./cmd/migrate -c configs/config.yaml -expect-tables 17 verify
+go run ./cmd/migrate -c configs/config.yaml -expect-tables 131 verify
 ```
 
 新增迁移导致表数量变化时，同步更新 `scripts/verify-migration.sh` 的 `EXPECTED_TABLES` 默认值；CI 继承脚本默认值，不再单独配置。

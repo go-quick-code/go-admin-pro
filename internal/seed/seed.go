@@ -113,14 +113,15 @@ func Run(db *gorm.DB, withDemo bool) error {
 //
 // 唯一的顺序契约：OA 必须在 CRM 之后——OA 演示数据依赖 CRM 演示组织
 // （sales1/sales2/manager，见 oa_demo.go）；其余演示种子只依赖基础种子
-// （admin 账号 + 各自自含的兜底），顺序无关（ERP/Platform/Pay 的取值位置
-// 只是历史落点）。契约的结构化断言见 TestDemoOrderOAAfterCRM。
+// （admin 账号 + 各自自含的兜底），顺序无关（ERP/Platform/Pay/Mall 的取值
+// 位置只是历史落点）。契约的结构化断言见 TestDemoOrderOAAfterCRM。
 const (
 	DemoOrderCRM      = 10
 	DemoOrderOA       = 20
 	DemoOrderERP      = 30
 	DemoOrderPlatform = 40
 	DemoOrderPay      = 50
+	DemoOrderMall     = 60
 )
 
 // demoSeed 是一条演示种子注册项：order 决定执行次序，fn 是写入入口。

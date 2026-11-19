@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// testDemoOrder 是撞序号单测专用的 order 值：避开 DemoOrder 常量段（10–50），
+// testDemoOrder 是撞序号单测专用的 order 值：避开 DemoOrder 常量段（10–60），
 // 与 demo 文件 init 的真实注册互不干扰。
 const testDemoOrder = 987654
 

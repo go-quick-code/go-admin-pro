@@ -84,7 +84,7 @@ func countPayDemo(t *testing.T, db *gorm.DB) payDemoCounts {
 func TestIntegrationPayDemoSeed(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 
-	// 测试基座默认关闭演示数据；显式写入第一遍（含 CRM/OA/ERP/平台演示，
+	// 测试基座默认关闭演示数据；显式写入第一遍（含 CRM/OA/ERP/平台/mall 演示，
 	// 本用例只断言 pay 域）。
 	if err := seed.Run(env.DB, true); err != nil {
 		t.Fatalf("写入 pay 演示数据: %v", err)
@@ -96,14 +96,14 @@ func TestIntegrationPayDemoSeed(t *testing.T) {
 		Packages:      2, // 套餐 50+5 / 100+15
 		DemoOrders:    3, // 2 笔已支付（其一全额退款）+ 1 笔待支付
 		DemoWithdraws: 3, // 1 笔审批转账成功 + 2 笔等待审批
-		Orders:        5, // 3 笔示例挂单 + 2 笔充值挂单
-		Extensions:    4, // 待支付示例订单未发起支付，无 extension
+		Orders:        7, // 3 笔示例挂单 + 2 笔充值挂单 + 2 笔 mall 演示挂单（issue #183：已支付 1 + 待支付 1，下单即建单）
+		Extensions:    5, // 待支付示例订单与待支付 mall 订单未发起支付，无 extension（issue #183 mall 已支付订单 +1）
 		Refunds:       3, // 示例部分退款 + 示例全额退款 + 充值退款
 		Transfers:     1, // 提现审批转账
-		Wallets:       1, // admin 演示钱包（懒创建）
+		Wallets:       1, // admin 演示钱包（懒创建；mall 演示链路走 mock 渠道，不建钱包）
 		WalletTxs:     6, // 充值/充值退款/充值/支付/支付退款/转账
-		NotifyTasks:   8, // 4×支付 + 3×退款 + 1×转账
-		Sequences:     4, // ZF/TK/ZZ/LS 各一个日期键
+		NotifyTasks:   9, // 4×支付 + 3×退款 + 1×转账 + 1×mall 演示支付回调（issue #183；mall 应用回调地址为空，投递无消费方）
+		Sequences:     4, // ZF/TK/ZZ/LS 各一个日期键（mall 订单号走 mall_sequence，不占 pay_sequence）
 	}
 	if first != want {
 		t.Fatalf("pay 演示数据行数不符：\n got %+v\nwant %+v", first, want)
@@ -381,13 +381,16 @@ func assertPayDemoLedgerReplay(t *testing.T, db *gorm.DB) {
 	}
 }
 
-// assertPayDemoNotifyTasks 校验回调任务：8 行（4 支付 + 3 退款 + 1 转账），
-// 全部有待投递回调地址（make run-demo 后由回调 job 投递、demo 联动幂等应答）。
+// assertPayDemoNotifyTasks 校验回调任务：演示应用（app_id=5001）名下 8 行
+// （4 支付 + 3 退款 + 1 转账），全部有待投递回调地址（make run-demo 后由回调
+// job 投递、demo 联动幂等应答）。mall 挂单应用（5011，issue #183 mall 演示
+// 支付回调任务，回调地址为空、投递无消费方）是另一消费方的 footprint，
+// 不在本断言域（mall 演示任务由 mall_demo_integration_test.go 覆盖）。
 // 状态不断言（测试环境调度器可能已投递一轮，见文件头注释）。
 func assertPayDemoNotifyTasks(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	var tasks []paymodel.NotifyTask
-	if err := tenant.Skip(db).Order("id ASC").Find(&tasks).Error; err != nil {
+	if err := tenant.Skip(db).Order("id ASC").Find(&tasks, "app_id = ?", 5001).Error; err != nil {
 		t.Fatalf("读取回调任务: %v", err)
 	}
 	if len(tasks) != 8 {
