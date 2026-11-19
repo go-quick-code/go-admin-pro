@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -201,4 +202,150 @@ func ValidateMemberAppPassword(password string) error {
 		return xerr.BadRequest("密码不能超过 32 位")
 	}
 	return nil
+}
+
+// ---------- C 端收货地址自助（规格 §4；写入唯一入口，管理端 T1 只读）----------
+// 上限对齐芋道 member_address 默认 20 条；归属谓词 (id, user_id) 全程携带，
+// 越权/不存在统一 404 不泄露存在性（照 T6 订单越权口径）。
+
+// appAddressLimit 是单会员收货地址上限。
+const appAddressLimit = 20
+
+// AppListAddresses 我的地址列表（默认置顶，上限内不分页）。
+func (s *Service) AppListAddresses(ctx context.Context, memberID int64) ([]model.MemberAddress, error) {
+	return s.repo.ListAllAddressesByUser(ctx, memberID)
+}
+
+// AppCreateAddress 新增收货地址：校验 → 上限 409 → 首地址自动默认 / 显式
+// 默认时同事务先清旧默认（互斥不变量：单会员至多一个 is_default=1）。
+func (s *Service) AppCreateAddress(ctx context.Context, memberID int64, req *dto.AppAddressSaveReq) (*model.MemberAddress, error) {
+	if err := ValidateAddressInput(req.ReceiverName, req.ReceiverMobile, req.Province, req.City, req.District, req.Detail); err != nil {
+		return nil, err
+	}
+	count, err := s.repo.CountAddressesByUser(ctx, memberID)
+	if err != nil {
+		return nil, err
+	}
+	if count >= appAddressLimit {
+		return nil, xerr.Conflict(fmt.Sprintf("收货地址最多 %d 条，请先删除不需要的地址", appAddressLimit))
+	}
+	isDefault := req.IsDefault
+	if count == 0 {
+		isDefault = 1 // 首地址强制默认：结算页默认地址语义需要非空集
+	}
+	row := &model.MemberAddress{
+		UserID:         memberID,
+		ReceiverName:   req.ReceiverName,
+		ReceiverMobile: req.ReceiverMobile,
+		Province:       req.Province,
+		City:           req.City,
+		District:       req.District,
+		Detail:         req.Detail,
+		IsDefault:      isDefault,
+	}
+	err = s.repo.Transaction(ctx, func(tx *mallrepo.Repository) error {
+		if isDefault == 1 {
+			if err := tx.ClearDefaultAddress(ctx, memberID); err != nil {
+				return err
+			}
+		}
+		return tx.CreateAddress(ctx, row)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// AppUpdateAddress 更新收货地址：归属 404 → 校验 → 置默认时同事务清旧默认
+// → 白名单列更新（is_default=0 的更新不清他人默认位——谓词只打本行）。
+func (s *Service) AppUpdateAddress(ctx context.Context, memberID, id int64, req *dto.AppAddressSaveReq) error {
+	if err := ValidateAddressInput(req.ReceiverName, req.ReceiverMobile, req.Province, req.City, req.District, req.Detail); err != nil {
+		return err
+	}
+	if _, err := s.findAppAddress(ctx, memberID, id); err != nil {
+		return err
+	}
+	fields := map[string]any{
+		"receiver_name":   req.ReceiverName,
+		"receiver_mobile": req.ReceiverMobile,
+		"province":        req.Province,
+		"city":            req.City,
+		"district":        req.District,
+		"detail":          req.Detail,
+	}
+	return s.repo.Transaction(ctx, func(tx *mallrepo.Repository) error {
+		if req.IsDefault == 1 {
+			if err := tx.ClearDefaultAddress(ctx, memberID); err != nil {
+				return err
+			}
+			fields["is_default"] = 1
+		}
+		rows, err := tx.UpdateAddressFields(ctx, memberID, id, fields)
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return xerr.NotFound("收货地址不存在")
+		}
+		return nil
+	})
+}
+
+// AppSetDefaultAddress 设默认地址：归属 404 → 同事务清旧默认 + 置本行
+// （0 行 = 并发删除，报不存在）。
+func (s *Service) AppSetDefaultAddress(ctx context.Context, memberID, id int64) error {
+	if _, err := s.findAppAddress(ctx, memberID, id); err != nil {
+		return err
+	}
+	return s.repo.Transaction(ctx, func(tx *mallrepo.Repository) error {
+		if err := tx.ClearDefaultAddress(ctx, memberID); err != nil {
+			return err
+		}
+		rows, err := tx.SetDefaultAddressByID(ctx, memberID, id)
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return xerr.NotFound("收货地址不存在")
+		}
+		return nil
+	})
+}
+
+// AppDeleteAddress 删除收货地址：归属 404 → 软删（0 行 = 并发删除同答）；
+// 删的是默认地址且仍有剩余时自动顶位最早一条（结算页「默认地址」语义需要
+// 非空集，同事务保证）。
+func (s *Service) AppDeleteAddress(ctx context.Context, memberID, id int64) error {
+	row, err := s.findAppAddress(ctx, memberID, id)
+	if err != nil {
+		return err
+	}
+	wasDefault := row.IsDefault == 1
+	rows, err := s.repo.DeleteAddressByID(ctx, memberID, id)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return xerr.NotFound("收货地址不存在")
+	}
+	if wasDefault {
+		if _, err := s.repo.PromoteOldestAddress(ctx, memberID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// findAppAddress 归属校验：地址不存在/跨会员/跨租户统一 404（租户插件隔离
+// + user_id 比对双防线——插件漏登记 member_address 时不静默放行）。
+func (s *Service) findAppAddress(ctx context.Context, memberID, id int64) (*model.MemberAddress, error) {
+	row, err := s.repo.FindAddressByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil || row.UserID != memberID {
+		return nil, xerr.NotFound("收货地址不存在")
+	}
+	return row, nil
 }

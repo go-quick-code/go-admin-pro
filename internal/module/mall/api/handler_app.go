@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -177,4 +178,103 @@ func (h *Handler) AppGetProductSPU(c *gin.Context) {
 		return
 	}
 	response.OK(c, row)
+}
+
+// ---------- C 端收货地址（T6 补口：规格 §4 C 端地址维护；写入唯一入口）----------
+
+// AppListAddresses GET /mall/app/address——我的地址（默认置顶）。
+func (h *Handler) AppListAddresses(c *gin.Context) {
+	principal, ok := authn.From(c.Request.Context())
+	if !ok {
+		response.Abort(c, xerr.Unauthorized(service.MemberTokenUnauthorizedMsg))
+		return
+	}
+	list, err := h.svc.AppListAddresses(c.Request.Context(), principal.UserID)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, list)
+}
+
+// AppCreateAddress POST /mall/app/address——新增（首地址自动默认）。
+func (h *Handler) AppCreateAddress(c *gin.Context) {
+	principal, ok := authn.From(c.Request.Context())
+	if !ok {
+		response.Abort(c, xerr.Unauthorized(service.MemberTokenUnauthorizedMsg))
+		return
+	}
+	var req dto.AppAddressSaveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, xerr.BadRequest("参数错误"))
+		return
+	}
+	row, err := h.svc.AppCreateAddress(c.Request.Context(), principal.UserID, &req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, row)
+}
+
+// AppUpdateAddress PUT /mall/app/address/:id——更新。
+func (h *Handler) AppUpdateAddress(c *gin.Context) {
+	principal, ok := authn.From(c.Request.Context())
+	if !ok {
+		response.Abort(c, xerr.Unauthorized(service.MemberTokenUnauthorizedMsg))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.Fail(c, xerr.BadRequest("地址 ID 不合法"))
+		return
+	}
+	var req dto.AppAddressSaveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, xerr.BadRequest("参数错误"))
+		return
+	}
+	if err := h.svc.AppUpdateAddress(c.Request.Context(), principal.UserID, id, &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+// AppSetDefaultAddress PUT /mall/app/address/:id/default——设默认（互斥清旧）。
+func (h *Handler) AppSetDefaultAddress(c *gin.Context) {
+	principal, ok := authn.From(c.Request.Context())
+	if !ok {
+		response.Abort(c, xerr.Unauthorized(service.MemberTokenUnauthorizedMsg))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.Fail(c, xerr.BadRequest("地址 ID 不合法"))
+		return
+	}
+	if err := h.svc.AppSetDefaultAddress(c.Request.Context(), principal.UserID, id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+// AppDeleteAddress DELETE /mall/app/address/:id——删除（软删）。
+func (h *Handler) AppDeleteAddress(c *gin.Context) {
+	principal, ok := authn.From(c.Request.Context())
+	if !ok {
+		response.Abort(c, xerr.Unauthorized(service.MemberTokenUnauthorizedMsg))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.Fail(c, xerr.BadRequest("地址 ID 不合法"))
+		return
+	}
+	if err := h.svc.AppDeleteAddress(c.Request.Context(), principal.UserID, id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
 }

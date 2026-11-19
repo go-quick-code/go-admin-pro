@@ -89,3 +89,26 @@ func ValidateLevelExperience(experience int) error {
 	}
 	return nil
 }
+
+// ValidateAddressInput 校验收货地址输入（C 端新增/更新共用，规格 §3.1
+// member_address 列宽口径）：四项省市县+详址非空且不超列宽，联系人/手机号
+// 同宽；手机号复用会员 mobile 规则（同一 C 端身份标识，口径不分叉）。
+func ValidateAddressInput(receiverName, receiverMobile, province, city, district, detail string) error {
+	if len([]rune(receiverName)) == 0 || len([]rune(receiverName)) > 64 {
+		return xerr.BadRequest("联系人姓名必填且不超过 64 字")
+	}
+	if err := ValidateMemberMobile(receiverMobile); err != nil {
+		return err
+	}
+	for _, v := range []struct{ label, val string }{
+		{"省份", province}, {"城市", city}, {"区县", district},
+	} {
+		if len([]rune(v.val)) == 0 || len([]rune(v.val)) > 64 {
+			return xerr.BadRequest(v.label + "必填且不超过 64 字")
+		}
+	}
+	if len([]rune(detail)) == 0 || len([]rune(detail)) > 255 {
+		return xerr.BadRequest("详细地址必填且不超过 255 字")
+	}
+	return nil
+}

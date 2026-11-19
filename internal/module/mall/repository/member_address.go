@@ -61,3 +61,58 @@ func (r *Repository) FindAddressByID(ctx context.Context, id int64) (*model.Memb
 	}
 	return &row, nil
 }
+
+// ---------- C 端自助写入（issue #178/T6 补口：规格 §4 C 端地址维护；
+// 管理端 T1 只读，写入唯一入口在 C 端 service 层）----------
+
+// CountAddressesByUser 返回会员地址数量（C 端新增上限校验用）。
+func (r *Repository) CountAddressesByUser(ctx context.Context, userID int64) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.MemberAddress{}).
+		Where("user_id = ?", userID).Count(&n).Error
+	return n, err
+}
+
+// CreateAddress 新增地址；is_default 由 service 在事务内先清旧默认再写入。
+func (r *Repository) CreateAddress(ctx context.Context, row *model.MemberAddress) error {
+	return r.db.WithContext(ctx).Create(row).Error
+}
+
+// UpdateAddressFields 按 (id, user_id) 谓词更新字段（map 键即白名单，由
+// service 从校验后的请求构造；越权/不存在返回 0 行）。软删行由 gorm
+// DeletedAt 谓词天然排除。
+func (r *Repository) UpdateAddressFields(ctx context.Context, userID, id int64, fields map[string]any) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.MemberAddress{}).
+		Where("id = ? AND user_id = ?", id, userID).Updates(fields)
+	return res.RowsAffected, res.Error
+}
+
+// ClearDefaultAddress 清掉该会员的全部默认位（设新默认前的同事务前置）。
+func (r *Repository) ClearDefaultAddress(ctx context.Context, userID int64) error {
+	return r.db.WithContext(ctx).Model(&model.MemberAddress{}).
+		Where("user_id = ? AND is_default = 1", userID).
+		Update("is_default", 0).Error
+}
+
+// SetDefaultAddressByID 按 (id, user_id) 谓词置默认（0 行 = 越权/不存在）。
+func (r *Repository) SetDefaultAddressByID(ctx context.Context, userID, id int64) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.MemberAddress{}).
+		Where("id = ? AND user_id = ?", id, userID).Update("is_default", 1)
+	return res.RowsAffected, res.Error
+}
+
+// DeleteAddressByID 按 (id, user_id) 谓词软删（0 行 = 越权/不存在）。
+func (r *Repository) DeleteAddressByID(ctx context.Context, userID, id int64) (int64, error) {
+	res := r.db.WithContext(ctx).Delete(&model.MemberAddress{}, "id = ? AND user_id = ?", id, userID)
+	return res.RowsAffected, res.Error
+}
+
+// PromoteOldestAddress 删除默认地址后的自动顶位：把剩余地址中最早一条置为
+// 默认（结算页「默认地址」语义需要非空集；0 行 = 无剩余地址，合法终态）。
+func (r *Repository) PromoteOldestAddress(ctx context.Context, userID int64) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.MemberAddress{}).
+		Where("user_id = ?", userID).
+		Order("id ASC").Limit(1).
+		Update("is_default", 1)
+	return res.RowsAffected, res.Error
+}
