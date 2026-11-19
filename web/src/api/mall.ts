@@ -1,9 +1,24 @@
 import request from '@/utils/request'
+import { downloadExcel } from '@/utils/download'
 
 // mall 会员域 API（issue #174/#175，docs/mall-mvp-spec.md §4/§5）：管理端
 // 会员/等级/地址/积分。商品/交易域与 C 端端点随 T3/T5 追加。
 // 积分余额只经后端唯一入账入口变动（ApplyPointChange）：前端只有「调整」
 // 触发端（adjustMemberPoint），不存在任何直改余额的接口。
+
+// ---------- Excel 导出（spec §1 第 8 步，PR #184 审查补票） ----------
+// 三个管理列表导出返回 xlsx 二进制（responseType: blob，照 pay.ts 先例），
+// 复用列表筛选与租户隔离口径；权限码 mall:<entity>:export（后端 403 由
+// 拦截器提示）。
+export function exportMembers(params?: Record<string, any>) {
+  return downloadExcel('/mall/member/export-excel', params)
+}
+export function exportProductSPUs(params?: Record<string, any>) {
+  return downloadExcel('/mall/product/spu/export-excel', params)
+}
+export function exportTradeOrders(params?: Record<string, any>) {
+  return downloadExcel('/mall/trade/order/export-excel', params)
+}
 
 // ---------- 会员（mall:member:*） ----------
 // mobile 租户内唯一（后端撞键 409）；password 选填（空 = 不设/不改密码，
