@@ -17,7 +17,8 @@ import (
 // 会员中心 900 段菜单 + 「普通会员」等级种子一行 + 商品 910 段菜单 +
 // 交易 920 段菜单（issue #180，T7）；
 // 支付联动种子（issue #181，T8）：mall 挂单支付应用（app_key=mall，
-// 5011）+ mock/wallet 渠道绑定（5012/5013），基础种子常驻（文件尾）。
+// 5011）+ mock 渠道绑定（5012），基础种子常驻（文件尾）。wallet 渠道
+// 刻意不绑（run-11 安全审计 C1 HIGH 止血，见 seedMallPayApp 注释）。
 //
 // 菜单（spec §5「9xx 段——900 会员中心（member/level/address 页）、910 商品
 //（category/brand/property/spu 页）、920 交易订单（order 页）」）：
@@ -119,21 +120,39 @@ func seedMemberLevel(db *gorm.DB) error {
 
 // mall 支付联动种子固定 ID（issue #181，T8）：5011 段位模式照 pay_demo.go
 // 的 payDemoAppID 5001 段（应用 5001/绑定 5001–5002），mall 取相邻 5011 段
-// （应用 5011 + 绑定 5012/5013）——开工前已 grep seed 确认 501x 未被占用。
-// 与 CRM 1001/OA 2001/ERP 3001+4001/pay 5001 段错开。
+// （应用 5011 + 绑定 5012；5013 为 wallet 绑定预留 ID，当前不落行）——开工
+// 前已 grep seed 确认 501x 未被占用。与 CRM 1001/OA 2001/ERP 3001+4001/
+// pay 5001 段错开。
 const (
 	// mallPayAppID 是 mall 挂单支付应用（app_key=mall，service.MallPayAppKey
 	// 的建单定位键）。
 	mallPayAppID int64 = 5011
-	// mallPayAppChannelMockID/mallPayAppChannelWalletID 是 mall 应用的
-	// mock/wallet 渠道绑定（C 端发起支付的渠道域）。
-	mallPayAppChannelMockID   int64 = 5012
+	// mallPayAppChannelMockID 是 mall 应用的 mock 渠道绑定（C 端发起支付的
+	// 渠道域，当前唯一绑定）。
+	mallPayAppChannelMockID int64 = 5012
+	// mallPayAppChannelWalletID 是 wallet 渠道绑定的预留 ID（当前不落行）：
+	// run-11 安全审计 C1 止血——mall 应用不再绑定 wallet（根因与实证链见
+	// seedMallPayApp 注释）；pay_demo 哨兵排除清单仍引用本 ID（排除断言
+	// 对未落行的预留 ID 恒真，根因修复开放 wallet 绑定时复用该段位）。
 	mallPayAppChannelWalletID int64 = 5013
 )
 
 // seedMallPayApp 写入 mall 挂单支付应用与渠道绑定（issue #181，T8；默认
-// 租户 ID=1，mock/wallet 双绑定）：支付联动是 mall 的常驻能力（非演示数据），
+// 租户 ID=1，仅 mock 绑定）：支付联动是 mall 的常驻能力（非演示数据），
 // 基础种子写入（seed.Run，GAP_SEED_DEMO 之外）。
+//
+// **wallet 渠道刻意不绑（run-11 安全审计 C1 HIGH 止血）**。C1 实证链：
+// mall C 端委托主体只有数值 UserID（member_user.id，见 trade_pay.go
+// delegateMemberCtx），而 pay 钱包归属与本人订单校验只在
+// (tenant_id, user_id, user_type=admin) 单一命名空间解析（PayByWallet
+// 硬编码 WalletUserTypeAdmin，pay_wallet UNIQUE(tenant_id,user_id,
+// user_type)）——member_user.id 与 system_user.id 是两套自增序列却共用
+// 数值空间（全新库 admin=1 与首个注册会员=1 确定性碰撞），绑定 wallet 即
+// 任何 C 端会员可花掉同号系统用户充值所得的钱包余额（探针 A 实证：admin
+// 充值 ¥100 后会员 id=1 经 wallet 支付 ¥30 成功，admin 域钱包 100→70）。
+// 根因修复需 pay 侧 user_type 三元组改造（WalletUserTypeMember=1 模型层
+// 已预留），follow-up 晨审（spec §7 裁决 9）；MVP 以种子止血：mall 应用
+// 只绑 mock，wallet 渠道对 mall 应用发起即 409「渠道未绑定」。
 //
 // 幂等守卫是行级哨兵（pay_app 存在 app_key=mall 行即跳过），不是「表空才
 // 插」：pay_app 同时承载 pay 演示应用（pay_demo.go，5001），基础种子先行
@@ -159,7 +178,7 @@ func seedMallPayApp(db *gorm.DB) error {
 		AppKey:     mallservice.MallPayAppKey,
 		Name:       "商城应用",
 		Status:     paymodel.StatusEnable,
-		Remark:     "mall 交易订单挂单应用（issue #181 种子）：C 端发起支付的建单定位键，绑定 mock/wallet",
+		Remark:     "mall 交易订单挂单应用（issue #181 种子）：C 端发起支付的建单定位键，绑定 mock（wallet 待会员钱包域落地后开放，见审计 C1）",
 	}
 	if err := tenant.Skip(db).Create(&app).Error; err != nil {
 		return fmt.Errorf("seed mall pay app: %w", err)
@@ -171,12 +190,10 @@ func seedMallPayApp(db *gorm.DB) error {
 			AppID:       mallPayAppID,
 			ChannelCode: paychannel.CodeMock,
 		},
-		{
-			BaseEntity:  paymodel.BaseEntity{ID: mallPayAppChannelWalletID},
-			TenantID:    1,
-			AppID:       mallPayAppID,
-			ChannelCode: paychannel.CodeWallet,
-		},
+		// wallet 绑定行（5013）刻意不写：run-11 审计 C1 止血——mall 委托
+		// 主体（数值 member_user.id）与 pay 钱包 admin 域键空间共号，绑定
+		// 即会员可花同号系统用户的钱包余额。根因修复（pay 侧 user_type
+		// 三元组改造）后在此恢复绑定并复用预留 ID 5013。
 	}
 	if err := tenant.Skip(db).Create(&bindings).Error; err != nil {
 		return fmt.Errorf("seed mall pay app channels: %w", err)

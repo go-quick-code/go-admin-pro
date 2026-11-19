@@ -92,7 +92,7 @@ func TestIntegrationPayDemoSeed(t *testing.T) {
 	first := countPayDemo(t, env.DB)
 	want := payDemoCounts{
 		Apps:          2, // 演示应用（app_key=demo）+ mall 挂单应用（issue #181 基础种子常驻）
-		AppChannels:   4, // 演示 mock+wallet 绑定 + mall 应用 mock+wallet 绑定
+		AppChannels:   3, // 演示 mock+wallet 绑定 + mall 应用 mock 绑定（run-11 审计 C1 止血：mall 不绑 wallet）
 		Packages:      2, // 套餐 50+5 / 100+15
 		DemoOrders:    3, // 2 笔已支付（其一全额退款）+ 1 笔待支付
 		DemoWithdraws: 3, // 1 笔审批转账成功 + 2 笔等待审批
