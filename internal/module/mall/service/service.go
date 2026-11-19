@@ -46,6 +46,10 @@ type Service struct {
 	// 反向注册（pay 对 mall 零依赖，只持函数值）。未注入时支付端点 500
 	//（paySvcReady 防御，fail-closed）。
 	paySvc *payservice.Service
+	// tenants 是启用租户清单来源（issue #182，T9 超时关单 job 的跨租户迭代
+	// 数据源）：app 装配期经 SetTenantLister 注入（system Service 直接满足
+	// TenantLister 窄接口，照 pay 同型）。未注入时 job 报错拒跑（fail-closed）。
+	tenants TenantLister
 }
 
 // New 创建 mall Service。

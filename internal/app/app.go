@@ -450,6 +450,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	//     pay 侧零改动（既有扩展点），pay 对 mall 保持零依赖（只持函数值）。
 	mallSvc.SetPaySvc(paySvc)
 	paySvc.SetOrderSuccessHandler(mallSvc.HandlePaySuccess)
+	// 超时关单 job 的租户清单（issue #182，T9）：跨租户逐租户扫描（照 pay
+	// SetTenantLister 模式——system Service 直接满足 mallservice.TenantLister
+	// 窄接口），未注入 job 拒跑 fail-closed。
+	mallSvc.SetTenantLister(sysSvc)
 	mallAPI := mallapi.New(mallSvc, sysAPI.RequirePermission, cfg.Location())
 
 	// 定时任务绑定表（ADR 0024 补遗）：键 = 处理器名常量（与 seed.JobSpecs
@@ -545,13 +549,27 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 				"tenants", result.Tenants, "closed", result.Closed)
 			return nil
 		},
+		// 商城订单超时关闭任务（issue #182，mall spec §1 第 7 条）：系统级
+		// handler（跨租户逐租户，照 pay 超时关单模式），infra_job 种子默认行
+		// 每 5 分钟一次（与 pay 超时关单同 cron）。扫描待支付超 15 分钟的订单
+		//（status=0 且 created_at < businessNow−15min）同事务条件更新置 40
+		// 已关闭 + 回补库存；已支付/已取消/已关闭不受影响（终态无出边）。
+		mallservice.OrderTimeoutCloseJobHandlerName: func(ctx context.Context, param string) error {
+			result, err := mallSvc.RunOrderTimeoutClose(ctx)
+			if err != nil {
+				return err
+			}
+			slog.Info("mall order timeout close job finished",
+				"tenants", result.Tenants, "closed", result.Closed)
+			return nil
+		},
 	}
 
 	// 按规格注册执行闭包（ADR 0024 补遗）：规格与绑定以同一常量为键——
 	// 先 fail-closed 校验绑定齐全（键缺失或值为 nil 都算缺失：nil 执行体
 	// 会在 cron 首触发时 panic，须在装配期拦截；缺绑定即拒启，纯函数检查
 	// 由 app 包单测覆盖），再按规格 System 标志分派普通/系统级注册。
-	// System 标志逐条对应重构前现状（demoJob=false、其余 6 条=true）：租户
+	// System 标志：demoJob=false，其余规格（含 mall 超时关单）=true：租户
 	// 可见性过滤与调度二次防线读同一张系统级注册表，行为不变。孤儿绑定
 	//（绑定无规格）与规格外直注（如 cleanLogs 的「注册-不种子」）都不校验——
 	// 后者是合法状态（管理员按需建任务行）。
