@@ -51,7 +51,7 @@
         <el-descriptions-item label="状态">
           <el-tag :type="statusTagType(detail.status, statusTagMap)" size="small">
             {{ statusLabel(detail.status) }}
-          </el-descriptions-item>
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="会员 ID">{{ detail.userId }}</el-descriptions-item>
         <el-descriptions-item label="下单时间">{{ formatTime(detail.createTime) }}</el-descriptions-item>
