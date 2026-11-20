@@ -246,6 +246,14 @@ func (s *Service) orderSubject(ctx context.Context, orderID int64) string {
 //  1. 定位 mall 订单：pay_order.merchant_order_id = SO 单号（建单时写入）。
 //     查不到 = 非 mall 消费方的 pay 单（充值/示例订单等）→ 无联动返回 nil
 //     （照充值 handler 对非充值单的跳过口径）。
+//     1.5 应用与金额绑定（run-11 安全审计 C2 修复）：定位键 merchant_order_id
+//     单独不足以确立「这笔支付对应这笔订单」——pay 的建单/发起面只挂登录
+//     且幂等键是 (app_id, merchant_order_id)，换一个 mock 绑定应用即可用
+//     受害者的 SO 号以任意金额（¥0.01）建单、本人发起、回调成功（探针 B
+//     实证：受害订单被低价认领已支付、积分全额入账）。故两个绑定缺一不可：
+//     pay 单所属应用的 app_key 必须等于 MallPayAppKey（与种子同源），且
+//     pay 单金额与 mall 订单 pay_money 分值一致；任一不符返回 error 整笔
+//     支付认领事务回滚（pay 单留待支付，由 pay 超时关单收口）。
 //  2. 守卫：mall 订单必须仍待支付（status=0）。已取消/已关闭/已支付 →
 //     返回 error 使整笔支付认领事务回滚——pay 订单认领/extension/回调任务
 //     一并回滚，pay 单回到待支付；wallet 渠道扣款与认领同事务（pay 渠道
@@ -281,6 +289,20 @@ func (s *Service) HandlePaySuccess(ctx context.Context, tx *payrepo.Repository, 
 	if mallOrder == nil {
 		// 非 mall 订单（充值/示例等消费方）：无联动。
 		return nil
+	}
+	// 步骤 1.5 应用与金额绑定（run-11 审计 C2 修复，语义见函数头）：SO 号
+	// 定位之后补「应用归属 + 金额一致」两个绑定，定位键升级为
+	// 「应用 + 单号 + 金额」三元一致。应用行经同一 pay 事务读（FindAppByID
+	// ——mall→pay 单向依赖的既有 repo 消费面）。
+	app, err := tx.FindAppByID(ctx, order.AppID)
+	if err != nil {
+		return err
+	}
+	if app == nil || app.AppKey != MallPayAppKey {
+		return xerr.Conflict("支付单不属于商城应用，支付联动中止：" + order.MerchantOrderID)
+	}
+	if order.Price.Cents() != mallOrder.PayMoney.Cents() {
+		return xerr.Conflict("支付单金额与商城订单实付不一致，支付联动中止：" + mallOrder.No)
 	}
 	// 守卫（步骤 2）：非待支付一律拒绝联动、整笔回滚（语义见函数头）。
 	if mallOrder.Status != model.TradeOrderStatusPending {

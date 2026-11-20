@@ -101,7 +101,7 @@ C 端（公开组 `/mall/app/*`，Bearer 会员令牌，限速）：
 
 ## 6. 验收
 
-- `make check` 全绿；`make verify-migration` 空库迁移往返（130 表）+ 启动冒烟。
+- `make check` 全绿；`make verify-migration` 空库迁移往返（131 表）+ 启动冒烟。
 - 集成测试（真实 router + MySQL，独立库）：会员注册/登录/令牌失败矩阵；积分唯一入账（并发调整不重不漏、非负）；商品上下架购买边界；下单扣库存（并发下单不超卖）；支付联动（mock 回调 → 订单已支付 + 积分入账 + 库存已扣）；取消/关单回补；超时关单 job（GAP 时钟缝同款拨钟手法——mall 复用 pay 的 `SetBusinessClock`？否：mall 自建包级写缝照 pay 形态，或 job 直接扫 DB 时间字段用拨钟？——**照 pay 先例建 mall `SetBusinessClock` atomic.Value 缝**，注释对齐）；越权矩阵（会员 A 操作会员 B 资源 404/403）。
 - 401 探测网与 prefixes 在场测试随新组自动覆盖（/mall 加入 prefixes 列表）。
 - 全量集成 `-p 1` 零 FAIL；CI 四项绿。
@@ -112,7 +112,9 @@ C 端（公开组 `/mall/app/*`，Bearer 会员令牌，限速）：
 2. **C 端身份 = 模块内 HMAC 令牌自校验**（公开组 + handler 内校验），不动 router 组结构；完整 member 认证中间件/多端点体系留后续。
 3. **下单扣库存**（非支付扣），避免收款后库存死结；超卖防线 = 行锁条件 UPDATE。
 4. **支付联动 = pay `SetOrderSuccessHandler` 第二消费方**，同事务置已支付 + 积分入账；pay 侧零改动。
+   **修订（PR #184 审查留痕）**：取消待支付订单**不作废**在途 pay 单——C 端/管理端取消与超时关单均只动 mall 订单，pay 单保持待支付。收口双保险：① 取消后到达的支付成功回调被 `HandlePaySuccess` 状态守卫拒绝（订单非待支付即返回 error，整笔支付认领事务回滚，wallet 渠道扣款随事务返还）；② 残留的待支付 pay 单由 pay 自身超时关单 job 按过期时间关闭。窗口内资金一致性分析见 `internal/module/mall/service/trade_pay.go` 文件头「取消联动口径」与 HandlePaySuccess 守卫注释。这是 pay 导出面无 Close/Void 入口、「pay 侧零改动」约束下的唯一选择（票 #181 验收项「取消作废在途单」按本修订口径执行，对应集成测试 `TestIntegrationTradePayIdempotentAndCancelGuard` 断言守卫回滚而非作废）。
 5. **mall 依赖 payservice 单向**（平台能力域消费，非业务套件打通）。
 6. **积分 = 支付成功按实付入账**（point_per_yuan 配置），无过期/清零。
 7. **菜单 9xx 段**（900/910/920），迁移号 00040 起，EXPECTED_TABLES 116→131（T6 实建口径修正，补 mall_sequence）。
 8. **postage/discount 字段预留恒 0**；省市区存文本不联动 system_area。
+9. **委托主体身份域（run-11 审计 C1 根因）follow-up**：mall C 端委托主体只携带数值 UserID（`member_user.id`，见 `trade_pay.go delegateMemberCtx`），而 pay 钱包归属与本人订单校验只在 (tenant_id, user_id, user_type=admin) 单一命名空间解析——member_user.id 与 system_user.id 是两套自增序列却共用数值空间（全新库 admin=1 与首个注册会员=1 确定性碰撞），mall 应用绑定 wallet 渠道即成「会员花掉同号系统用户钱包余额」的跨主体扣款通路（探针 A 实证）。**根因修复**需 pay 侧 user_type 三元组改造（`WalletUserTypeMember=1` 模型层已预留：委托主体显式携带身份域，PayByWallet/CreateOrder/GetCashierOrder/SubmitOrder 按三元组定位），follow-up 晨审立项；**MVP 止血**以种子收口——mall 应用只绑 mock（`seed/mall.go seedMallPayApp`，wallet 绑定行 5013 预留不落行），wallet 渠道对 mall 订单发起即 409「应用未绑定该渠道」。配套：`HandlePaySuccess` 补「应用 + 金额」绑定（审计 C2，定位键升级为 app_key=mall + SO 号 + 金额三元一致）。

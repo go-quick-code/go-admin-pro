@@ -39,6 +39,14 @@ const appLoginBizCode = 1004
 // appLoginFailedMsg 是登录失败的统一文案（不泄露存在性）。
 const appLoginFailedMsg = "账号或密码错误"
 
+// appLoginDummyHash 是固定 dummy bcrypt 哈希（原文 "mall-app-login-dummy"，
+// DefaultCost 与 AppRegister 的哈希成本一致）：mobile 不存在时对它空跑一次
+// CompareHashAndPassword 再回失败——登录响应的耗时口径与「账号存在但密码
+// 错」恒等（真实路径是 bcrypt 比对，无 dummy 时不存在号直接短路返回，响应
+// 时间差即 mobile 存在性枚举侧信道；恒时口径抹平该差，PR #184 审查 H1）。
+// 常量固定而非运行时生成：启动成本为零，且哈希内容无保密需求（比对必败）。
+const appLoginDummyHash = "$2a$10$/DOhY1x8/FaDAD7JIBIwF.cOgiwAi.8yT1hXJS79eccRSbKmWMwEK"
+
 // AppRegister C 端注册（POST /mall/app/auth/register）：mobile/password/
 // nickname → 自动建 member_user（status 启用，point_balance 0）+ 默认等级
 // 「普通会员」（租户内 level=1 的启用等级，spec §3.1 种子行；无该行时落 0
@@ -94,6 +102,12 @@ func (s *Service) AppRegister(ctx context.Context, req *dto.AppRegisterReq) (*dt
 // 未设密码 / 会员停用四种形态同答（HTTP 200 + 业务码 1004，照 system login
 // 信封）——停用会员若回「账号已停用」即泄露存在性，统一文案下停用与密码
 // 错误不可区分。
+//
+// 恒时口径：mobile 不存在也做一次等成本 bcrypt 比对（appLoginDummyHash，
+// DefaultCost 与真实哈希一致）——文案统一防的是响应内容侧信道，dummy 比对
+// 防的是响应耗时侧信道，两者互补（PR #184 审查 H1）。空密码哈希（管理端
+// 建号未设密）不 dummy 空跑：显式短路，与真实「密码错误」路径的耗时差被
+// 限速（注册/登录 10 次/分/IP）压在不构成实用枚举信号的程度。
 func (s *Service) AppLogin(ctx context.Context, req *dto.AppLoginReq) (*dto.AppAuthResp, error) {
 	ctx = tenant.WithTenantID(ctx, tenant.DefaultID)
 	mobile := trimString(req.Mobile)
@@ -102,6 +116,8 @@ func (s *Service) AppLogin(ctx context.Context, req *dto.AppLoginReq) (*dto.AppA
 		return nil, err
 	}
 	if row == nil {
+		// 不存在号：dummy 哈希空跑等成本比对后同答（恒时口径，见函数头）。
+		_ = bcrypt.CompareHashAndPassword([]byte(appLoginDummyHash), []byte(req.Password))
 		return nil, xerr.Business(appLoginBizCode, appLoginFailedMsg)
 	}
 	if row.PasswordHash == "" {
@@ -315,26 +331,31 @@ func (s *Service) AppSetDefaultAddress(ctx context.Context, memberID, id int64) 
 
 // AppDeleteAddress 删除收货地址：归属 404 → 软删（0 行 = 并发删除同答）；
 // 删的是默认地址且仍有剩余时自动顶位最早一条（结算页「默认地址」语义需要
-// 非空集，同事务保证）。
+// 非空集）。删除与顶位包进同一事务（照 AppSetDefaultAddress 形状）——两步
+// 是「默认地址互斥不变量」的原子迁移：非事务下删除与顶位之间出错、或与
+// 并发 AppSetDefaultAddress 交错，可出现「会员无默认地址」或两个
+// is_default=1，结算页默认地址取值随之漂移（PR #184 审查 P2）。
 func (s *Service) AppDeleteAddress(ctx context.Context, memberID, id int64) error {
 	row, err := s.findAppAddress(ctx, memberID, id)
 	if err != nil {
 		return err
 	}
 	wasDefault := row.IsDefault == 1
-	rows, err := s.repo.DeleteAddressByID(ctx, memberID, id)
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return xerr.NotFound("收货地址不存在")
-	}
-	if wasDefault {
-		if _, err := s.repo.PromoteOldestAddress(ctx, memberID); err != nil {
+	return s.repo.Transaction(ctx, func(tx *mallrepo.Repository) error {
+		rows, err := tx.DeleteAddressByID(ctx, memberID, id)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		if rows == 0 {
+			return xerr.NotFound("收货地址不存在")
+		}
+		if wasDefault {
+			if _, err := tx.PromoteOldestAddress(ctx, memberID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // findAppAddress 归属校验：地址不存在/跨会员/跨租户统一 404（租户插件隔离

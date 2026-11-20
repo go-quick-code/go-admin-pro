@@ -210,10 +210,12 @@ func payDemoChannelRegistry(ctx context.Context, repo *payrepo.Repository, svc *
 // 基础种子常驻）刻意不在哨兵内。
 //
 // mall 支付应用（issue #181，T8 基础种子 seedMallPayApp，固定 ID 5011 +
-// 绑定 5012/5013）与 pay_channel 同理是常驻配置行、非演示数据信号：
-// pay_app/pay_app_channel 两行哨兵对 mall 固定 ID 显式排除——否则基础种子
-// 先落 mall 应用行会让演示哨兵在全新库上永真、pay 演示数据在
-// GAP_SEED_DEMO=true 时整段跳过（回归）。
+// mock 绑定 5012；wallet 绑定 5013 是预留 ID 当前不落行——run-11 审计 C1
+// 止血，见 seedMallPayApp 注释）与 pay_channel 同理是常驻配置行、非演示
+// 数据信号：pay_app/pay_app_channel 两行哨兵对 mall 固定 ID 显式排除
+// （排除清单含预留 ID 5013，对未落行恒真；根因修复恢复 wallet 绑定时
+// 无需改这里）——否则基础种子先落 mall 应用行会让演示哨兵在全新库上
+// 永真、pay 演示数据在 GAP_SEED_DEMO=true 时整段跳过（回归）。
 func payDemoSkipReason(db *gorm.DB) (string, error) {
 	checks := []struct {
 		label string
@@ -240,7 +242,8 @@ func payDemoSkipReason(db *gorm.DB) (string, error) {
 		var count int64
 		q := tenant.Skip(db).Unscoped().Model(check.model)
 		if check.excludeMallSeed {
-			// 排除 mall 基础种子固定 ID 行（5011 应用 + 5012/5013 绑定）。
+			// 排除 mall 基础种子固定 ID 行（5011 应用 + 5012 绑定 + 5013
+			// wallet 预留 ID——当前不落行，排除恒真）。
 			q = q.Where("id NOT IN ?", []int64{mallPayAppID, mallPayAppChannelMockID, mallPayAppChannelWalletID})
 		}
 		if err := q.Count(&count).Error; err != nil {

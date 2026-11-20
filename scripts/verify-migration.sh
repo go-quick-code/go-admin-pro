@@ -8,7 +8,7 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=127 断言 up 后的业务表数量（默认 127；CI 继承此默认值；
+#   EXPECTED_TABLES=131 断言 up 后的业务表数量（默认 131；CI 继承此默认值；
 #                       00023 新增 system_tenant_package（system_tenant 加
 #                       package_id 列，列变更不改表数），
 #                       00026 新增 infra_api_log，

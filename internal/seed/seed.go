@@ -82,9 +82,10 @@ func Run(db *gorm.DB, withDemo bool) error {
 		return err
 	}
 	// mall 挂单支付应用种子（issue #181，T8，spec §1 第 4 条）：默认租户
-	// app_key=mall 应用 + mock/wallet 绑定，行级哨兵幂等写入（支付联动是
-	// 常驻能力，非演示数据；pay 演示哨兵对 mall 固定 ID 行显式排除，见
-	// pay_demo.go payDemoSkipReason）。
+	// app_key=mall 应用 + mock 绑定（wallet 刻意不绑——run-11 审计 C1 止血，
+	// 见 seedMallPayApp 注释），行级哨兵幂等写入（支付联动是常驻能力，非
+	// 演示数据；pay 演示哨兵对 mall 固定 ID 行显式排除，见 pay_demo.go
+	// payDemoSkipReason）。
 	if err := seedMallPayApp(db); err != nil {
 		return err
 	}

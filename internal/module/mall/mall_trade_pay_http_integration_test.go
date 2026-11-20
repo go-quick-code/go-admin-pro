@@ -7,8 +7,9 @@
 //     demo 回调测试手法——paySvc.MockNotifyOrder 服务入口，与 HTTP 端点同一
 //     代码路径）→ mall 订单 10 已支付 + pay 四列回填 + 积分按实付入账
 //     （point_per_yuan=1 默认，整数元）+ 库存已扣；
-//   - wallet 渠道扣款链：钱包预充值（paySvc.ApplyWalletChange 唯一入账入口）
-//     → 发起支付同步成功 → 余额扣减 + mall 已支付；余额不足 409 透传；
+//   - wallet 渠道对 mall 应用不可用（run-11 审计 C1 止血回归）：C 端对 mall
+//     订单发起 wallet 支付 409「应用未绑定该渠道」，同号 admin 域钱包余额
+//     分文不动（种子已止血：mall 应用只绑 mock）；
 //   - 发起支付幂等：重复发起同 pay 单（pay_order 恰 1 笔、extension 递增）；
 //   - 取消后发起支付 409 + 守卫回滚：取消后模拟支付成功回调 → 联动拒绝 →
 //     整笔支付认领事务回滚（pay 单回未支付、积分无入账、mall 订单留已取消）
@@ -286,66 +287,67 @@ func TestIntegrationTradePayMockFullChain(t *testing.T) {
 	}
 }
 
-// ---------- wallet 渠道扣款链 ----------
+// ---------- wallet 渠道不可用（run-11 审计 C1 止血回归） ----------
 
-// TestIntegrationTradePayWalletChannel wallet 渠道：预充值 → 发起支付同步
-// 成功（联动同事务置单）→ 余额扣减；余额不足 409 透传、mall 订单留待支付。
-func TestIntegrationTradePayWalletChannel(t *testing.T) {
+// TestIntegrationTradePayWalletChannelNotBound wallet 渠道对 mall 应用不可用
+// （run-11 安全审计 C1 HIGH 止血回归）：mall 委托主体只携带数值 UserID
+// （member_user.id），pay 钱包归属在 (tenant_id, user_id, user_type=admin)
+// 单一命名空间解析——member_user.id 与 system_user.id 共用数值空间，若
+// mall 应用绑定 wallet，会员即可花掉同号系统用户的钱包余额（审计探针 A
+// 实证）。种子已止血（mall 应用只绑 mock，见 seed/mall.go seedMallPayApp）：
+// C 端对 mall 订单发起 wallet 支付必须 409「应用未绑定该渠道」，且即使
+// 同号 admin 域钱包行真实存在并有余额也分文不动（无扣款、无 extension、
+// mall 订单留待支付）。
+func TestIntegrationTradePayWalletChannelNotBound(t *testing.T) {
 	env := testutil.NewIntegrationEnv(t)
 	adminToken := env.Login(t, "admin", "123456")
 	memberID, memberToken := payTestEnvMember(t, env, adminToken, "13891007002")
-	_, skuID := tradeCreateSaleableSPU(t, env, adminToken, "钱包扣款商品", "30.00", 5)
+	_, skuID := tradeCreateSaleableSPU(t, env, adminToken, "钱包不可用商品", "30.00", 5)
 	addressID := tradeInsertAddress(t, env, memberID, "收货人")
 
-	// 钱包预充值（pay 钱包唯一入账入口，余额 100）。
+	// 前置复现 C1 场景的钱包状态：memberID 数值命中的 admin 域钱包行
+	//（pay 唯一入账入口充值 ¥100——审计探针 A 同款状态）。C1 止血后该
+	// 余额对 mall 会员不可达。
 	payRechargeWallet(t, env, memberID, 10_000)
 
 	tradeAddCart(t, env, memberToken, skuID, 1)
-	order := tradeCreateOrder(t, env, memberToken, addressID, "wallet 全链")
+	order := tradeCreateOrder(t, env, memberToken, addressID, "wallet 不可用")
 	orderID := int64(order["id"].(float64))
 	soNo := order["no"].(string)
-	payFindPayOrder(t, env, soNo) // 下单即建单：wallet 发起前 pay 单已存在
+	payOrder := payFindPayOrder(t, env, soNo) // 下单即建单：发起前 pay 单已存在
 
-	// wallet 发起：同步扣款成功即支付成功（联动 handler 同事务置单）。
-	submit := paySubmitOrderPay(t, env, memberToken, orderID, "wallet", http.StatusOK)
-	if int8(submit["status"].(float64)) != 10 {
-		t.Fatalf("wallet 发起应同步成功 status=10：%s", submit)
+	// wallet 发起：409「应用未绑定该渠道」透传（pay 侧应用-渠道绑定守卫）。
+	status, api := env.Request(t, http.MethodPost,
+		"/mall/app/trade/order/"+itoa(orderID)+"/pay", memberToken,
+		map[string]any{"channelCode": "wallet"})
+	if status != http.StatusConflict || !strings.Contains(api.Msg, "应用未绑定该渠道") {
+		t.Fatalf("mall 订单 wallet 发起应 409 渠道未绑定，实际 HTTP %d code %d msg %q",
+			status, api.Code, api.Msg)
+	}
+
+	// 零副作用：admin 域钱包余额分文不动（C1 的资金面断言）、无 extension
+	//（发起事务回滚）、pay 单与 mall 订单均留待支付。
+	if got := payReadWallet(t, env, memberID).Balance.Cents(); got != 10_000 {
+		t.Fatalf("wallet 发起被拒后同号 admin 域钱包余额应分文不动（100.00），实际 %d 分", got)
+	}
+	if payCountExtensions(t, env, payOrder.ID) != 0 {
+		t.Fatalf("wallet 发起被拒不应留下 extension")
+	}
+	if got := payFindPayOrder(t, env, soNo); got.Status != paymodel.OrderStatusPending {
+		t.Fatalf("pay 单应留待支付，实际 %d", got.Status)
 	}
 	mallRow := payReadMallOrder(t, env, orderID)
-	if mallRow.Status != mallmodel.TradeOrderStatusPaid || mallRow.PayChannelCode != "wallet" ||
-		mallRow.PayTime == nil {
-		t.Fatalf("wallet 支付后 mall 订单应已支付（channel=wallet）：status=%d channel=%s",
-			mallRow.Status, mallRow.PayChannelCode)
+	if mallRow.Status != mallmodel.TradeOrderStatusPending {
+		t.Fatalf("mall 订单应留待支付，实际 %d", mallRow.Status)
 	}
-	wallet := payReadWallet(t, env, memberID)
-	if wallet.Balance.Cents() != 7000 {
-		t.Fatalf("钱包余额应扣至 70.00，实际 %s", wallet.Balance)
-	}
-	if got := payMemberPointBalance(t, env, memberID); got != 30 {
-		t.Fatalf("积分应入账 30（¥30.00），实际 %d", got)
+	if got := payMemberPointBalance(t, env, memberID); got != 0 {
+		t.Fatalf("不应有积分入账，实际 %d", got)
 	}
 
-	// 余额不足：第二单 3 件 × ¥30 = ¥90 > 余额 ¥70 → wallet 发起 409 透传
-	//（extension 回滚无部分扣款），mall 订单留待支付、钱包余额不变。
-	tradeAddCart(t, env, memberToken, skuID, 3)
-	order2 := tradeCreateOrder(t, env, memberToken, addressID, "余额不足")
-	orderID2 := int64(order2["id"].(float64))
-	soNo2 := order2["no"].(string)
-	if payFindPayOrder(t, env, soNo2).Status != paymodel.OrderStatusPending {
-		t.Fatalf("第二单 pay 单应已建且待支付")
-	}
-	status, api := env.Request(t, http.MethodPost,
-		"/mall/app/trade/order/"+itoa(orderID2)+"/pay", memberToken,
-		map[string]any{"channelCode": "wallet"})
-	if status != http.StatusConflict || !strings.Contains(api.Msg, "余额不足") {
-		t.Fatalf("余额不足应 409 透传，实际 HTTP %d code %d msg %q", status, api.Code, api.Msg)
-	}
-	mallRow2 := payReadMallOrder(t, env, orderID2)
-	if mallRow2.Status != mallmodel.TradeOrderStatusPending {
-		t.Fatalf("余额不足后 mall 订单应留待支付，实际 %d", mallRow2.Status)
-	}
-	if got := payReadWallet(t, env, memberID).Balance.Cents(); got != 7000 {
-		t.Fatalf("余额不足不应扣款，钱包应仍 70.00，实际 %d", got)
+	// mock 渠道不受影响：同单改走 mock 正常发起（渠道域只收窄到 wallet）。
+	submit := paySubmitOrderPay(t, env, memberToken, orderID, "mock", http.StatusOK)
+	if int8(submit["status"].(float64)) != 0 || submit["displayMode"] != "none" {
+		t.Fatalf("mock 发起应 status=0 displayMode=none：%s", submit)
 	}
 }
 
