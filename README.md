@@ -30,6 +30,8 @@
 - **实时推送**：SSE + WebSocket 双传输，一次性票据认证；前端按 WS → SSE → 轮询降级。
 - **OA 套件**：公告（受众/已读）、请假（类型/额度/半天粒度）、报销（明细/审批）、考勤（班次/考勤组/Web 打卡/结果派生/月度汇总）、日程、会议室预约、文档目录与 ACL；审批统一走 bpm。
 - **ERP 进销存**：产品分类/单位/产品、仓库、客户/供应商；库存账（唯一入账入口、负库存禁令、流水可重放）、其它出入库、调拨、盘点；采购订单/入库/退货与销售订单/出库/退货（挂已审核订单、进度回写）；结算账户、收款/付款核销与首页统计；十二类单据与主数据均支持 Excel 导出。
+- **支付中心**：支付应用/平台渠道、支付/退款/转账单与回调任务（重试投递）、钱包（流水可重放）与充值/示例业务；收银台按应用绑定渠道发起支付，mock 渠道支持服务端模拟回调。
+- **商城**：会员/等级/积分（唯一入账入口）、分类/品牌/属性/SPU-SKU（多规格 JSON 快照）、购物车/订单（SO 单号、下单扣库存、成交快照、超时关单）；C 端 `/mall/app/*` 会员令牌自助（注册/登录/商品/购物车/下单/支付/我的订单/积分），支付经 pay 扩展点同事务联动入账。
 - **bpm 与通知**：版本化线性审批链（角色/权限码候选池、部门负责人、转办/驳回/撤回）、通用待办、站内通知（待办/结果/公告/会议提醒）。
 - **基础设施**：本地文件存储、参数配置、Cron 定时任务（6 段表达式，支持立即执行、重试、执行日志）、API 访问日志、数据库文档、监控面板。
 - **代码生成器**：两种入口——元信息驱动的「owner-scoped 实体全栈脚手架」（model/dto/repository/service/api + 路由注册点 + 菜单/权限码种子 + 测试骨架 + ProTable 页面，配套装配说明），以及读取 `information_schema` 按表结构生成通用 CRUD 模板 ZIP；两者生成物都是起点，接入工程需按产物内说明手工放置并注册。
@@ -91,6 +93,8 @@ go-admin-pro
 │   │   ├── notify/             # 站内通知投递、未读数、已读状态、实时推送 HTTP 入口
 │   │   ├── oa/                 # 公告、请假、报销、考勤、日程、会议室、文档
 │   │   ├── erp/                # ERP 进销存（产品分类/单位/产品、库存、采购、销售、财务）
+│   │   ├── pay/                # 支付中心（应用/渠道、支付/退款/转账、回调任务、钱包、充值）
+│   │   ├── mall/               # 商城（会员/积分、分类/品牌/属性/SPU-SKU、购物车/订单，C 端 /mall/app/* 自助）
 │   │   └── codegen/            # 代码生成器
 │   └── pkg/                    # 框架能力
 │       ├── database/           # GORM 连接、迁移校验 + 多租户/审计插件
@@ -360,7 +364,7 @@ ERP 与 CRM/OA 共用同一条演示数据入口：`make run-demo` 会在 OA 演
 
 ```bash
 make migrate-up            # 建表（幂等，可重复执行）
-make run-demo              # 启动后端并写入 CRM + OA + ERP + 平台演示数据
+make run-demo              # 启动后端并写入 CRM + OA + ERP + 平台 + 支付 + 商城演示数据
 ```
 
 演示数据按表哨兵幂等：任一 ERP 主数据/单据/库存表已有行（含软删）时整段
@@ -385,7 +389,7 @@ GAP_TEST_DATABASE_DSN='root:123456@tcp(127.0.0.1:3306)/go_admin_pro_test?charset
 表结构由 `migrations/` 下的 goose SQL 管理，迁移文件会内嵌进二进制：
 
 - `make migrate-up`：按版本执行未应用的迁移，可重复执行。
-- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前全部迁移回滚等于删掉全部 100 张业务表。**
+- `make migrate-down` / `make migrate-reset`：回滚一个 / 全部版本，必须显式传 `CONFIRM=yes`。**回滚会执行 Down 段的 DROP，请先备份；当前全部迁移回滚等于删掉全部 131 张业务表。**
 - `make migrate-status`：查看每个版本的应用状态。
 - `make migrate-stamp version=1`：把结构已存在但没有迁移记录的库标记为基线版本，不执行 DDL；后续版本必须走 `migrate up`。
 - `make migrate-create name=add_xxx`：生成下一个版本的 SQL 模板。
@@ -513,6 +517,8 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | CRM（客户/联系人/跟进/商机/合同/回款/仪表盘） | `/admin-api/crm/*` |
 | OA（公告/请假/报销/考勤/日程/会议室/文档） | `/admin-api/oa/*` |
 | ERP（主数据/库存/采购/销售/财务/统计） | `/admin-api/erp/*` |
+| 支付（应用/渠道/订单/退款/转账/钱包/充值/示例业务） | `/admin-api/pay/*` |
+| 商城（会员/商品/交易管理端）+ 商城 C 端自助（公开端点，会员令牌） | `/admin-api/mall/*`、`/admin-api/mall/app/*` |
 | bpm（流程定义/待办/实例） | `/admin-api/bpm/*` |
 | 站内通知 | `/admin-api/notify/*` |
 | 代码生成 | `/admin-api/infra/codegen/*` |
@@ -527,7 +533,7 @@ curl -s "http://127.0.0.1:8080/admin-api/system/user/page?pageNo=1&pageSize=10" 
 | `app.cors.allowed-origins` | 跨域白名单：精确匹配 Origin，非白名单来源不返回 CORS 头；为空表示不放行任何跨域（可用 `GAP_CORS_ALLOWED_ORIGINS` 逗号分隔覆盖） |
 | `database.dsn` | MySQL DSN |
 | `database.seed` | 启动时写入种子数据 |
-| `database.seed-demo` | 是否写入 CRM + OA + ERP + 平台演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
+| `database.seed-demo` | 是否写入 CRM + OA + ERP + 平台 + 支付 + 商城演示数据，默认 `false`（`GAP_SEED_DEMO=true` 或 `make run-demo` 开启） |
 | `jwt.secret` / `jwt.expire` | JWT 密钥与有效期 |
 | `security.captcha.enabled` | 是否启用图形验证码 |
 | `security.login.max-fail` / `lock-duration` | 登录失败锁定策略 |

@@ -32,6 +32,11 @@ import (
 	oaapi "github.com/go-quick-code/go-admin-pro/internal/module/oa/api"
 	"github.com/go-quick-code/go-admin-pro/internal/module/oa/repository"
 	oaservice "github.com/go-quick-code/go-admin-pro/internal/module/oa/service"
+	// mall（issue #174）：会员域管理端。依赖指向平台层与 pay service（mall 是
+	// pay 的业务消费方，T4 支付联动接线；docs/mall-mvp-spec.md §2）。
+	mallapi "github.com/go-quick-code/go-admin-pro/internal/module/mall/api"
+	mallrepo "github.com/go-quick-code/go-admin-pro/internal/module/mall/repository"
+	mallservice "github.com/go-quick-code/go-admin-pro/internal/module/mall/service"
 	payapi "github.com/go-quick-code/go-admin-pro/internal/module/pay/api"
 	payrepo "github.com/go-quick-code/go-admin-pro/internal/module/pay/repository"
 	payservice "github.com/go-quick-code/go-admin-pro/internal/module/pay/service"
@@ -94,6 +99,15 @@ func (a *App) FlushAPILogs(ctx context.Context) error {
 
 // New 初始化数据库、模块与 HTTP 引擎。
 func New(cfg *config.Config, log *slog.Logger) (*App, error) {
+	// mall 会员令牌签名密钥 fail-closed（issue #178，spec §7 裁决 2）：密钥
+	// 缺失时拒绝启动——C 端 /mall/app/* 的注册/登录签发与令牌自校验全部
+	// 依赖该密钥，缺密钥等于 C 端身份体系不可用，静默降级只会把问题推迟到
+	// 首个会员请求。放在 database.Open 之前：零依赖配置事实，与「分类正确
+	// 性是 schema 事实」的 VerifyTenantTables 同一收口思路。错误信息指明
+	// mall.jwt_secret（配置键 mall.jwt-secret / 环境变量 GAP_MALL_JWT_SECRET）。
+	if strings.TrimSpace(cfg.Mall.JWTSecret) == "" {
+		return nil, fmt.Errorf("mall.jwt_secret 不能为空：C 端会员令牌签名密钥必须在配置文件（mall.jwt-secret）或环境变量 GAP_MALL_JWT_SECRET 中设置唯一强随机值")
+	}
 	db, err := database.Open(cfg.Database, log)
 	if err != nil {
 		return nil, err
@@ -417,6 +431,31 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	paySvc.SetDemoNotifyHandler(paySvc.HandleDemoNotify)
 	payAPI := payapi.New(paySvc, sysAPI.RequirePermission, cfg.Location())
 
+	// mall 装配（issue #174）：repo → service → api.New，形状对照 pay/crm
+	//（svc + requirePermission + location）。T1 会员域管理端；积分入账随 T2
+	// 的唯一入账入口接线。会员令牌签名材料（issue #178，T5）：密钥与有效期
+	// 注入 service（登录签发 + handler 自校验共用同一实现，Set* 形状照
+	// paySvc.SetNotifyHMACKey）。业务时区（issue #179，T6）：SetLocation
+	// 注入 service——SO 单号日期键的唯一口径（照 paySvc.SetLocation 先例）。
+	mallRepo := mallrepo.New(db)
+	mallSvc := mallservice.New(mallRepo)
+	mallSvc.SetLocation(cfg.Location())
+	mallSvc.SetMemberTokenAuth(cfg.Mall.JWTSecret, cfg.Mall.TokenTTL)
+	// 支付联动（issue #181，T8；spec §2 mall→pay 单向 + §7 裁决 4）：
+	//   - SetPaySvc 注入 pay Service——C 端发起支付的建单（merchant_order_id
+	//     = SO 号幂等）与 SubmitOrder 转发起（委托主体，见 service.AppPayOrder）；
+	//   - paySvc.SetOrderSuccessHandler 注册 mall 联动——pay OrderSuccessHandler
+	//     扩展点第二消费方（充值是第一，payservice.New 内置）：pay 订单认领后
+	//     同事务置 mall 订单已支付 + 积分按实付入账，任一失败整体回滚。
+	//     pay 侧零改动（既有扩展点），pay 对 mall 保持零依赖（只持函数值）。
+	mallSvc.SetPaySvc(paySvc)
+	paySvc.SetOrderSuccessHandler(mallSvc.HandlePaySuccess)
+	// 超时关单 job 的租户清单（issue #182，T9）：跨租户逐租户扫描（照 pay
+	// SetTenantLister 模式——system Service 直接满足 mallservice.TenantLister
+	// 窄接口），未注入 job 拒跑 fail-closed。
+	mallSvc.SetTenantLister(sysSvc)
+	mallAPI := mallapi.New(mallSvc, sysAPI.RequirePermission, cfg.Location())
+
 	// 定时任务绑定表（ADR 0024 补遗）：键 = 处理器名常量（与 seed.JobSpecs
 	// 引用同一常量，处理器名没有第二处字面量），值 = 执行闭包——业务服务在
 	// 装配期已就绪，闭包体自原装配点逐字迁移；demoJob 闭包自 JobScheduler
@@ -510,13 +549,27 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 				"tenants", result.Tenants, "closed", result.Closed)
 			return nil
 		},
+		// 商城订单超时关闭任务（issue #182，mall spec §1 第 7 条）：系统级
+		// handler（跨租户逐租户，照 pay 超时关单模式），infra_job 种子默认行
+		// 每 5 分钟一次（与 pay 超时关单同 cron）。扫描待支付超 15 分钟的订单
+		//（status=0 且 created_at < businessNow−15min）同事务条件更新置 40
+		// 已关闭 + 回补库存；已支付/已取消/已关闭不受影响（终态无出边）。
+		mallservice.OrderTimeoutCloseJobHandlerName: func(ctx context.Context, param string) error {
+			result, err := mallSvc.RunOrderTimeoutClose(ctx)
+			if err != nil {
+				return err
+			}
+			slog.Info("mall order timeout close job finished",
+				"tenants", result.Tenants, "closed", result.Closed)
+			return nil
+		},
 	}
 
 	// 按规格注册执行闭包（ADR 0024 补遗）：规格与绑定以同一常量为键——
 	// 先 fail-closed 校验绑定齐全（键缺失或值为 nil 都算缺失：nil 执行体
 	// 会在 cron 首触发时 panic，须在装配期拦截；缺绑定即拒启，纯函数检查
 	// 由 app 包单测覆盖），再按规格 System 标志分派普通/系统级注册。
-	// System 标志逐条对应重构前现状（demoJob=false、其余 6 条=true）：租户
+	// System 标志：demoJob=false，其余规格（含 mall 超时关单）=true：租户
 	// 可见性过滤与调度二次防线读同一张系统级注册表，行为不变。孤儿绑定
 	//（绑定无规格）与规格外直注（如 cleanLogs 的「注册-不种子」）都不校验——
 	// 后者是合法状态（管理员按需建任务行）。
@@ -568,6 +621,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		// 公开端点（demo 回调，issue #134，PR #140 补渠道回调）挂公开组——
 		// 无登录、挂 IP 限速、不记访问日志（公开组在 protected 组外，结构使然）。
 		payAPI,
+		// mall（issue #174）：统一前缀 /mall，会员域管理端起步（商品/交易路由
+		// 随 T2/T3 追加注册，C 端公开组 /mall/app/* 随 T5）。列表序在 pay 之后
+		//（spec §2：mall 是 pay 的业务消费方，注册器相对次序一致）。
+		mallAPI,
 	}
 
 	engine := router.New(cfg, backbone, registrars...)

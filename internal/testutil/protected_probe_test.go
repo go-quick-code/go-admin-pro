@@ -41,6 +41,8 @@ var protectedProbes = []struct {
 	{"message", http.MethodGet, "/message/channel/page"},
 	{"erp", http.MethodGet, "/erp/product/page"},
 	{"pay", http.MethodGet, "/pay/app/page"},
+	// mall（issue #174）：会员域管理端代表端点（GET 分页，各模块最稳选点）。
+	{"mall", http.MethodGet, "/mall/member/page"},
 }
 
 // TestIntegrationProtectedNamespaceRequiresAuth 对 10 个受保护命名空间逐一

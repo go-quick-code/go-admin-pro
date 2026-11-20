@@ -8,7 +8,7 @@
 # 依赖：bash、curl、python3、lsof、go。
 #
 # 可选：
-#   EXPECTED_TABLES=116 断言 up 后的业务表数量（默认 116；CI 继承此默认值；
+#   EXPECTED_TABLES=131 断言 up 后的业务表数量（默认 131；CI 继承此默认值；
 #                       00023 新增 system_tenant_package（system_tenant 加
 #                       package_id 列，列变更不改表数），
 #                       00026 新增 infra_api_log，
@@ -70,6 +70,26 @@
 #                       充值套餐；112→114），
 #                       00039 新增 pay_demo_order、pay_demo_withdraw
 #                       （issue #137，2 张：示例订单 + 示例提现；114→116），
+#                       00040 新增 member_user（issue #174，mall 会员域；
+#                       116→117），
+#                       00041 新增 member_level（issue #174；117→118），
+#                       00042 新增 member_address（issue #174；118→119），
+#                       00043 新增 member_point_config（issue #174；119→120），
+#                       00044 新增 member_point_record（issue #174；120→121），
+#                       00045 新增 product_category（issue #176，mall 商品域；
+#                       121→122），
+#                       00046 新增 product_brand（issue #176；122→123），
+#                       00047 新增 product_property（issue #176；123→124），
+#                       00048 新增 product_property_value（issue #176；
+#                       124→125），
+#                       00049 新增 product_spu（issue #177，mall 商品域
+#                       SPU/SKU；125→126），
+#                       00050 新增 product_sku（issue #177；126→127），
+#                       00051 新增 mall_sequence（issue #179，mall 交易域；
+#                       127→128），
+#                       00052 新增 trade_cart（issue #179；128→129），
+#                       00053 新增 trade_order（issue #179；129→130），
+#                       00054 新增 trade_order_item（issue #179；130→131），
 #                       ——另为 crm_follow_up 加 opportunity_id/contract_id 列、
 #                       00012 为 infra_file 加 biz_type/biz_id 列与索引，均不改表数）
 #   VERIFY_PORT=18099   启动冒烟使用的端口
@@ -77,7 +97,7 @@ set -euo pipefail
 
 : "${GAP_DATABASE_DSN:?set GAP_DATABASE_DSN to a disposable empty MySQL database}"
 
-EXPECTED_TABLES="${EXPECTED_TABLES:-116}"
+EXPECTED_TABLES="${EXPECTED_TABLES:-131}"
 PORT="${VERIFY_PORT:-18099}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

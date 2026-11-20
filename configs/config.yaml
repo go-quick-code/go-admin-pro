@@ -22,15 +22,16 @@ database:
   max-idle-conns: 10
   max-open-conns: 100
   seed: true
-  # CRM + OA + ERP + 平台演示数据（销售角色/账号、产品、客户、商机、合同、回款
-  # 与仪表盘时间分布；公告、请假、报销、考勤、日程、会议室、文档；ERP 主数据与
-  # 采购/销售/库存/财务完整链路；消息渠道/模板、套餐兜底、敏感词示例、停用的
-  # 社交客户端、演示消息日志——配置与密钥全部占位符）。
+  # CRM + OA + ERP + 平台 + 支付 + 商城演示数据（销售角色/账号、产品、客户、
+  # 商机、合同、回款与仪表盘时间分布；公告、请假、报销、考勤、日程、会议室、
+  # 文档；ERP 主数据与采购/销售/库存/财务完整链路；消息渠道/模板、套餐兜底、
+  # 敏感词示例、停用的社交客户端、演示消息日志；pay 演示应用/充值/示例订单/
+  # 提现链路；mall 演示会员/商品/交易链路——配置与密钥全部占位符）。
   # 默认关闭：演示数据只在显式开启时写入（GAP_SEED_DEMO=true 或 make run-demo），
   # 避免生产/真实环境被演示账号与示例业务数据污染（PR #39 审查 P2）。
   # 开启后按表/编码判空写入（CRM 以 crm_customer、OA 以各业务表、ERP 以
-  # 主数据/单据/库存表为哨兵，平台段按编码判重、message_log 判空）；
-  # 集成测试基座始终显式关闭。
+  # 主数据/单据/库存表、pay 以业务/交易表、mall 以业务表为哨兵，平台段按
+  # 编码判重、message_log 判空）；集成测试基座始终显式关闭。
   seed-demo: false
 
 jwt:
@@ -113,3 +114,17 @@ pay:
   # 链路与集成测试的 httptest 商户端点）；**生产必须留空**——内网地址不应
   # 出现在公开可配的回调地址白名单里。
   notify-ssrf-private-allow: ["127.0.0.1", "::1"]
+
+# mall 商城模块（issue #174/#178，docs/mall-mvp-spec.md §2/§7 裁决 2）：
+# C 端会员令牌（/mall/app/* 公开端点，HMAC-SHA256 自校验令牌）签名密钥。
+mall:
+  # 会员令牌签名密钥：base64url(payload{mid,tid,exp}) + "." + base64url(
+  # HMAC-SHA256(payload))。为空时 app.New 拒绝启动（fail-closed）；非 dev/test
+  # 环境使用下面这个 dev 默认值同样拒绝启动（validateMallJWTSecret）。
+  # **生产必须换成唯一强随机值**（如 openssl rand -base64 32 生成，
+  # GAP_MALL_JWT_SECRET 环境变量可覆盖），照抄等于对任何读过仓库的人开放
+  # 伪造会员身份。
+  jwt-secret: go-admin-pro-mall-jwt-dev-key
+  # 会员令牌有效期，默认 168h（7 天）；到期校验拒绝，停用会员令牌经 DB
+  # 状态查询失效（无撤销列表）。可选覆盖。
+  # token-ttl: 168h

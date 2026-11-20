@@ -229,6 +229,55 @@ var TenantTables = []string{
 	// SQL（回调端点是公开路由，租户经关联单据派生后显式传入）。
 	"pay_demo_order",
 	"pay_demo_withdraw",
+
+	// mall 会员域（issue #174，迁移 00040–00044，docs/mall-mvp-spec.md §3.1）：
+	// 会员/等级/地址/积分配置/积分流水五表全量租户隔离（跨租户业务 ID 一律
+	// 404）。member_user.mobile 与 member_level 的 name/level 入租户唯一键；
+	// point_config 是租户级单行（UNIQUE(tenant_id)）；point_record 是
+	// append-only 流水（余额只经唯一入账入口变动，余额列不得直改）。
+	// member_user/member_level/member_address 的管理端读写随本票；积分
+	// 配置/流水的业务逻辑随 T2（表先建，避免迁移翻工）。
+	"member_user",
+	"member_level",
+	"member_address",
+	"member_point_config",
+	"member_point_record",
+
+	// mall 商品域基础四表（issue #176，迁移 00045–00048，docs/mall-mvp-spec.md
+	// §3.2）：分类/品牌/属性名/属性值全量租户隔离（跨租户业务 ID 一律 404）。
+	// product_category 同级 name、product_brand/property 租户内 name、
+	// product_property_value 的 (property_id, name) 全部入租户唯一键（插件
+	// 隔离）。两级树父级合法性与分类删除守卫（有子级禁删；SPU 引用计数随
+	// T4 SPU 表落地接线）在 service 层收口。SPU/SKU 两表随 T4 迁移建表时
+	// 追加登记。
+	"product_category",
+	"product_brand",
+	"product_property",
+	"product_property_value",
+
+	// mall 商品域 SPU/SKU（issue #177，迁移 00049–00050，docs/mall-mvp-spec.md
+	// §3.2）：SPU（name 租户内唯一）与 SKU（规格 JSON 快照 + 价格/库存）全量
+	// 租户隔离（跨租户业务 ID 一律 404）。SPU 的 category/brand 归属、SKU 的
+	// 属性值引用（properties JSON 内 valueId）都在 service 层经租户插件限定
+	// 后校验；上下架（0 下架 / 1 上架）是 T5 起的购买边界；SPU 删除守卫
+	//（订单引用计数 repo.CountOrdersBySPU，T6 前恒 0）与删除事务级联软删
+	// SKU 在 service 层收口。
+	"product_spu",
+	"product_sku",
+
+	// mall 交易域（issue #179，迁移 00051–00054，docs/mall-mvp-spec.md §3.3）：
+	// 序列/购物车/订单/订单项四表全量租户隔离（跨租户业务 ID 一律 404）。
+	// mall_sequence 的 (tenant_id, biz_type, date_key) 入租户唯一键（SO 单号
+	// 按租户独立发放，照 pay_sequence/erp_sequence）；trade_cart 的
+	// UNIQUE(tenant_id, user_id, sku_id) 兜底加购合并并发；trade_order 的
+	// UNIQUE(tenant_id, no) 兜底 SO 单号租户内唯一。订单/订单项的越权谓词
+	// （user_id）与金额不变量（pay_money 服务端定）在 service 层收口
+	//（spec §3.4）；下单扣库存/取消回补走显式租户参数的裸 SQL（同积分
+	// 入账原语口径）。
+	"mall_sequence",
+	"trade_cart",
+	"trade_order",
+	"trade_order_item",
 }
 
 // PlatformTables 是平台级表：全平台共享、不属于任何租户，刻意不做租户隔离。

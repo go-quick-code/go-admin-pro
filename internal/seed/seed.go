@@ -76,6 +76,19 @@ func Run(db *gorm.DB, withDemo bool) error {
 	if err := seedPayChannels(db); err != nil {
 		return err
 	}
+	// mall 会员等级种子（issue #174，spec §3.1）：默认租户一行「普通会员
+	// level=1 experience=0」，表为空时幂等写入。
+	if err := seedMemberLevel(db); err != nil {
+		return err
+	}
+	// mall 挂单支付应用种子（issue #181，T8，spec §1 第 4 条）：默认租户
+	// app_key=mall 应用 + mock 绑定（wallet 刻意不绑——run-11 审计 C1 止血，
+	// 见 seedMallPayApp 注释），行级哨兵幂等写入（支付联动是常驻能力，非
+	// 演示数据；pay 演示哨兵对 mall 固定 ID 行显式排除，见 pay_demo.go
+	// payDemoSkipReason）。
+	if err := seedMallPayApp(db); err != nil {
+		return err
+	}
 	if err := seedPoolConfigs(db); err != nil {
 		return err
 	}
@@ -101,14 +114,15 @@ func Run(db *gorm.DB, withDemo bool) error {
 //
 // 唯一的顺序契约：OA 必须在 CRM 之后——OA 演示数据依赖 CRM 演示组织
 // （sales1/sales2/manager，见 oa_demo.go）；其余演示种子只依赖基础种子
-// （admin 账号 + 各自自含的兜底），顺序无关（ERP/Platform/Pay 的取值位置
-// 只是历史落点）。契约的结构化断言见 TestDemoOrderOAAfterCRM。
+// （admin 账号 + 各自自含的兜底），顺序无关（ERP/Platform/Pay/Mall 的取值
+// 位置只是历史落点）。契约的结构化断言见 TestDemoOrderOAAfterCRM。
 const (
 	DemoOrderCRM      = 10
 	DemoOrderOA       = 20
 	DemoOrderERP      = 30
 	DemoOrderPlatform = 40
 	DemoOrderPay      = 50
+	DemoOrderMall     = 60
 )
 
 // demoSeed 是一条演示种子注册项：order 决定执行次序，fn 是写入入口。
@@ -599,6 +613,10 @@ func seedMenus(db *gorm.DB) error {
 	// 820 渠道配置。资金敏感：内置普通角色（role id=2）默认不授予任何
 	// pay 菜单（见 seedRoles 的 roleMenus——刻意无 800 段条目）。
 	menus = append(menus, payMenus()...)
+	// 会员中心 900 段（issue #174，spec §5）：dir 900 + 901 会员管理 +
+	// 902 会员等级。管理面属租户管理员职责：内置普通角色默认不授予
+	// mall 菜单（照 erp 700 段「普通角色零默认授权」口径）。
+	menus = append(menus, mallMenus()...)
 	// 菜单补齐（issue #69）：按 ID 只插入缺失项，不更新、不复活已软删菜单。
 	// 旧实现「有菜单就整体跳过」会让存量库永远看不到新版本追加的菜单；
 	// Unscoped 把软删 ID 也视为已存在，避免重新插入撞主键或复活管理员删除的菜单。

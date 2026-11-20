@@ -6,6 +6,7 @@ import (
 	bpmmodel "github.com/go-quick-code/go-admin-pro/internal/module/bpm/model"
 	crmmodel "github.com/go-quick-code/go-admin-pro/internal/module/crm/model"
 	inframodel "github.com/go-quick-code/go-admin-pro/internal/module/infra/model"
+	mallmodel "github.com/go-quick-code/go-admin-pro/internal/module/mall/model"
 	msgmodel "github.com/go-quick-code/go-admin-pro/internal/module/message/model"
 	oamodel "github.com/go-quick-code/go-admin-pro/internal/module/oa/model"
 	paymodel "github.com/go-quick-code/go-admin-pro/internal/module/pay/model"
@@ -42,6 +43,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		&inframodel.Config{}, &inframodel.Job{},
 		&msgmodel.Channel{}, &msgmodel.Template{}, &sysmodel.Area{},
 		&paymodel.Channel{},
+		// mall 挂单支付应用（issue #181，seedMallPayApp 基础种子触达的两表）。
+		&paymodel.App{}, &paymodel.AppChannel{},
+		&mallmodel.MemberLevel{},
 		&crmmodel.PoolConfig{},
 		&bpmmodel.ProcessDefinition{},
 		&oamodel.AttendanceShift{}, &oamodel.AttendanceGroup{},
@@ -78,6 +82,17 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		8101, 8102, 8103, 8115, 8125, 8135, 8201, 8215, 8221, 8222, 8223, 8224, 8225,
 		8301, 8302, 8311, 8312, 8313,
 	}, false, "普通角色")
+	// mall 900/910/920 段（issue #174/#175/#176/#177/#180，spec §5）：会员中心
+	//（含积分配置按钮 9013/9014）+ 商品目录四页（914 SPU 随 #177，按钮
+	// 9141–9144）+ 交易订单页（920/921 与按钮 9211–9213 随 #180）。
+	// 管理面属租户管理员职责：普通角色默认不授予任何 mall 菜单/按钮（照
+	// pay 800 段/erp 700 段口径，见 seed/mall.go 注释）。
+	assertRoleMenus(t, db, 2, []int64{
+		900, 901, 902, 9011, 9012, 9013, 9014, 9015, 9021, 9022, 9023,
+		910, 911, 912, 913, 914, 9111, 9112, 9113, 9121, 9122, 9123, 9131, 9132, 9133,
+		9141, 9142, 9143, 9144, 9145,
+		920, 921, 9211, 9212, 9213, 9214,
+	}, false, "普通角色")
 	// 菜单 800 段存在性（issue #139，spec §8.2 迁移/种子行「菜单 800 段 seed
 	// 幂等」前置：未授予断言只有在菜单行真实存在时才有意义）+ 超管全量授予。
 	// 14 个页面/目录 + 18 个按钮行 = 31 行，清单与 payMenus() 逐一对应
@@ -88,7 +103,21 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		8101, 8102, 8103, 8115, 8125, 8135, 8201, 8215, 8221, 8222, 8223, 8224, 8225,
 		8301, 8302, 8311, 8312, 8313,
 	}
-	assertPayMenusExist(t, db, payMenuIDs)
+	assertMenusExist(t, db, payMenuIDs)
+	// mall 900/910/920 段存在性（issue #174/#175/#176/#177/#180）：11 个 900
+	// 段行（dir 900 + 2 页 + 6 按钮，导出按钮 9015 随 #184 审查补票）+
+	// 19 个 910 段行（dir 910 + 4 页 + 14 按钮，914 SPU 页与按钮 9141–9144
+	// 随 #177、导出按钮 9145 随 #184）+ 6 个 920 段行（dir 920 + 1 页 +
+	// 4 按钮 9211–9213 随 #180、导出按钮 9214 随 #184），清单与 mallMenus()
+	// 逐一对应——同 issue #139 invariant：未授予断言只有在菜单行在场时
+	// 才有意义。
+	mallMenuIDs := []int64{
+		900, 901, 902, 9011, 9012, 9013, 9014, 9015, 9021, 9022, 9023,
+		910, 911, 912, 913, 914, 9111, 9112, 9113, 9121, 9122, 9123, 9131, 9132, 9133,
+		9141, 9142, 9143, 9144, 9145,
+		920, 921, 9211, 9212, 9213, 9214,
+	}
+	assertMenusExist(t, db, mallMenuIDs)
 	menuCountBefore := countMenus(t, db)
 	// ERP 700 段同级菜单 sort 唯一（终审 P1：历史 725/731/741 等 11/12/13 重复
 	// 会让侧栏按 sort ASC,id ASC 交错；按 spec §1 分组序 1–22 连续编号）。
@@ -105,7 +134,8 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	assertCount(t, db, &inframodel.Config{}, 2, "参数配置")
 	// 定时任务：演示 + 公海回收 + 考勤日结果（issue #61）+ 会议提醒（#57）
 	// + 访问日志清理（issue #80，每日 03:00 按保留期清理）+ 商户回调重试/
-	// 订单超时关闭（issue #134，spec §7 job 种子两行）。计数跟随规格清单
+	// 订单超时关闭（issue #134，spec §7 job 种子两行）+ 商城订单超时关闭
+	//（issue #182，mall spec §1 第 7 条）。计数跟随规格清单
 	//（ADR 0024 补遗）：规格与种子行同源，新增规格漏投影即在此暴露。
 	assertCount(t, db, &inframodel.Job{}, int64(len(seed.JobSpecs)), "定时任务")
 	assertCount(t, db, &crmmodel.PoolConfig{}, 1, "公海配置")
@@ -116,6 +146,9 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 	// mock/wallet 启用、其余停用。
 	assertCount(t, db, &paymodel.Channel{}, 14, "支付渠道")
 	assertPayChannelSeed(t, db)
+	// mall 会员等级种子（issue #174，spec §3.1）：默认租户一行「普通会员」。
+	assertCount(t, db, &mallmodel.MemberLevel{}, 1, "会员等级")
+	assertMemberLevelSeed(t, db)
 	// 默认审批流程（spec §7.3）：crm_contract_approval v1（issue #47）、
 	// oa_leave_approval v1（issue #63 收口）与 oa_expense_approval v1（#55）均已发布。
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义")
@@ -154,6 +187,7 @@ func TestSeedRunUnderFailClosedTenantPlugin(t *testing.T) {
 		t.Fatalf("重复 seed 不应新增菜单：before %d after %d", menuCountBefore, got)
 	}
 	assertPayMenusExist(t, db, payMenuIDs)
+	assertMenusExist(t, db, mallMenuIDs)
 	assertCount(t, db, &sysmodel.User{}, 2, "用户（幂等）")
 	assertCount(t, db, &bpmmodel.ProcessDefinition{}, 3, "默认流程定义（幂等）")
 	assertCount(t, db, &sysmodel.TenantPackage{}, 1, "默认套餐（幂等）")
@@ -296,6 +330,22 @@ func assertPayChannelSeed(t *testing.T, db *gorm.DB) {
 	}
 }
 
+// assertMemberLevelSeed 断言「普通会员」等级种子行（issue #174，spec §3.1）：
+// level=1 experience=0 启用态，默认租户（ID=1）。
+func assertMemberLevelSeed(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var row mallmodel.MemberLevel
+	if err := tenant.Skip(db).Order("id ASC").First(&row).Error; err != nil {
+		t.Fatalf("读取会员等级种子: %v", err)
+	}
+	if row.Name != "普通会员" || row.Level != 1 || row.Experience != 0 {
+		t.Fatalf("会员等级种子不符：name=%s level=%d experience=%d，期望 普通会员/1/0", row.Name, row.Level, row.Experience)
+	}
+	if row.TenantID != 1 || row.Status != mallmodel.StatusEnable {
+		t.Fatalf("会员等级种子归属/状态不符：tenant=%d status=%d，期望 1/0", row.TenantID, row.Status)
+	}
+}
+
 // assertRoleMenus 断言角色对指定菜单的授予/未授予状态（issue #64 review：
 // 普通角色权限收敛的回归守卫）。
 func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, want bool, label string) {
@@ -315,8 +365,15 @@ func assertRoleMenus(t *testing.T, db *gorm.DB, roleID int64, menuIDs []int64, w
 }
 
 // assertPayMenusExist 断言菜单行真实存在（issue #139，spec §8.2「菜单 800 段
-// seed 幂等」）：「未授予」断言只有在菜单行在场时才有意义。
+// seed 幂等」）：「未授予」断言只有在菜单行在场时才有意义。兼容旧名——新
+// 代码请用 assertMenusExist（各段菜单存在性共用一个断言，issue #176 随
+// mall 910 段接入改名，行为不变）。
 func assertPayMenusExist(t *testing.T, db *gorm.DB, menuIDs []int64) {
+	assertMenusExist(t, db, menuIDs)
+}
+
+// assertMenusExist 断言菜单行真实存在（pay 800 段/mall 900·910 段共用）。
+func assertMenusExist(t *testing.T, db *gorm.DB, menuIDs []int64) {
 	t.Helper()
 	for _, menuID := range menuIDs {
 		var total int64
